@@ -1,0 +1,10 @@
+{
+  "name": "AHJ Atlas",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "ahj-atlas-server",
+      "command": "source .cursor/node-env.sh && export ATLAS_BROWSER=/opt/google/chrome/chrome && npm start"
+    }
+  ]
+}
