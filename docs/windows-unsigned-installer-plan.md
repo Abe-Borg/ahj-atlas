@@ -84,7 +84,7 @@ This document is the durable progress tracker. Every implementation PR must:
 | Session | Scope | Status | PR / notes |
 |---|---|---|---|
 | 1 | Electron compatibility spike and runnable development shell | COMPLETE | Windows x64 source-mode shell and fake-provider smoke passed; [PR #4](https://github.com/Abe-Borg/ahj-atlas/pull/4). |
-| 2 | Production desktop lifecycle, security, data paths, and migration | COMPLETE | Windows x64 source-mode lifecycle, safe legacy import, and credential isolation passed. Session 2 PR pending. |
+| 2 | Production desktop lifecycle, security, data paths, and migration | COMPLETE | Windows x64 source-mode lifecycle, safe legacy import, and credential isolation passed; [PR #5](https://github.com/Abe-Borg/ahj-atlas/pull/5). |
 | 3 | Downloads, external navigation, desktop UX, and regression coverage | NOT STARTED | |
 | 4 | Unsigned NSIS installer and installed-app validation | NOT STARTED | |
 | 5 | GitHub release automation, checksums, documentation, and release candidate | NOT STARTED | |
