@@ -89,6 +89,19 @@ Before relying on a release for project research, run a small, budgeted evaluati
 
 `npm run check` checks server/frontend syntax. `node tests/preview.mjs` starts an isolated synthetic UI test workspace on port 4319 with fake provider responses; it never uses the user’s key or makes paid API calls. Do not use its synthetic results for design.
 
+### Electron development shell
+
+`npm run desktop` opens the existing loopback application in a sandboxed Electron window. This Session 1 shell uses a separate temporary development profile and data directory; it is not the installed application. `npm start` and the source launchers still work as before.
+
+For a Windows x64 smoke test without paid requests, use a disposable directory and the fake provider:
+
+```powershell
+$env:ATLAS_DESKTOP_DATA_DIR = Join-Path (Get-Location) 'test-results\desktop-session-1'
+npm run desktop -- --fake-provider --browser-smoke --remote-debugging-port=9223
+```
+
+In a second terminal, run `npm run test:desktop:window`. The `--browser-smoke` flag reads public `example.com` through installed Edge or Chrome, so that part needs network access. The test uses only synthetic project and chat data. Close the Electron window before relaunching and check that `test-results\desktop-session-1\instance.lock` is gone. The focused lifecycle checks are `npm run test:desktop`.
+
 Optional environment variables: `ATLAS_PORT`, `ATLAS_DATA_DIR`, `ATLAS_BROWSER` (path to installed Chrome/Edge). The standard Windows launcher uses port 4318.
 
 Official references: [API](https://platform.claude.com/docs/en/api/overview), [models](https://platform.claude.com/docs/en/models/overview), [effort](https://platform.claude.com/docs/en/build-with-claude/effort), [batch processing](https://platform.claude.com/docs/en/build-with-claude/batch-processing), [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching), [pricing](https://platform.claude.com/docs/en/about-claude/pricing).
