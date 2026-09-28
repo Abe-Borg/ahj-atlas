@@ -85,7 +85,7 @@ This document is the durable progress tracker. Every implementation PR must:
 |---|---|---|---|
 | 1 | Electron compatibility spike and runnable development shell | COMPLETE | Windows x64 source-mode shell and fake-provider smoke passed; [PR #4](https://github.com/Abe-Borg/ahj-atlas/pull/4). |
 | 2 | Production desktop lifecycle, security, data paths, and migration | COMPLETE | Windows x64 source-mode lifecycle, safe legacy import, and credential isolation passed; [PR #5](https://github.com/Abe-Borg/ahj-atlas/pull/5). |
-| 3 | Downloads, external navigation, desktop UX, and regression coverage | IN PROGRESS | Rebased on updated `main`; completing review follow-up and rerunning checks in [PR #6](https://github.com/Abe-Borg/ahj-atlas/pull/6). |
+| 3 | Downloads, external navigation, desktop UX, and regression coverage | COMPLETE | Windows x64 source-mode export, navigation, UX, and regression checks passed after rebasing on updated `main`; [PR #6](https://github.com/Abe-Borg/ahj-atlas/pull/6). |
 | 4 | Unsigned NSIS installer and installed-app validation | NOT STARTED | |
 | 5 | GitHub release automation, checksums, documentation, and release candidate | NOT STARTED | |
 
@@ -105,6 +105,7 @@ This document is the durable progress tracker. Every implementation PR must:
 | 2026-09-28 | 2 review follow-up | Reclaim a verified-stale legacy source lock before importing; include persisted dispatching and pending attempts in close detection | A crashed source installation must not block safe import forever, and submitted batches remain active between poll calls even when worker sets are empty. |
 | 2026-09-28 | 3 | Stage only approved loopback attachments in private temporary files, then use a native Save dialog and exclusive final copy | Electron's `setSaveDialogOptions()` still saved directly to Downloads in the Windows smoke. Staging keeps an explicit destination choice and `COPYFILE_EXCL` prevents silent overwrite even if the selected path collides. Completion, cancellation, and errors use accessible native notices; renderer code never receives local paths. |
 | 2026-09-28 | 3 | Preserve safe Unicode filenames through RFC 5987 `filename*`; derive backend and diagnostics version from `package.json`, and launch development Electron through the package entry point | Keeps server filenames and extensions consistent in native Save, allows names with spaces and Unicode, and makes Electron `app.getVersion()` match `/api/bootstrap`, Diagnostics, and future installer metadata. Existing Diagnostics already provides the version, so no new About screen is needed. |
+| 2026-09-28 | 3 review follow-up | Reject Windows device names when they precede a dot, including COM/LPT superscript-digit aliases | `CON.txt` and `LPT1.backup` remain reserved on Windows; replacing these project-name stems before building the attachment name prevents interrupted desktop downloads. |
 
 ### Blocker and handoff log
 
@@ -114,7 +115,7 @@ Add dated entries here when a problem is left for a later session. Include exact
 
 2026-09-28, Session 2: None. Source-mode Windows lifecycle and disposable legacy import passed. The installed/package boundary remains assigned to Session 4. The Windows command sandbox prevented Chromium's child renderer from loading; live window checks passed when the disposable Electron run was launched outside that command sandbox.
 
-2026-09-28, Session 3: No implementation blocker. PR #5 merged and the Session 3 branch was rebased on updated `main`. Source-mode checks passed before rebase; rerun is in progress. Installed/package validation remains in Session 4. Windows desktop tests use a disposable fake-provider profile and export directory outside the command sandbox.
+2026-09-28, Session 3: None. PR #5 merged and the Session 3 branch was rebased on updated `main`. Automated, browser UI, and live source-mode Electron checks passed after the review fix; the native Save flows were also exercised on the preserved Session 3 branch before rebase. Installed/package validation remains in Session 4. Windows desktop tests used a disposable fake-provider profile and export directory outside the command sandbox.
 
 ## Session 1: Electron compatibility spike and development shell
 

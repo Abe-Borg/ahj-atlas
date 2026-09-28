@@ -23,6 +23,10 @@ test('attachment filenames retain Unicode and spaces, and reject Windows special
   assert.equal(name,'Café 東京 site - AHJ research.pdf');
   assert.equal(safeDownloadName('CON'),'Project');
   assert.equal(safeDownloadName('LPT2'),'Project');
+  for(const name of ['CON.txt','con .backup','LPT1.report','COM¹.notes']){
+    assert.equal(safeDownloadName(name),'Project',name);
+    assert.equal(projectExportFilename(name,'pdf'),'Project - AHJ research.pdf',name);
+  }
   assert.equal(safeDownloadName('A<B>C'),'ABC');
   assert.ok(projectExportFilename('📐'.repeat(300),'xlsx').length<240);
   const header=attachmentDisposition(name);

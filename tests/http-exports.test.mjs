@@ -33,7 +33,7 @@ test('PDF and Excel exports are real documents with sources, gaps, literal cells
 });
 test('export attachment names survive Unicode, invalid Windows characters, and long project names',async t=>{
   const {app}=await setup(t);
-  for(const name of ['Café 東京 project','Reserved : <> / \\ ? * name','Long '+ 'x'.repeat(95)]){
+  for(const name of ['Café 東京 project','Reserved : <> / \\ ? * name','Long '+ 'x'.repeat(95),'CON.txt','LPT1.backup']){
     const project=app.store.create({...input,name});
     const response=await fetch(`${app.url}/api/projects/${project.id}/export?format=json`);
     assert.equal(response.status,200);
@@ -45,5 +45,6 @@ test('export attachment names survive Unicode, invalid Windows characters, and l
     assert.ok(!/[<>:"/\\|?*\x00-\x1f]/.test(filename));
     assert.ok(filename.length<150);
     if(name.startsWith('Café'))assert.ok(filename.startsWith('Café 東京'));
+    if(name==='CON.txt'||name==='LPT1.backup')assert.equal(filename,'Project - AHJ research.json');
   }
 });
