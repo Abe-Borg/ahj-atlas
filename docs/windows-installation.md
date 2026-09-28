@@ -21,7 +21,9 @@ The installer and app are unsigned. Windows may show **Unknown publisher** or a 
 
 Run the installer under your normal Windows account. It installs for the current user, adds **AHJ Atlas** to the Start menu, and registers an uninstall entry in **Installed Apps**. Launch it from the Start menu. It opens its own desktop window; there is no `.cmd` launcher for installed users.
 
-To update, close AHJ Atlas and run the newer installer from a published release under the same Windows account. It upgrades the application in place and retains the workspace. There is no automatic updater. Back up your data before an update.
+The installed app checks for a newer published Windows release when it opens and at most once every 24 hours while it remains open. Open **API & spending → App updates → Check for updates** to check again at any time. If an update is available, the app links to its GitHub Release. It does not download or install updates automatically.
+
+To update, download the newer installer and checksum from that release, verify the checksum as described above, close AHJ Atlas, and run the installer under the same Windows account. It upgrades the application in place and retains the workspace. Back up your data before an update.
 
 ## Data, backup, and removal
 
