@@ -85,7 +85,7 @@ This document is the durable progress tracker. Every implementation PR must:
 |---|---|---|---|
 | 1 | Electron compatibility spike and runnable development shell | COMPLETE | Windows x64 source-mode shell and fake-provider smoke passed; [PR #4](https://github.com/Abe-Borg/ahj-atlas/pull/4). |
 | 2 | Production desktop lifecycle, security, data paths, and migration | COMPLETE | Windows x64 source-mode lifecycle, safe legacy import, and credential isolation passed; [PR #5](https://github.com/Abe-Borg/ahj-atlas/pull/5). |
-| 3 | Downloads, external navigation, desktop UX, and regression coverage | NOT STARTED | |
+| 3 | Downloads, external navigation, desktop UX, and regression coverage | IN PROGRESS | Rebased on updated `main`; completing review follow-up and rerunning checks in [PR #6](https://github.com/Abe-Borg/ahj-atlas/pull/6). |
 | 4 | Unsigned NSIS installer and installed-app validation | NOT STARTED | |
 | 5 | GitHub release automation, checksums, documentation, and release candidate | NOT STARTED | |
 
@@ -103,6 +103,8 @@ This document is the durable progress tracker. Every implementation PR must:
 | 2026-09-28 | 2 | Import before `createApp()` using `node:sqlite` online backup, a temporary legacy `instance.lock`, staged `Store`/integrity validation, and same-volume rename | A consistent snapshot includes committed WAL rows, refuses an active source, leaves original database/journals in place, and never merges into an initialized destination. A decision marker records a deliberate fresh start. |
 | 2026-09-28 | 2 | Constrain the window to the runtime loopback origin, validate public external links before sending them to the system browser, deny child windows/permissions, and drain the backend on close/crash/session end | Preserves the HTTP security boundary and prevents external content from replacing the app page. Close confirmation explains that local requests finish before exit while submitted batches may continue at the provider. |
 | 2026-09-28 | 2 review follow-up | Reclaim a verified-stale legacy source lock before importing; include persisted dispatching and pending attempts in close detection | A crashed source installation must not block safe import forever, and submitted batches remain active between poll calls even when worker sets are empty. |
+| 2026-09-28 | 3 | Stage only approved loopback attachments in private temporary files, then use a native Save dialog and exclusive final copy | Electron's `setSaveDialogOptions()` still saved directly to Downloads in the Windows smoke. Staging keeps an explicit destination choice and `COPYFILE_EXCL` prevents silent overwrite even if the selected path collides. Completion, cancellation, and errors use accessible native notices; renderer code never receives local paths. |
+| 2026-09-28 | 3 | Preserve safe Unicode filenames through RFC 5987 `filename*`; derive backend and diagnostics version from `package.json`, and launch development Electron through the package entry point | Keeps server filenames and extensions consistent in native Save, allows names with spaces and Unicode, and makes Electron `app.getVersion()` match `/api/bootstrap`, Diagnostics, and future installer metadata. Existing Diagnostics already provides the version, so no new About screen is needed. |
 
 ### Blocker and handoff log
 
@@ -111,6 +113,8 @@ Add dated entries here when a problem is left for a later session. Include exact
 2026-09-28, Session 1: None. Windows x64 source-mode checks passed. The unpacked and installed application remain untested until Sessions 4–5 as planned.
 
 2026-09-28, Session 2: None. Source-mode Windows lifecycle and disposable legacy import passed. The installed/package boundary remains assigned to Session 4. The Windows command sandbox prevented Chromium's child renderer from loading; live window checks passed when the disposable Electron run was launched outside that command sandbox.
+
+2026-09-28, Session 3: No implementation blocker. PR #5 merged and the Session 3 branch was rebased on updated `main`. Source-mode checks passed before rebase; rerun is in progress. Installed/package validation remains in Session 4. Windows desktop tests use a disposable fake-provider profile and export directory outside the command sandbox.
 
 ## Session 1: Electron compatibility spike and development shell
 
@@ -204,26 +208,26 @@ Make all currently browser-dependent behaviors work naturally inside the desktop
 
 ### Tasks
 
-- [ ] Implement Electron download handling for PDF, XLSX, JSON, and diagnostic attachments.
-- [ ] Preserve the server-provided sanitized filename and extension, but use a native Save dialog or another explicit user-selected destination. Never silently overwrite an existing file.
-- [ ] Surface download completion, cancellation, and failure in an accessible way. Do not expose local filesystem paths to remote content.
-- [ ] Test filenames with spaces, Unicode, reserved Windows characters, long project names, and collisions.
-- [ ] Confirm source links, help links, Anthropic links, and other intended external destinations open in the system browser while app-internal routes stay in the Electron window.
-- [ ] Confirm clipboard, printing if currently used, keyboard navigation, dialogs, focus restoration, and responsive layouts work in the desktop window.
-- [ ] Confirm the optional installed Edge/Chrome reader continues to use an isolated temporary profile and is not confused with Electron's Chromium executable.
-- [ ] Add an About surface or equivalent small desktop affordance only if necessary to display version and diagnostic information. Do not redesign the application.
-- [ ] Ensure version reporting comes from one authoritative package/app version and remains consistent between Electron, `/api/bootstrap`, diagnostics, and installer metadata.
-- [ ] Add end-to-end desktop smoke coverage. Reuse fake providers and synthetic data; tests must not make paid model requests.
-- [ ] Run the existing browser UI scripts where supported and document any platform prerequisites.
+- [x] Implement Electron download handling for PDF, XLSX, JSON, and diagnostic attachments.
+- [x] Preserve the server-provided sanitized filename and extension, but use a native Save dialog or another explicit user-selected destination. Never silently overwrite an existing file.
+- [x] Surface download completion, cancellation, and failure in an accessible way. Do not expose local filesystem paths to remote content.
+- [x] Test filenames with spaces, Unicode, reserved Windows characters, long project names, and collisions.
+- [x] Confirm source links, help links, Anthropic links, and other intended external destinations open in the system browser while app-internal routes stay in the Electron window.
+- [x] Confirm clipboard, printing if currently used, keyboard navigation, dialogs, focus restoration, and responsive layouts work in the desktop window. (No UI print action exists.)
+- [x] Confirm the optional installed Edge/Chrome reader continues to use an isolated temporary profile and is not confused with Electron's Chromium executable.
+- [x] Add an About surface or equivalent small desktop affordance only if necessary to display version and diagnostic information. Do not redesign the application. (Existing Diagnostics displays the package version.)
+- [x] Ensure version reporting comes from one authoritative package/app version and remains consistent between Electron, `/api/bootstrap`, diagnostics, and installer metadata.
+- [x] Add end-to-end desktop smoke coverage. Reuse fake providers and synthetic data; tests must not make paid model requests.
+- [x] Run the existing browser UI scripts where supported and document any platform prerequisites.
 
 ### Required checks
 
-- [ ] `npm run check`
-- [ ] `npm test`
-- [ ] All desktop tests
-- [ ] Existing relevant UI tests, including preview/chat/questions/delete/citations as applicable
-- [ ] Manual export of PDF, XLSX, JSON, and diagnostics from the Electron window
-- [ ] Manual external-link and blocked-navigation tests
+- [x] `npm run check`
+- [x] `npm test`
+- [x] All desktop tests
+- [x] Existing relevant UI tests, including preview/chat/questions/delete/citations as applicable
+- [x] Manual export of PDF, XLSX, JSON, and diagnostics from the Electron window
+- [x] Manual external-link and blocked-navigation tests
 
 ### Exit criteria
 

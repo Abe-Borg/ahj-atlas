@@ -18,7 +18,7 @@ class FakeApp extends EventEmitter{
 }
 class FakeWindow extends EventEmitter{
   constructor(options){super();this.options=options;this.actions=[];this.minimized=false;
-    this.webContents=new EventEmitter();this.webContents.session={setPermissionRequestHandler:handler=>{this.permissionHandler=handler;}};
+    this.webContents=new EventEmitter();this.webContents.session=new EventEmitter();this.webContents.session.setPermissionRequestHandler=handler=>{this.permissionHandler=handler;};
     this.webContents.setWindowOpenHandler=handler=>{this.openHandler=handler;};
     this.webContents.closeDevTools=()=>this.actions.push('closeDevTools');}
   async loadURL(url){this.url=url;}

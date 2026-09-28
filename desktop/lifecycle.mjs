@@ -1,6 +1,7 @@
 import { preflightWorkspace } from './migration.mjs';
 import { secureWindowNavigation } from './navigation.mjs';
 import { restoredBounds, saveWindowBounds } from './window-state.mjs';
+import { handleDesktopDownloads } from './downloads.mjs';
 
 function activeWork(backend){
   const services=backend?.services;
@@ -10,7 +11,7 @@ function activeWork(backend){
 }
 
 export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths,dataDir,provider,
-  dialog,screen,shell,preflight=preflightWorkspace,onError=console.error,diagnostics=false,migrationChoice=null}){
+  dialog,screen,shell,preflight=preflightWorkspace,onError=console.error,diagnostics=false,migrationChoice=null,downloadDir=null}){
   if(!app.requestSingleInstanceLock()){
     app.quit();
     return {primary:false};
@@ -66,6 +67,7 @@ export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths
     window=new BrowserWindow({...bounds,minWidth:900,minHeight:650,
       webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,devTools:diagnostics||!paths.packaged}});
     if(shell)secureWindowNavigation({window,appUrl:backend.url,shell,onError});
+    const stopDownloads=dialog?handleDesktopDownloads({window,appUrl:backend.url,dialog,downloadsDir:downloadDir||app.getPath?.('downloads')||paths.userData||process.cwd(),onError}):null;
     if(paths.packaged&&!diagnostics)window.webContents.on('devtools-opened',()=>window.webContents.closeDevTools());
     window.on('close',event=>{
       if(paths.userData)saveWindowBounds(paths.userData,window);
@@ -80,7 +82,7 @@ export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths
         if(response===1){allowWindowClose=true;app.quit();}
       }).catch(onError).finally(()=>{confirming=false;});
     });
-    window.on('closed',()=>{window=null;app.quit();});
+    window.on('closed',()=>{stopDownloads?.();window=null;app.quit();});
     for(const event of ['query-session-end','session-end'])window.on(event,()=>{
       void closeBackend().finally(()=>{allowQuit=true;allowWindowClose=true;app.quit();});
     });

@@ -2,6 +2,7 @@
 // is open with a disposable ATLAS_DESKTOP_DATA_DIR. No paid provider requests.
 import assert from 'node:assert/strict';
 import puppeteer from 'puppeteer-core';
+import { VERSION } from '../lib/config.mjs';
 
 const port=Number(process.env.ATLAS_DESKTOP_DEBUG_PORT||9223);
 const browser=await puppeteer.connect({browserURL:`http://127.0.0.1:${port}`});
@@ -13,8 +14,21 @@ try{
   const renderer=await page.evaluate(async()=>({node:typeof process,require:typeof require,bootstrap:await(await fetch('/api/bootstrap')).json()}));
   assert.equal(renderer.node,'undefined');assert.equal(renderer.require,'undefined');
   assert.equal(renderer.bootstrap.application,'AHJ Atlas');
+  assert.equal(renderer.bootstrap.version,VERSION);
   assert.equal(renderer.bootstrap.keyConfigured,true);
   assert.equal(renderer.bootstrap.browserAvailable,true);
+  const diagnostics=await page.evaluate(async token=>{
+    const response=await fetch('/api/diagnostics',{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':token},body:'{}'});
+    return response.json();
+  },renderer.bootstrap.token);
+  assert.equal(diagnostics.application.version,VERSION);
+
+  await page.click('#settings-top');
+  assert.equal(await page.$eval('#settings-dialog',element=>element.open),true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.$eval('#settings-dialog',element=>element.open),false);
+  await page.keyboard.press('Tab');
+  assert.ok(await page.evaluate(()=>Boolean(document.activeElement)));
 
   const seeded=await page.$$eval('[data-project]',els=>els.map(el=>({id:el.dataset.project,name:el.textContent})).find(p=>p.name.includes('Electron synthetic report')));
   assert.ok(seeded);
@@ -23,6 +37,11 @@ try{
   await page.waitForFunction(()=>document.querySelector('#report-content')?.textContent.includes('Synthetic workflow verification'));
   await page.click('[data-tab=codes]');
   assert.match(await page.$eval('#report-content',el=>el.textContent),/Fixture Building Code/);
+  await page.click('[data-tab=sources]');
+  await page.waitForSelector('#report-content a[href^="https://"]');
+  const appPage=page.url();
+  await page.click('#report-content a[href^="https://"]');
+  assert.equal(page.url(),appPage);
 
   await page.click('[data-tab=chat]');
   await page.waitForSelector('#chat-message');
@@ -62,5 +81,18 @@ try{
   assert.deepEqual(exports.pdf.magic,[37,80,68,70,45]);
   assert.deepEqual(exports.xlsx.magic.slice(0,2),[80,75]);
   assert.match(exports.json.json,/Synthetic workflow verification/);
-  console.log(JSON.stringify({renderer:'sandboxed',bootstrap:'passed',report:'rendered',chat:'sent and reloaded',project:'created and reloaded',exports},null,2));
+  await page.setViewport({width:1000,height:800});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
+  await page.setViewport({width:390,height:780});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
+  await page.setViewport({width:1280,height:900});
+
+  await page.click('footer a[href="/help"]');
+  await page.waitForFunction(()=>location.pathname==='/help');
+  assert.match(await page.$eval('main',element=>element.textContent),/From address to evidence/);
+  await page.click('a[href^="https://platform.claude.com"]');
+  assert.equal(new URL(page.url()).pathname,'/help');
+  await page.evaluate(()=>{const link=document.createElement('a');link.href='file:///C:/Windows/win.ini';link.click();});
+  assert.equal(new URL(page.url()).pathname,'/help');
+  console.log(JSON.stringify({renderer:'sandboxed',version:VERSION,bootstrap:'passed',diagnostics:'passed',report:'rendered',chat:'sent and reloaded',project:'created and reloaded',keyboardDialog:'passed',responsive:'1000px and 390px',internalHelp:'same window',externalAndFileNavigation:'app page retained',exports},null,2));
 }finally{browser.disconnect();}

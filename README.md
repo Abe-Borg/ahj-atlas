@@ -93,6 +93,8 @@ Before relying on a release for project research, run a small, budgeted evaluati
 
 `npm run desktop` opens the existing loopback application in a sandboxed Electron window. Source-mode runs use a separate temporary development profile and data directory. A packaged desktop run uses `%LOCALAPPDATA%\AHJ Atlas\data` for the workspace and the existing `%LOCALAPPDATA%\AHJ Atlas\credential.bin` DPAPI location. It offers a first-run import of a source installation's `data` folder before opening the workspace. `npm start` and the source launchers still work as before.
 
+Desktop exports download into a private temporary file, then ask where to save with a native dialog. Existing files are never silently replaced; completion, cancellation and failures are announced. The server supplies sanitized PDF, XLSX, JSON and diagnostics filenames. Help stays in the app window, while public source and Anthropic links open in the default browser. The version shown in Diagnostics comes from `package.json`, the same metadata used by Electron.
+
 For a Windows x64 smoke test without paid requests, use a disposable directory and the fake provider:
 
 ```powershell
@@ -102,6 +104,8 @@ npm run desktop -- --fake-provider --browser-smoke --remote-debugging-port=9223
 ```
 
 In a second terminal, run `npm run test:desktop:window`. The `--browser-smoke` flag reads public `example.com` through installed Edge or Chrome, so that part needs network access. The test uses only synthetic project and chat data. Close the Electron window before relaunching and check that `test-results\desktop-session-1\instance.lock` is gone. The focused lifecycle, path, navigation and migration checks are `npm run test:desktop`.
+
+For disposable export checks with `--fake-provider`, set `ATLAS_DESKTOP_DOWNLOAD_DIR` to an existing empty folder under `test-results` before launch. The normal desktop app defaults the Save dialog to the user's Downloads folder. `npm run test:desktop:window` checks the renderer, reports, chat, diagnostics version, keyboard dialog behavior, responsive widths and navigation. The browser UI scripts are `node tests/chat-ui.mjs`, `node tests/questions-ui.mjs`, and `node tests/delete-project-ui.mjs`; they require installed Edge or Chrome and use synthetic data only.
 
 For an unattended migration smoke with disposable source data only, set `ATLAS_DESKTOP_LEGACY_DIR` to a copy of a source installation folder (or its `data` folder), point `ATLAS_DESKTOP_PROFILE_DIR` and `ATLAS_DESKTOP_DATA_DIR` to new disposable folders, then run `npm run desktop -- --fake-provider --migration-smoke`. This development-only flag accepts the import choice automatically. A packaged build always asks the user on its first empty workspace. If an import fails, the original source database remains in place; close any source app before retrying.
 
