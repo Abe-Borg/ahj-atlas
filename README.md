@@ -1,8 +1,16 @@
 # AHJ Atlas
 
-A local HTML/CSS/JavaScript application for source-linked AHJ, professional contact, code-adoption, and submission research. Node.js 24 serves the UI, coordinates Anthropic requests, and persists state in SQLite. No hosting subscription is required.
+A local HTML/CSS/JavaScript application for source-linked AHJ, professional contact, code-adoption, and submission research. The Windows desktop build includes its own Electron/Node runtime; source development uses Node.js 24. No hosting subscription is required.
 
-## Open the application
+## Windows installer
+
+The unsigned Windows x64 installer is built as `dist/AHJ-Atlas-1.5.1-Windows-x64-Setup.exe`. A public download is planned for the GitHub release work in Session 5. The installer is per-user, needs no administrator elevation or separate Node.js installation, and creates an **AHJ Atlas** Start menu entry and an Installed Apps uninstall entry. An installed Edge or Chrome browser is optional for reading JavaScript-rendered public pages.
+
+The installer and app are unsigned. Windows may show **Unknown publisher** or a SmartScreen warning. Confirm the installer came from a release you trust before choosing whether to run it; your organization may block unsigned applications. Do not disable Windows security protections to install it.
+
+Run a newer installer over the current installation to upgrade. A normal uninstall removes the app and shortcuts but retains projects and the protected credential in `%LOCALAPPDATA%\AHJ Atlas`. Back up that folder before removing it manually if you want a full data removal. Deleting it permanently removes your saved workspace and remembered key.
+
+## Open the source version
 
 On Windows, double-click **Start AHJ Atlas.cmd**. It starts a hidden local backend and opens http://127.0.0.1:4318. **Stop AHJ Atlas.cmd** drains in-flight work and stops the backend. Closing the browser alone leaves the backend running.
 
@@ -60,7 +68,7 @@ A matching quotation does not establish semantic/legal correctness on its own. T
 
 - Server binds only to `127.0.0.1`. Host/origin checks, a per-process mutation token, request-size limits and restrictive browser content policies protect the local endpoints.
 - Default key storage is backend memory. Optional Windows storage uses DPAPI for the current Windows user, at `%LOCALAPPDATA%\AHJ Atlas\credential.bin`, outside this folder. No API key is written to SQLite, browser storage, exports or prompts.
-- SQLite, internal conversation state and public evidence live under `data/`, excluded by `.gitignore`. Project details and tool results are sent to Anthropic. Address lookup may use the Census geocoder. A folder under OneDrive or another sync service follows its normal sync policy.
+- In an installed desktop app, SQLite, internal conversation state and public evidence live under `%LOCALAPPDATA%\AHJ Atlas\data`. The source version uses this repository's `data/`, excluded by `.gitignore`. Project details and tool results are sent to Anthropic. Address lookup may use the Census geocoder. A folder under OneDrive or another sync service follows its normal sync policy.
 - External text is untrusted. The application has no email, permit-submission, purchasing, unrestricted filesystem or shell tools. Source retrieval blocks private/local addresses and DNS-pins outbound requests; dynamic-page reads use an isolated browser profile and intercepted public requests.
 - Saved conversations preserve provider signatures and encrypted search content for valid continuation. They are not included in public exports. The application’s data directory is single-instance locked to prevent duplicate workers.
 - Protect this computer/account and data folder appropriately. This is a single-user local app, not a remotely exposed multi-user server.
