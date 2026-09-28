@@ -87,7 +87,7 @@ This document is the durable progress tracker. Every implementation PR must:
 | 2 | Production desktop lifecycle, security, data paths, and migration | COMPLETE | Windows x64 source-mode lifecycle, safe legacy import, and credential isolation passed; [PR #5](https://github.com/Abe-Borg/ahj-atlas/pull/5). |
 | 3 | Downloads, external navigation, desktop UX, and regression coverage | COMPLETE | Windows x64 source-mode export, navigation, UX, and regression checks passed after rebasing on updated `main`; [PR #6](https://github.com/Abe-Borg/ahj-atlas/pull/6). |
 | 4 | Unsigned NSIS installer and installed-app validation | COMPLETE (accepted) | [PR #7](https://github.com/Abe-Borg/ahj-atlas/pull/7) merged. The user accepted the completed build, install, upgrade, uninstall, and installed-app checks as Session 4 done; a fresh Windows machine without Node.js remains unverified and carries into the release gate. |
-| 5 | GitHub release automation, checksums, documentation, and release candidate | IN PROGRESS | Session 5 PR in preparation. Draft-release and exact-download acceptance require the workflow on merged `main`. |
+| 5 | GitHub release automation, checksums, documentation, and release candidate | IN PROGRESS | [PR #8](https://github.com/Abe-Borg/ahj-atlas/pull/8). Draft-release and exact-download acceptance require the workflow on merged `main`. |
 
 ### Decision log
 
