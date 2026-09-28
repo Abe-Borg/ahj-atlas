@@ -91,16 +91,19 @@ Before relying on a release for project research, run a small, budgeted evaluati
 
 ### Electron development shell
 
-`npm run desktop` opens the existing loopback application in a sandboxed Electron window. This Session 1 shell uses a separate temporary development profile and data directory; it is not the installed application. `npm start` and the source launchers still work as before.
+`npm run desktop` opens the existing loopback application in a sandboxed Electron window. Source-mode runs use a separate temporary development profile and data directory. A packaged desktop run uses `%LOCALAPPDATA%\AHJ Atlas\data` for the workspace and the existing `%LOCALAPPDATA%\AHJ Atlas\credential.bin` DPAPI location. It offers a first-run import of a source installation's `data` folder before opening the workspace. `npm start` and the source launchers still work as before.
 
 For a Windows x64 smoke test without paid requests, use a disposable directory and the fake provider:
 
 ```powershell
 $env:ATLAS_DESKTOP_DATA_DIR = Join-Path (Get-Location) 'test-results\desktop-session-1'
+$env:ATLAS_DESKTOP_PROFILE_DIR = Join-Path (Get-Location) 'test-results\desktop-profile-session-1'
 npm run desktop -- --fake-provider --browser-smoke --remote-debugging-port=9223
 ```
 
-In a second terminal, run `npm run test:desktop:window`. The `--browser-smoke` flag reads public `example.com` through installed Edge or Chrome, so that part needs network access. The test uses only synthetic project and chat data. Close the Electron window before relaunching and check that `test-results\desktop-session-1\instance.lock` is gone. The focused lifecycle checks are `npm run test:desktop`.
+In a second terminal, run `npm run test:desktop:window`. The `--browser-smoke` flag reads public `example.com` through installed Edge or Chrome, so that part needs network access. The test uses only synthetic project and chat data. Close the Electron window before relaunching and check that `test-results\desktop-session-1\instance.lock` is gone. The focused lifecycle, path, navigation and migration checks are `npm run test:desktop`.
+
+For an unattended migration smoke with disposable source data only, set `ATLAS_DESKTOP_LEGACY_DIR` to a copy of a source installation folder (or its `data` folder), point `ATLAS_DESKTOP_PROFILE_DIR` and `ATLAS_DESKTOP_DATA_DIR` to new disposable folders, then run `npm run desktop -- --fake-provider --migration-smoke`. This development-only flag accepts the import choice automatically. A packaged build always asks the user on its first empty workspace. If an import fails, the original source database remains in place; close any source app before retrying.
 
 Optional environment variables: `ATLAS_PORT`, `ATLAS_DATA_DIR`, `ATLAS_BROWSER` (path to installed Chrome/Edge). The standard Windows launcher uses port 4318.
 

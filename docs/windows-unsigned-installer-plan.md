@@ -84,7 +84,7 @@ This document is the durable progress tracker. Every implementation PR must:
 | Session | Scope | Status | PR / notes |
 |---|---|---|---|
 | 1 | Electron compatibility spike and runnable development shell | COMPLETE | Windows x64 source-mode shell and fake-provider smoke passed; [PR #4](https://github.com/Abe-Borg/ahj-atlas/pull/4). |
-| 2 | Production desktop lifecycle, security, data paths, and migration | NOT STARTED | |
+| 2 | Production desktop lifecycle, security, data paths, and migration | COMPLETE | Windows x64 source-mode lifecycle, safe legacy import, and credential isolation passed. Session 2 PR pending. |
 | 3 | Downloads, external navigation, desktop UX, and regression coverage | NOT STARTED | |
 | 4 | Unsigned NSIS installer and installed-app validation | NOT STARTED | |
 | 5 | GitHub release automation, checksums, documentation, and release candidate | NOT STARTED | |
@@ -99,12 +99,17 @@ This document is the durable progress tracker. Every implementation PR must:
 | 2026-09-28 | 1 | Keep a temporary, separate development profile; start `createApp({dataDir,port:0})` and load its loopback URL in a sandboxed BrowserWindow without preload | Avoids a real workspace during the spike while preserving the existing HTTP boundary. Production paths, migration, navigation policy, downloads, and packaging remain in their assigned sessions. |
 | 2026-09-28 | 1 | Use Electron's single-instance lock and await `backend.close()` before quit; do not top-level await `app.whenReady()` in the ESM entry point | Windows close/relaunch removed `instance.lock`; awaiting readiness at module top level stalled Electron startup, so the lifecycle promise is started without top-level await. |
 | 2026-09-28 | 1 | Use installed Chrome for the optional reader smoke | `browserPath()` found `C:\Program Files\Google\Chrome\Application\chrome.exe`; `ResearchTools.render()` ran in the Electron main process against public `example.com` without bundling a browser. |
+| 2026-09-28 | 2 | Set packaged Electron `userData` to `%LOCALAPPDATA%\AHJ Atlas`; put SQLite under `data` and keep DPAPI `credential.bin` at the existing root | Keeps both mutable stores outside installation files, stable across upgrades, and avoids a duplicate product-name segment. Source-mode profiles stay disposable. |
+| 2026-09-28 | 2 | Import before `createApp()` using `node:sqlite` online backup, a temporary legacy `instance.lock`, staged `Store`/integrity validation, and same-volume rename | A consistent snapshot includes committed WAL rows, refuses an active source, leaves original database/journals in place, and never merges into an initialized destination. A decision marker records a deliberate fresh start. |
+| 2026-09-28 | 2 | Constrain the window to the runtime loopback origin, validate public external links before sending them to the system browser, deny child windows/permissions, and drain the backend on close/crash/session end | Preserves the HTTP security boundary and prevents external content from replacing the app page. Closing during active work accurately warns that the current request must finish. |
 
 ### Blocker and handoff log
 
 Add dated entries here when a problem is left for a later session. Include exact reproduction commands and relevant file paths. Write `None` when a completed session leaves no known blocker.
 
 2026-09-28, Session 1: None. Windows x64 source-mode checks passed. The unpacked and installed application remain untested until Sessions 4–5 as planned.
+
+2026-09-28, Session 2: None. Source-mode Windows lifecycle and disposable legacy import passed. The installed/package boundary remains assigned to Session 4. The Windows command sandbox prevented Chromium's child renderer from loading; live window checks passed when the disposable Electron run was launched outside that command sandbox.
 
 ## Session 1: Electron compatibility spike and development shell
 
@@ -159,32 +164,32 @@ Turn the spike into a production-quality desktop host whose lifecycle and storag
 
 ### Tasks
 
-- [ ] Introduce a small, testable desktop bootstrap/lifecycle module rather than concentrating all behavior in one top-level script.
-- [ ] Select the stable production data directory beneath Electron's per-user application-data location. Pass it explicitly to `createApp()`.
-- [ ] Ensure the DPAPI credential remains at a stable per-user path. Avoid accidentally nesting or duplicating `AHJ Atlas` path segments when Electron's product name already supplies one.
-- [ ] Define and test development, packaged, and test data-path behavior.
-- [ ] Add a one-time legacy workspace import flow for users who have an existing source installation with `data/atlas.sqlite`. Migration detection and any native prompt must run **before** `createApp()` constructs the destination `Store`, because normal store construction creates `atlas.sqlite` immediately. Skip import only when the destination has an initialized/nonempty workspace or a recorded migration decision—not merely because an empty database file exists.
-- [ ] Refactor desktop startup into an explicit preflight order: resolve paths, inspect destination state, detect an eligible legacy workspace, prompt when needed, perform/validate the import, and only then call `createApp()`. Test that first launch can import and that all later launches bypass the prompt without overwriting the destination.
-- [ ] Import the legacy database with a transactionally consistent, WAL-aware SQLite snapshot mechanism (prefer the runtime's SQLite online-backup API or an equivalently safe mechanism), not a filesystem copy of `atlas.sqlite` alone. The snapshot must include committed transactions present in `atlas.sqlite-wal`, refuse migration while the legacy workspace is actively locked/in use, write to a staging destination, validate the staged database through the normal store/schema path, and atomically promote it only after validation. Leave the original database and its WAL/SHM files untouched as the backup. Never merge two SQLite workspaces automatically.
-- [ ] Keep the backend bound to loopback and retain its host/origin/token/request-size/CSP controls.
-- [ ] Restrict the main window to the exact runtime loopback origin. Deny or reroute unexpected navigation.
-- [ ] Open approved public `http:`/`https:` links in the user's default browser. Reject `file:`, `javascript:`, unexpected `data:`, custom, and malformed navigation targets.
-- [ ] Deny arbitrary window creation. Handle intended external links explicitly through Electron's window-open/navigation hooks.
-- [ ] Decide and implement close behavior. Normal window close should gracefully stop local services and exit. If existing semantics require reconciling in-flight work, display an accurate confirmation rather than claiming provider work can be canceled instantly.
-- [ ] Handle `before-quit`, `window-all-closed`, second-instance, renderer crash, backend startup failure, and Windows shutdown/logoff as safely as the platform permits.
-- [ ] Add a bounded startup screen or native error dialog so backend failures do not leave a blank window. Put non-sensitive diagnostics in a stable user-accessible location if logging is added.
-- [ ] Persist and restore reasonable window bounds while ensuring an off-screen window is brought back onto a current display.
-- [ ] Disable production developer tools and development shortcuts unless an explicit diagnostic flag enables them.
-- [ ] Add lifecycle, path, migration, single-instance, and navigation-policy tests.
+- [x] Introduce a small, testable desktop bootstrap/lifecycle module rather than concentrating all behavior in one top-level script.
+- [x] Select the stable production data directory beneath Electron's per-user application-data location. Pass it explicitly to `createApp()`.
+- [x] Ensure the DPAPI credential remains at a stable per-user path. Avoid accidentally nesting or duplicating `AHJ Atlas` path segments when Electron's product name already supplies one.
+- [x] Define and test development, packaged, and test data-path behavior.
+- [x] Add a one-time legacy workspace import flow for users who have an existing source installation with `data/atlas.sqlite`. Migration detection and any native prompt must run **before** `createApp()` constructs the destination `Store`, because normal store construction creates `atlas.sqlite` immediately. Skip import only when the destination has an initialized/nonempty workspace or a recorded migration decision—not merely because an empty database file exists.
+- [x] Refactor desktop startup into an explicit preflight order: resolve paths, inspect destination state, detect an eligible legacy workspace, prompt when needed, perform/validate the import, and only then call `createApp()`. Test that first launch can import and that all later launches bypass the prompt without overwriting the destination.
+- [x] Import the legacy database with a transactionally consistent, WAL-aware SQLite snapshot mechanism (prefer the runtime's SQLite online-backup API or an equivalently safe mechanism), not a filesystem copy of `atlas.sqlite` alone. The snapshot must include committed transactions present in `atlas.sqlite-wal`, refuse migration while the legacy workspace is actively locked/in use, write to a staging destination, validate the staged database through the normal store/schema path, and atomically promote it only after validation. Leave the original database and its WAL/SHM files untouched as the backup. Never merge two SQLite workspaces automatically.
+- [x] Keep the backend bound to loopback and retain its host/origin/token/request-size/CSP controls.
+- [x] Restrict the main window to the exact runtime loopback origin. Deny or reroute unexpected navigation.
+- [x] Open approved public `http:`/`https:` links in the user's default browser. Reject `file:`, `javascript:`, unexpected `data:`, custom, and malformed navigation targets.
+- [x] Deny arbitrary window creation. Handle intended external links explicitly through Electron's window-open/navigation hooks.
+- [x] Decide and implement close behavior. Normal window close should gracefully stop local services and exit. If existing semantics require reconciling in-flight work, display an accurate confirmation rather than claiming provider work can be canceled instantly.
+- [x] Handle `before-quit`, `window-all-closed`, second-instance, renderer crash, backend startup failure, and Windows shutdown/logoff as safely as the platform permits.
+- [x] Add a bounded startup screen or native error dialog so backend failures do not leave a blank window. Put non-sensitive diagnostics in a stable user-accessible location if logging is added.
+- [x] Persist and restore reasonable window bounds while ensuring an off-screen window is brought back onto a current display.
+- [x] Disable production developer tools and development shortcuts unless an explicit diagnostic flag enables them.
+- [x] Add lifecycle, path, migration, single-instance, and navigation-policy tests.
 
 ### Required checks
 
-- [ ] `npm run check`
-- [ ] `npm test`
-- [ ] All desktop tests from Sessions 1 and 2
-- [ ] Manual Windows tests for first run, second launch, normal exit, forced renderer failure, and relaunch
-- [ ] Manual migration test using a disposable copy of a legacy `data/` directory
-- [ ] Confirm the API key is absent from browser storage, logs, diagnostics, and migration output
+- [x] `npm run check`
+- [x] `npm test`
+- [x] All desktop tests from Sessions 1 and 2
+- [x] Manual Windows tests for first run, second launch, normal exit, forced renderer failure, and relaunch
+- [x] Manual migration test using a disposable copy of a legacy `data/` directory
+- [x] Confirm the API key is absent from browser storage, logs, diagnostics, and migration output
 
 ### Exit criteria
 

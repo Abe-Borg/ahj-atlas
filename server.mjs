@@ -21,9 +21,11 @@ function acquireDataLock(dir){
     }
   }throw new Error('Unable to claim the local workspace.');
 }
-export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provider:injectedProvider,worker=true}={}){
+export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provider:injectedProvider,worker=true,vaultDir}={}){
   const releaseLock=acquireDataLock(dataDir);
-  const store=new Store(dataDir), token=randomBytes(32).toString('hex');
+  let store;
+  try{store=new Store(dataDir);}catch(error){releaseLock();throw error;}
+  const token=randomBytes(32).toString('hex');
   let services=null;
   const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));};
   const server=http.createServer(async(req,res)=>{
@@ -63,7 +65,7 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
       res.writeHead(200,{'Content-Type':filename.endsWith('.js')?'text/javascript; charset=utf-8':filename.endsWith('.css')?'text/css; charset=utf-8':filename.endsWith('.svg')?'image/svg+xml':'text/html; charset=utf-8'});res.end(req.method==='HEAD'?undefined:file);
     }catch(e){store.diagnostic('http.failed',{level:'error',localRequestId,method:req.method,endpoint,error:errorDetails(e)});send(res,400,{error:services?.safeError(e)||e.message||'The request could not be completed.',requestId:localRequestId});}
   });
-  try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});services=await createServices({store,provider:injectedProvider,worker});}
+  try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});services=await createServices({store,provider:injectedProvider,worker,vaultDir});}
   catch(e){await new Promise(r=>server.close(()=>r()));store.close();releaseLock();throw e;}
   store.diagnostic('application.started',{version:VERSION});
   let closing=false;const closeApp=async()=>{if(closing)return;closing=true;store.diagnostic('application.stopping');await services?.close();await new Promise(r=>server.close(r));store.close();releaseLock();};
