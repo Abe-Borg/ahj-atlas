@@ -83,7 +83,7 @@ This document is the durable progress tracker. Every implementation PR must:
 
 | Session | Scope | Status | PR / notes |
 |---|---|---|---|
-| 1 | Electron compatibility spike and runnable development shell | NOT STARTED | |
+| 1 | Electron compatibility spike and runnable development shell | COMPLETE | Windows x64 source-mode shell and fake-provider smoke passed; Session 1 PR. |
 | 2 | Production desktop lifecycle, security, data paths, and migration | NOT STARTED | |
 | 3 | Downloads, external navigation, desktop UX, and regression coverage | NOT STARTED | |
 | 4 | Unsigned NSIS installer and installed-app validation | NOT STARTED | |
@@ -95,10 +95,16 @@ This document is the durable progress tracker. Every implementation PR must:
 |---|---|---|---|
 | 2026-09-28 | Planning | Electron + electron-builder/NSIS; unsigned per-user x64 installer; manual upgrades through GitHub Releases | Meets the requested zero-fee deployment model while reusing the existing Node/web application. |
 | 2026-09-28 | Planning review | Run legacy-import preflight before `createApp()` and use a WAL-aware SQLite snapshot staged and validated before promotion | `Store` creates the destination database immediately and enables WAL, so post-start detection or copying only `atlas.sqlite` can skip migration or lose committed records. |
+| 2026-09-28 | 1 | Pin Electron 44.4.5 and electron-builder 26.15.3; retain the in-process backend | Electron 44.4.5 embeds Node 24.21.0. On Windows x64, `node:sqlite` read/write and `@napi-rs/canvas` native load passed in Electron, so no runtime fallback or sidecar is needed. |
+| 2026-09-28 | 1 | Keep a temporary, separate development profile; start `createApp({dataDir,port:0})` and load its loopback URL in a sandboxed BrowserWindow without preload | Avoids a real workspace during the spike while preserving the existing HTTP boundary. Production paths, migration, navigation policy, downloads, and packaging remain in their assigned sessions. |
+| 2026-09-28 | 1 | Use Electron's single-instance lock and await `backend.close()` before quit; do not top-level await `app.whenReady()` in the ESM entry point | Windows close/relaunch removed `instance.lock`; awaiting readiness at module top level stalled Electron startup, so the lifecycle promise is started without top-level await. |
+| 2026-09-28 | 1 | Use installed Chrome for the optional reader smoke | `browserPath()` found `C:\Program Files\Google\Chrome\Application\chrome.exe`; `ResearchTools.render()` ran in the Electron main process against public `example.com` without bundling a browser. |
 
 ### Blocker and handoff log
 
 Add dated entries here when a problem is left for a later session. Include exact reproduction commands and relevant file paths. Write `None` when a completed session leaves no known blocker.
+
+2026-09-28, Session 1: None. Windows x64 source-mode checks passed. The unpacked and installed application remain untested until Sessions 4–5 as planned.
 
 ## Session 1: Electron compatibility spike and development shell
 
@@ -108,20 +114,20 @@ Prove that a supported Electron runtime can execute the complete backend depende
 
 ### Tasks
 
-- [ ] Create a dedicated Electron main-process entry point, preferably under `desktop/`.
-- [ ] Add pinned development dependencies for Electron and electron-builder. Commit the lockfile changes.
-- [ ] Add a development script such as `npm run desktop` that starts Electron without replacing `npm start`.
-- [ ] In the main process, wait for Electron readiness, import `createApp()`, start it with an isolated development data directory and `port: 0`, then load the returned URL in a `BrowserWindow`.
-- [ ] Set `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Do not create a preload bridge unless a concrete feature requires it.
-- [ ] Implement basic shutdown so quitting Electron awaits `backend.close()` and does not leave `instance.lock` behind.
-- [ ] Add an Electron single-instance lock. A second launch must focus/restore the existing window.
-- [ ] Verify that the selected Electron version's embedded Node supports `node:sqlite` and the repository's required Node APIs.
-- [ ] Verify that `@napi-rs/canvas` loads in Electron on Windows x64. Account for ASAR unpacking if required, but defer final packaging rules to Session 4.
-- [ ] Exercise representative fake-provider workflows from the Electron window: bootstrap, project creation, project reload, chat UI, and report rendering.
-- [ ] Exercise PDF, XLSX, and JSON generation at the API level, even if native Save dialogs are deferred.
-- [ ] Verify installed Edge/Chrome discovery and at least one dynamic-page reader smoke path without bundling another browser.
-- [ ] Add focused automated tests for main-process bootstrap logic where practical. Keep side effects injectable so tests do not require a visible window for every assertion.
-- [ ] Document the chosen Electron version and compatibility findings in the decision log.
+- [x] Create a dedicated Electron main-process entry point, preferably under `desktop/`.
+- [x] Add pinned development dependencies for Electron and electron-builder. Commit the lockfile changes.
+- [x] Add a development script such as `npm run desktop` that starts Electron without replacing `npm start`.
+- [x] In the main process, wait for Electron readiness, import `createApp()`, start it with an isolated development data directory and `port: 0`, then load the returned URL in a `BrowserWindow`.
+- [x] Set `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Do not create a preload bridge unless a concrete feature requires it.
+- [x] Implement basic shutdown so quitting Electron awaits `backend.close()` and does not leave `instance.lock` behind.
+- [x] Add an Electron single-instance lock. A second launch must focus/restore the existing window.
+- [x] Verify that the selected Electron version's embedded Node supports `node:sqlite` and the repository's required Node APIs.
+- [x] Verify that `@napi-rs/canvas` loads in Electron on Windows x64. Account for ASAR unpacking if required, but defer final packaging rules to Session 4.
+- [x] Exercise representative fake-provider workflows from the Electron window: bootstrap, project creation, project reload, chat UI, and report rendering.
+- [x] Exercise PDF, XLSX, and JSON generation at the API level, even if native Save dialogs are deferred.
+- [x] Verify installed Edge/Chrome discovery and at least one dynamic-page reader smoke path without bundling another browser.
+- [x] Add focused automated tests for main-process bootstrap logic where practical. Keep side effects injectable so tests do not require a visible window for every assertion.
+- [x] Document the chosen Electron version and compatibility findings in the decision log.
 
 ### Compatibility fallback order
 
@@ -135,11 +141,11 @@ Do not silently downgrade the application's runtime requirements or replace SQLi
 
 ### Required checks
 
-- [ ] `npm run check`
-- [ ] `npm test`
-- [ ] New desktop unit/integration checks
-- [ ] Manual Windows x64 launch from `npm run desktop`
-- [ ] Clean shutdown and immediate relaunch without a stale lock
+- [x] `npm run check`
+- [x] `npm test`
+- [x] New desktop unit/integration checks
+- [x] Manual Windows x64 launch from `npm run desktop`
+- [x] Clean shutdown and immediate relaunch without a stale lock
 
 ### Exit criteria
 
