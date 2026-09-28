@@ -9,9 +9,11 @@ import { desktopPaths, PRODUCT_NAME } from './paths.mjs';
 import { VERSION } from '../lib/config.mjs';
 
 app.setName(PRODUCT_NAME);
-const userData=app.isPackaged?path.join(process.env.LOCALAPPDATA||app.getPath('appData'),PRODUCT_NAME)
+const packagedSmokeProfile=app.isPackaged&&process.argv.includes('--fake-provider')&&process.env.ATLAS_DESKTOP_SMOKE_PROFILE
+  ?path.resolve(process.env.ATLAS_DESKTOP_SMOKE_PROFILE):null;
+const userData=packagedSmokeProfile||(app.isPackaged?path.join(process.env.LOCALAPPDATA||app.getPath('appData'),PRODUCT_NAME)
   :process.env.ATLAS_DESKTOP_PROFILE_DIR?path.resolve(process.env.ATLAS_DESKTOP_PROFILE_DIR)
-    :path.join(os.tmpdir(),'AHJ Atlas Desktop Dev');
+    :path.join(os.tmpdir(),'AHJ Atlas Desktop Dev'));
 mkdirSync(userData,{recursive:true});
 app.setPath('userData',userData);
 
@@ -27,7 +29,7 @@ async function checkRuntime(){
 }
 
 let provider;
-if(!app.isPackaged&&process.argv.includes('--fake-provider')){
+if((!app.isPackaged||packagedSmokeProfile)&&process.argv.includes('--fake-provider')){
   const {FakeProvider,chatResponse}=await import('../tests/fixtures.mjs');
   provider=new class extends FakeProvider{
     async message(payload,options){
@@ -58,11 +60,14 @@ void startDesktop({app,BrowserWindow,dialog,screen,shell,provider,
           for(const stage of backend.store.stages(project.id))backend.store.updateStage(project.id,stage.id,{status:'complete',output:'Synthetic fixture findings.'});
           backend.store.updateProject(project.id,{status:'complete',report:validateReport(report(),backend.store.sources(project.id))});
         }
-        if(process.argv.includes('--browser-smoke')){
-          const {ResearchTools}=await import('../lib/research-tools.mjs');
-          const result=JSON.parse((await new ResearchTools(backend.store).render(backend.store.list()[0].id,{url:'https://example.com'})).text);
-          console.log(`AHJ Atlas desktop browser reader: ${result.title}; ${result.text.length} rendered characters`);
-        }
+      }
+      if(process.argv.includes('--browser-smoke')&&(!app.isPackaged||process.env.ATLAS_DESKTOP_TEST_READER==='1')){
+        const project=backend.store.list()[0];
+        if(!project)throw new Error('Create a synthetic project before running the browser reader smoke.');
+        const {ResearchTools}=await import('../lib/research-tools.mjs');
+        const smokeUrl=process.env.ATLAS_DESKTOP_TEST_READER_URL||'https://example.com';
+        const result=JSON.parse((await new ResearchTools(backend.store).render(project.id,{url:smokeUrl})).text);
+        console.log(`AHJ Atlas desktop browser reader: ${result.title}; ${result.text.length} rendered characters`);
       }
       console.log(`AHJ Atlas desktop ready at ${backend.url}`);
       return backend;

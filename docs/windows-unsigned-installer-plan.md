@@ -86,7 +86,7 @@ This document is the durable progress tracker. Every implementation PR must:
 | 1 | Electron compatibility spike and runnable development shell | COMPLETE | Windows x64 source-mode shell and fake-provider smoke passed; [PR #4](https://github.com/Abe-Borg/ahj-atlas/pull/4). |
 | 2 | Production desktop lifecycle, security, data paths, and migration | COMPLETE | Windows x64 source-mode lifecycle, safe legacy import, and credential isolation passed; [PR #5](https://github.com/Abe-Borg/ahj-atlas/pull/5). |
 | 3 | Downloads, external navigation, desktop UX, and regression coverage | COMPLETE | Windows x64 source-mode export, navigation, UX, and regression checks passed after rebasing on updated `main`; [PR #6](https://github.com/Abe-Borg/ahj-atlas/pull/6). |
-| 4 | Unsigned NSIS installer and installed-app validation | NOT STARTED | |
+| 4 | Unsigned NSIS installer and installed-app validation | IN PROGRESS | Built and exercised the 1.5.1 installer in [PR #7](https://github.com/Abe-Borg/ahj-atlas/pull/7); a separate clean Windows test account remains unavailable. |
 | 5 | GitHub release automation, checksums, documentation, and release candidate | NOT STARTED | |
 
 ### Decision log
@@ -106,6 +106,10 @@ This document is the durable progress tracker. Every implementation PR must:
 | 2026-09-28 | 3 | Stage only approved loopback attachments in private temporary files, then use a native Save dialog and exclusive final copy | Electron's `setSaveDialogOptions()` still saved directly to Downloads in the Windows smoke. Staging keeps an explicit destination choice and `COPYFILE_EXCL` prevents silent overwrite even if the selected path collides. Completion, cancellation, and errors use accessible native notices; renderer code never receives local paths. |
 | 2026-09-28 | 3 | Preserve safe Unicode filenames through RFC 5987 `filename*`; derive backend and diagnostics version from `package.json`, and launch development Electron through the package entry point | Keeps server filenames and extensions consistent in native Save, allows names with spaces and Unicode, and makes Electron `app.getVersion()` match `/api/bootstrap`, Diagnostics, and future installer metadata. Existing Diagnostics already provides the version, so no new About screen is needed. |
 | 2026-09-28 | 3 review follow-up | Reject Windows device names when they precede a dot, including COM/LPT superscript-digit aliases | `CON.txt` and `LPT1.backup` remain reserved on Windows; replacing these project-name stems before building the attachment name prevents interrupted desktop downloads. |
+| 2026-09-28 | 4 | Use an explicit electron-builder configuration, a stable `org.ahjatlas.desktop` identity, current-user NSIS settings, and an ASAR content audit | Explicit configuration prevents local `test-results` from entering the package; the audit checks native unpacking, production dependencies, and exclusion of credentials, test fixtures, and development files. |
+| 2026-09-28 | 4 | Generate a seven-resolution Windows icon from the existing AHJ Atlas favicon; ship no signing identity | Keeps the established project branding and makes the unsigned publisher state explicit. The generated 256 px icon and installed window were inspected. |
+| 2026-09-28 | 4 | Keep the Electron window alive while `backend.close()` drains, then call `app.exit(0)` | The first packaged close destroyed the window before asynchronous cleanup, leaving `instance.lock` behind. The revised sequence exits cleanly in source, unpacked, and installed builds. |
+| 2026-09-28 | 4 | Use version 1.5.0 as the older upgrade fixture and 1.5.1 for this installer; package one synthetic fixture only in the disposable unpacked smoke build | Allows a real in-place upgrade and full fake-provider smoke without including tests in the production installer or making paid calls. |
 
 ### Blocker and handoff log
 
@@ -116,6 +120,8 @@ Add dated entries here when a problem is left for a later session. Include exact
 2026-09-28, Session 2: None. Source-mode Windows lifecycle and disposable legacy import passed. The installed/package boundary remains assigned to Session 4. The Windows command sandbox prevented Chromium's child renderer from loading; live window checks passed when the disposable Electron run was launched outside that command sandbox.
 
 2026-09-28, Session 3: None. PR #5 merged and the Session 3 branch was rebased on updated `main`. Automated, browser UI, and live source-mode Electron checks passed after the review fix; the native Save flows were also exercised on the preserved Session 3 branch before rebase. Installed/package validation remains in Session 4. Windows desktop tests used a disposable fake-provider profile and export directory outside the command sandbox.
+
+2026-09-28, Session 4: A separate clean Windows account or VM without Node.js installed was not available. The installer was freshly installed and upgraded under the current user's medium-integrity, non-elevated token, with an isolated disposable application-data profile under `test-results/session4-installed-user`; Node.js was removed from `PATH` for installed-app launches. The machine has a real credential in its normal profile, which was never used for these checks and retained its SHA-256 hash. Complete the two unchecked clean-account/Node-free-system checks on a separate standard account before marking Session 4 COMPLETE: run `npm run package:win:installer` on the build machine, copy `dist/AHJ-Atlas-1.5.1-Windows-x64-Setup.exe` to the clean standard-user test machine, verify `where.exe node` finds nothing, install without elevation, and launch from the Start menu. All other Session 4 checks passed locally. The test installation was removed; the disposable data profile remains ignored by Git.
 
 ## Session 1: Electron compatibility spike and development shell
 
@@ -257,35 +263,37 @@ Produce and validate the actual unsigned Windows installer that users will downl
 
 ### Tasks
 
-- [ ] Add electron-builder metadata and NSIS configuration in a maintainable configuration file or `package.json`.
-- [ ] Add a proper multi-resolution Windows `.ico` asset and confirm branding rights. Do not use a low-resolution SVG conversion without inspecting Windows results.
-- [ ] Configure production files narrowly. Include required app code/assets/dependencies; exclude tests, repository data, logs, `.env`, development-only files, and local credentials.
-- [ ] Configure ASAR unpacking for native binaries and any resources that cannot run from the archive.
-- [ ] Ensure production dependencies are present and development-only dependencies are not shipped unnecessarily.
-- [ ] Add deterministic package/build scripts, such as an unpacked-directory build and an installer build.
-- [ ] Produce an unpacked build first and execute the complete desktop smoke suite against it.
-- [ ] Produce the unsigned NSIS installer on Windows.
+- [x] Add electron-builder metadata and NSIS configuration in a maintainable configuration file or `package.json`.
+- [x] Add a proper multi-resolution Windows `.ico` asset and confirm branding rights. Do not use a low-resolution SVG conversion without inspecting Windows results.
+- [x] Configure production files narrowly. Include required app code/assets/dependencies; exclude tests, repository data, logs, `.env`, development-only files, and local credentials.
+- [x] Configure ASAR unpacking for native binaries and any resources that cannot run from the archive.
+- [x] Ensure production dependencies are present and development-only dependencies are not shipped unnecessarily.
+- [x] Add deterministic package/build scripts, such as an unpacked-directory build and an installer build.
+- [x] Produce an unpacked build first and execute the complete desktop smoke suite against it.
+- [x] Produce the unsigned NSIS installer on Windows.
 - [ ] Install as a non-administrator on a clean Windows test account.
-- [ ] Verify Start menu launch, Installed Apps metadata, icon quality, version, application name, and uninstall entry.
-- [ ] Verify no Node.js installation is required by testing on a machine/account without Node on `PATH`.
-- [ ] Verify the app uses an ephemeral loopback port and still starts when port 4318 is occupied.
-- [ ] Verify exports and dynamic-page reading in the installed build.
-- [ ] Install an older test version, create data, install the new version over it, and confirm all projects, chat, sources, diagnostics, settings, and credentials survive.
-- [ ] Uninstall and confirm application binaries/shortcuts are removed while user data remains. Reinstall and confirm the retained workspace opens.
-- [ ] Record the expected unsigned Windows warning in documentation with neutral, accurate wording. Never automate bypasses or advise disabling Defender/SmartScreen.
+- [x] Verify Start menu launch, Installed Apps metadata, icon quality, version, application name, and uninstall entry.
+- [x] Verify no Node.js installation is required by testing on a machine/account without Node on `PATH`.
+- [x] Verify the app uses an ephemeral loopback port and still starts when port 4318 is occupied.
+- [x] Verify exports and dynamic-page reading in the installed build.
+- [x] Install an older test version, create data, install the new version over it, and confirm all projects, chat, sources, diagnostics, settings, and credentials survive.
+- [x] Uninstall and confirm application binaries/shortcuts are removed while user data remains. Reinstall and confirm the retained workspace opens.
+- [x] Record the expected unsigned Windows warning in documentation with neutral, accurate wording. Never automate bypasses or advise disabling Defender/SmartScreen.
 
 ### Required checks
 
-- [ ] `npm run check`
-- [ ] `npm test`
-- [ ] All desktop tests against source-mode Electron
-- [ ] Desktop smoke test against the unpacked packaged application
-- [ ] Installer build completes on Windows x64
-- [ ] Fresh non-admin install test
-- [ ] Upgrade-preserves-data test
-- [ ] Uninstall/reinstall-preserves-data test
-- [ ] Installation with port 4318 occupied
+- [x] `npm run check`
+- [x] `npm test`
+- [x] All desktop tests against source-mode Electron
+- [x] Desktop smoke test against the unpacked packaged application
+- [x] Installer build completes on Windows x64
+- [x] Fresh non-admin install test
+- [x] Upgrade-preserves-data test
+- [x] Uninstall/reinstall-preserves-data test
+- [x] Installation with port 4318 occupied
 - [ ] Launch on a test system/account without separately installed Node.js
+
+Local Windows x64 evidence: `npm run check` and `npm test` (164 passing tests); source and unpacked `npm run test:desktop:window`; `npm run package:win:smoke` and `npm run package:win:installer` with the production ASAR audit. The installed 1.5.1 app opened while port 4318 was occupied, read its protected test credential, and exported PDF/XLSX/JSON/diagnostics. The installed Chrome-backed reader rendered `https://quotes.toscrape.com/js/` and persisted 1,499 characters including a JavaScript-generated quote. A 1.5.0-to-1.5.1 upgrade, normal exit, uninstall, and reinstall preserved the disposable workspace; the final test installation was then removed.
 
 ### Exit criteria
 

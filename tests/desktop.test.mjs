@@ -69,6 +69,19 @@ test('preflight finishes before backend construction, and quit awaits backend cl
   assert.equal(app.quit(),true);
 });
 
+test('normal close releases the backend before exiting the packaged process',async()=>{
+  const app=new FakeApp(),exits=[];app.exit=code=>exits.push(code);
+  let finishClose;
+  const desktop=await startDesktop({app,BrowserWindow:FakeWindow,dataDir:'synthetic',
+    createBackend:async()=>backend(()=>new Promise(resolve=>{finishClose=resolve;}))});
+  const event=preventable();desktop.window.emit('close',event);
+  assert.equal(event.defaultPrevented,true);
+  await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(exits,[]);
+  finishClose();await desktop.closed();
+  assert.deepEqual(exits,[0]);
+});
+
 test('backend startup failure shows an error and leaves no window',async()=>{
   const app=new FakeApp(),errors=[];
   await assert.rejects(startDesktop({app,BrowserWindow:FakeWindow,dataDir:'synthetic',onError:()=>{},
@@ -135,8 +148,8 @@ test('dispatching and pending batch attempts require close confirmation between 
   assert.match(messages[1].detail,/submitted batch may continue/);
   store.updateAttempt(attempt.id,{state:'settled'});
   const settled=preventable();desktop.window.emit('close',settled);
-  assert.equal(settled.defaultPrevented,false);
-  app.quit();await desktop.closed();
+  assert.equal(settled.defaultPrevented,true);
+  await desktop.closed();assert.ok(app.quits>=1);
 });
 
 test('production paths preserve the existing local DPAPI directory and isolate development',()=>{

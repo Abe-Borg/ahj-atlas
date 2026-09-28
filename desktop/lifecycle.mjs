@@ -17,7 +17,7 @@ export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths
     return {primary:false};
   }
 
-  let window=null,backend=null,closing=null,allowQuit=false,allowWindowClose=false,confirming=false,pendingFocus=false;
+  let window=null,backend=null,closing=null,allowQuit=false,allowWindowClose=false,confirming=false,closingWindow=false,pendingFocus=false;
   const focusWindow=()=>{
     if(!window||window.isDestroyed()){pendingFocus=true;return;}
     if(window.isMinimized())window.restore();
@@ -28,16 +28,18 @@ export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths
     if(!closing)closing=Promise.resolve().then(()=>backend?.close()).catch(onError).finally(()=>{backend=null;});
     return closing;
   };
+  const exitAfterCleanup=()=>{
+    allowQuit=true;
+    allowWindowClose=true;
+    if(typeof app.exit==='function')app.exit(0);
+    else app.quit();
+  };
   app.on('second-instance',focusWindow);
-  app.on('window-all-closed',()=>app.quit());
+  app.on('window-all-closed',()=>{if(!allowQuit)app.quit();});
   app.on('before-quit',event=>{
     if(allowQuit||!backend)return;
     event.preventDefault();
-    void closeBackend().finally(()=>{
-      allowQuit=true;
-      allowWindowClose=true;
-      app.quit();
-    });
+    void closeBackend().finally(exitAfterCleanup);
   });
 
   try{
@@ -71,20 +73,26 @@ export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths
     if(paths.packaged&&!diagnostics)window.webContents.on('devtools-opened',()=>window.webContents.closeDevTools());
     window.on('close',event=>{
       if(paths.userData)saveWindowBounds(paths.userData,window);
-      if(allowWindowClose||!activeWork(backend)||!dialog)return;
+      if(allowWindowClose)return;
       event.preventDefault();
-      if(confirming)return;
+      if(confirming||closingWindow)return;
+      const finish=()=>{
+        if(closingWindow)return;
+        closingWindow=true;
+        void closeBackend().finally(exitAfterCleanup);
+      };
+      if(!activeWork(backend)||!dialog){finish();return;}
       confirming=true;
       void dialog.showMessageBox(window,{type:'warning',title:'Finish current work before closing?',
         message:'A research or chat request is still active.',
         detail:'AHJ Atlas waits for locally active requests to finish and save their outcome. A submitted batch may continue at the provider after the app exits; reopen the app to check it.',
         buttons:['Keep open','Close AHJ Atlas'],defaultId:0,cancelId:0,noLink:true}).then(({response})=>{
-        if(response===1){allowWindowClose=true;app.quit();}
+        if(response===1)finish();
       }).catch(onError).finally(()=>{confirming=false;});
     });
-    window.on('closed',()=>{stopDownloads?.();window=null;app.quit();});
+    window.on('closed',()=>{stopDownloads?.();window=null;if(!allowQuit)app.quit();});
     for(const event of ['query-session-end','session-end'])window.on(event,()=>{
-      void closeBackend().finally(()=>{allowQuit=true;allowWindowClose=true;app.quit();});
+      void closeBackend().finally(exitAfterCleanup);
     });
     window.webContents.on('render-process-gone',()=>{
       onError(new Error('The desktop window stopped unexpectedly. Reopen AHJ Atlas to continue saved work.'));
