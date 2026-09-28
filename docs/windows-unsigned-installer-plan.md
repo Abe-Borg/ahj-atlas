@@ -352,6 +352,8 @@ Use a Windows GitHub Actions runner to create release artifacts. Prefer a manual
 
 Local implementation checks on Windows x64: `npm ci`, `npm run check`, `npm test` (164 passed), and `npm run test:desktop` (28 passed). With `ATLAS_BUILD_OUTPUT=dist/session5`, `npm run package:win:smoke`, `npm run package:win:dir`, and `npm run package:win:installer` passed the ASAR audit; the installer had `NotSigned` Authenticode status. The PowerShell checksum create/verify script passed on that local installer. The original ignored `dist/win-unpacked/resources/app.asar` was held open, so these builds used the fresh output directory. The local checksum is not the release checksum; release acceptance must use the exact GitHub-downloaded files.
 
+PR #8's [Windows Actions run 36480519693](https://github.com/Abe-Borg/ahj-atlas/actions/runs/36480519693) passed on commit `39bdb8e`, including all workflow checks, package audits, installer build, checksum creation/verification, and CI artifact upload. The two files downloaded from that run's CI artifact verified locally: `AHJ-Atlas-1.5.1-Windows-x64-Setup.exe` SHA-256 `c36f9e0120f3a5fec16b1e1d109f350eeefe5a66f16f76e19c06463a0f6c0d38`; Authenticode status `NotSigned`. This is a PR CI artifact, **not** the draft GitHub Release asset. The clean release-commit run, draft assets, exact draft download, fresh install, upgrade, and installed-app smoke remain unchecked.
+
 ### Exit criteria
 
 Session 5 is complete when a repeatable GitHub workflow produces a draft release containing the unsigned per-user x64 installer and checksum file, the exact downloaded artifact passes clean-install and upgrade testing, and user/maintainer documentation is complete. Publishing the draft release remains a human decision.
