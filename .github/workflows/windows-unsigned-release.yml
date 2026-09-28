@@ -1,0 +1,106 @@
+name: Windows unsigned installer
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-unsigned-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Set up declared Node.js version
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - name: Validate version metadata
+        id: metadata
+        shell: pwsh
+        run: |
+          $package = Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json
+          $lock = Get-Content -LiteralPath package-lock.json -Raw | ConvertFrom-Json -AsHashtable
+          $version = [string]$package.version
+          $rootVersion = [string]$lock.packages[''].version
+          if ($version -notmatch '^\d+\.\d+\.\d+$' -or $lock.version -ne $version -or $rootVersion -ne $version) {
+            throw 'package.json and package-lock.json must have matching numeric release versions.'
+          }
+          if (-not (Test-Path -LiteralPath "docs/releases/$version.md" -PathType Leaf)) {
+            throw "Release notes are missing for $version."
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Syntax checks
+        run: npm run check
+      - name: Deterministic tests
+        run: npm test
+      - name: Desktop tests
+        run: npm run test:desktop
+      - name: Audit synthetic unpacked package
+        run: npm run package:win:smoke
+      - name: Audit production unpacked package
+        run: npm run package:win:dir
+      - name: Build and audit unsigned x64 installer
+        run: npm run package:win:installer
+      - name: Write and verify SHA-256 checksum
+        shell: pwsh
+        run: |
+          ./scripts/windows-release-checksums.ps1 -Mode Create -Directory dist
+          ./scripts/windows-release-checksums.ps1 -Mode Verify -Directory dist
+      - name: Upload inspected release files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-unsigned-${{ steps.metadata.outputs.version }}
+          path: |
+            dist/AHJ-Atlas-${{ steps.metadata.outputs.version }}-Windows-x64-Setup.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  draft-release:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release notes and verifier
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Download this run's inspected files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: windows-unsigned-${{ needs.build.outputs.version }}
+          path: release-artifacts
+      - name: Verify download and create draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ needs.build.outputs.version }}'
+          $tag = "v$version"
+          $notes = "docs/releases/$version.md"
+          $installer = "AHJ-Atlas-$version-Windows-x64-Setup.exe"
+          if (-not (Test-Path -LiteralPath $notes)) { throw "Release notes are missing: $notes" }
+          ./scripts/windows-release-checksums.ps1 -Mode Verify -Directory release-artifacts
+          $existingTag = git ls-remote --tags "https://github.com/$env:GITHUB_REPOSITORY.git" "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check the existing release tag.' }
+          if ($existingTag) { throw "Refusing to reuse existing release tag $tag." }
+          gh release create $tag "release-artifacts/$installer" 'release-artifacts/SHA256SUMS.txt' `
+            --target $env:GITHUB_SHA --title "AHJ Atlas $version" --notes-file $notes --draft
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed.' }

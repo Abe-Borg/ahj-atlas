@@ -86,8 +86,8 @@ This document is the durable progress tracker. Every implementation PR must:
 | 1 | Electron compatibility spike and runnable development shell | COMPLETE | Windows x64 source-mode shell and fake-provider smoke passed; [PR #4](https://github.com/Abe-Borg/ahj-atlas/pull/4). |
 | 2 | Production desktop lifecycle, security, data paths, and migration | COMPLETE | Windows x64 source-mode lifecycle, safe legacy import, and credential isolation passed; [PR #5](https://github.com/Abe-Borg/ahj-atlas/pull/5). |
 | 3 | Downloads, external navigation, desktop UX, and regression coverage | COMPLETE | Windows x64 source-mode export, navigation, UX, and regression checks passed after rebasing on updated `main`; [PR #6](https://github.com/Abe-Borg/ahj-atlas/pull/6). |
-| 4 | Unsigned NSIS installer and installed-app validation | IN PROGRESS | Built and exercised the 1.5.1 installer in [PR #7](https://github.com/Abe-Borg/ahj-atlas/pull/7); a separate clean Windows test account remains unavailable. |
-| 5 | GitHub release automation, checksums, documentation, and release candidate | NOT STARTED | |
+| 4 | Unsigned NSIS installer and installed-app validation | COMPLETE (accepted) | [PR #7](https://github.com/Abe-Borg/ahj-atlas/pull/7) merged. The user accepted the completed build, install, upgrade, uninstall, and installed-app checks as Session 4 done; a fresh Windows machine without Node.js remains unverified and carries into the release gate. |
+| 5 | GitHub release automation, checksums, documentation, and release candidate | IN PROGRESS | Session 5 PR in preparation. Draft-release and exact-download acceptance require the workflow on merged `main`. |
 
 ### Decision log
 
@@ -110,6 +110,8 @@ This document is the durable progress tracker. Every implementation PR must:
 | 2026-09-28 | 4 | Generate a seven-resolution Windows icon from the existing AHJ Atlas favicon; ship no signing identity | Keeps the established project branding and makes the unsigned publisher state explicit. The generated 256 px icon and installed window were inspected. |
 | 2026-09-28 | 4 | Keep the Electron window alive while `backend.close()` drains, then call `app.exit(0)` | The first packaged close destroyed the window before asynchronous cleanup, leaving `instance.lock` behind. The revised sequence exits cleanly in source, unpacked, and installed builds. |
 | 2026-09-28 | 4 | Use version 1.5.0 as the older upgrade fixture and 1.5.1 for this installer; package one synthetic fixture only in the disposable unpacked smoke build | Allows a real in-place upgrade and full fake-provider smoke without including tests in the production installer or making paid calls. |
+| 2026-09-28 | 4 acceptance | Treat Session 4 as done on the user's decision after its completed build/install/upgrade/uninstall/installed-app checks | This records acceptance of the completed installer work, not a claim that a separate fresh Windows system without Node.js passed. That test remains a Session 5 release gate. |
+| 2026-09-28 | 5 | Run one Windows workflow on PRs with read-only permissions; create a draft release only through a manual dispatch on `main` after rebuilding and verifying the artifact | Keeps untrusted PR code out of the release-writing job and ensures release files come from the successful release-commit run. Action references are pinned to upstream commit SHAs; maintainers review them at each release. |
 
 ### Blocker and handoff log
 
@@ -121,7 +123,9 @@ Add dated entries here when a problem is left for a later session. Include exact
 
 2026-09-28, Session 3: None. PR #5 merged and the Session 3 branch was rebased on updated `main`. Automated, browser UI, and live source-mode Electron checks passed after the review fix; the native Save flows were also exercised on the preserved Session 3 branch before rebase. Installed/package validation remains in Session 4. Windows desktop tests used a disposable fake-provider profile and export directory outside the command sandbox.
 
-2026-09-28, Session 4: A separate clean Windows account or VM without Node.js installed was not available. The installer was freshly installed and upgraded under the current user's medium-integrity, non-elevated token, with an isolated disposable application-data profile under `test-results/session4-installed-user`; Node.js was removed from `PATH` for installed-app launches. The machine has a real credential in its normal profile, which was never used for these checks and retained its SHA-256 hash. Complete the two unchecked clean-account/Node-free-system checks on a separate standard account before marking Session 4 COMPLETE: run `npm run package:win:installer` on the build machine, copy `dist/AHJ-Atlas-1.5.1-Windows-x64-Setup.exe` to the clean standard-user test machine, verify `where.exe node` finds nothing, install without elevation, and launch from the Start menu. All other Session 4 checks passed locally. The test installation was removed; the disposable data profile remains ignored by Git.
+2026-09-28, Session 4: A separate clean Windows account or VM without Node.js installed was not available. The installer was freshly installed and upgraded under the current user's medium-integrity, non-elevated token, with an isolated disposable application-data profile under `test-results/session4-installed-user`; Node.js was removed from `PATH` for installed-app launches. The machine has a real credential in its normal profile, which was never used for these checks and retained its SHA-256 hash. The user accepted Session 4 on the completed installer checks. The unchecked clean-account/Node-free-system tests are **not passed** and remain mandatory before release publication: download the exact candidate installer from the draft GitHub Release, confirm `where.exe node` finds nothing on a separate standard-user Windows x64 environment, install without elevation, and launch from the Start menu. All other Session 4 checks passed locally. The test installation was removed; the disposable data profile remains ignored by Git.
+
+2026-09-28, Session 5: GitHub's manual `workflow_dispatch` trigger requires the workflow file on the default branch. The Session 5 PR can exercise its read-only build job, but its draft-release job and exact draft-download checks require the PR to be merged. Keep Session 5 IN PROGRESS until the draft and release-gate tests pass; do not publish automatically.
 
 ## Session 1: Electron compatibility spike and development shell
 
@@ -295,6 +299,8 @@ Produce and validate the actual unsigned Windows installer that users will downl
 
 Local Windows x64 evidence: `npm run check` and `npm test` (164 passing tests); source and unpacked `npm run test:desktop:window`; `npm run package:win:smoke` and `npm run package:win:installer` with the production ASAR audit. The installed 1.5.1 app opened while port 4318 was occupied, read its protected test credential, and exported PDF/XLSX/JSON/diagnostics. The installed Chrome-backed reader rendered `https://quotes.toscrape.com/js/` and persisted 1,499 characters including a JavaScript-generated quote. A 1.5.0-to-1.5.1 upgrade, normal exit, uninstall, and reinstall preserved the disposable workspace; the final test installation was then removed.
 
+The user accepted Session 4 as complete on this evidence after PR #7 merged. This acceptance does not convert either unchecked separate clean-account or Node-free-system check into a pass; both remain open for the Session 5 release candidate.
+
 ### Exit criteria
 
 Session 4 is complete only when an unsigned per-user installer successfully installs, launches, upgrades, and uninstalls on Windows x64 without admin access or external Node.js, and all application functionality and user data survive the packaging boundary.
@@ -311,17 +317,17 @@ Use a Windows GitHub Actions runner to create release artifacts. Prefer a manual
 
 ### Tasks
 
-- [ ] Add a Windows release workflow with least-privilege GitHub token permissions.
-- [ ] Pin action versions to immutable commit SHAs where practical and document update ownership.
-- [ ] Install dependencies using `npm ci` and the repository's declared Node version.
-- [ ] Run syntax checks, the full deterministic test suite, and desktop/package checks before artifact publication.
-- [ ] Build the x64 unpacked package and unsigned NSIS installer.
-- [ ] Generate SHA-256 checksums with a standard Windows/PowerShell command and publish `SHA256SUMS.txt` alongside the installer.
+- [x] Add a Windows release workflow with least-privilege GitHub token permissions.
+- [x] Pin action versions to immutable commit SHAs where practical and document update ownership.
+- [x] Install dependencies using `npm ci` and the repository's declared Node version.
+- [x] Run syntax checks, the full deterministic test suite, and desktop/package checks before artifact publication. (Configured in the workflow and passed locally; the GitHub run remains pending.)
+- [x] Build the x64 unpacked package and unsigned NSIS installer. (Passed locally; GitHub build remains pending.)
+- [x] Generate SHA-256 checksums with a standard Windows/PowerShell command and publish `SHA256SUMS.txt` alongside the installer. (Creation/verification passed locally; release attachment remains pending.)
 - [ ] Upload CI artifacts for inspection, then attach the installer and checksum file to a draft GitHub Release.
-- [ ] Ensure workflows never package repository `data/`, `.env`, logs, credentials, test outputs, or developer workspaces.
-- [ ] Document a maintainer release checklist: version bump, changelog/release notes, local/CI checks, workflow invocation, artifact download, checksum verification, clean install, upgrade install, smoke test, and manual draft publication.
-- [ ] Document user installation, the unsigned publisher warning, update-by-running-new-installer, data location, backup, uninstall retention, full data removal, checksums, system requirements, and Edge/Chrome behavior.
-- [ ] Update the old source-launch documentation so installed users are not told to install Node or double-click `.cmd` files. Retain a clearly separated source-development section.
+- [x] Ensure workflows never package repository `data/`, `.env`, logs, credentials, test outputs, or developer workspaces. (Production ASAR audit passed locally; CI will repeat it.)
+- [x] Document a maintainer release checklist: version bump, changelog/release notes, local/CI checks, workflow invocation, artifact download, checksum verification, clean install, upgrade install, smoke test, and manual draft publication.
+- [x] Document user installation, the unsigned publisher warning, update-by-running-new-installer, data location, backup, uninstall retention, full data removal, checksums, system requirements, and Edge/Chrome behavior.
+- [x] Update the old source-launch documentation so installed users are not told to install Node or double-click `.cmd` files. Retain a clearly separated source-development section.
 - [ ] Download the artifacts from GitHub rather than using local build outputs for final acceptance. Verify the published checksum and test the exact download.
 - [ ] Create a release-candidate draft and complete the full release checklist.
 
@@ -342,7 +348,9 @@ Use a Windows GitHub Actions runner to create release artifacts. Prefer a manual
 - [ ] Fresh install using the GitHub-downloaded artifact
 - [ ] Upgrade using the GitHub-downloaded artifact
 - [ ] Full installed-app smoke checklist
-- [ ] Review documentation from the perspective of a non-developer user
+- [x] Review documentation from the perspective of a non-developer user
+
+Local implementation checks on Windows x64: `npm ci`, `npm run check`, `npm test` (164 passed), and `npm run test:desktop` (28 passed). With `ATLAS_BUILD_OUTPUT=dist/session5`, `npm run package:win:smoke`, `npm run package:win:dir`, and `npm run package:win:installer` passed the ASAR audit; the installer had `NotSigned` Authenticode status. The PowerShell checksum create/verify script passed on that local installer. The original ignored `dist/win-unpacked/resources/app.asar` was held open, so these builds used the fresh output directory. The local checksum is not the release checksum; release acceptance must use the exact GitHub-downloaded files.
 
 ### Exit criteria
 

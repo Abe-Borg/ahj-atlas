@@ -1,11 +1,12 @@
 // The disposable unpacked smoke build includes one synthetic fixture module.
 // The installer build excludes the entire tests tree.
 const smoke=process.env.ATLAS_PACKAGED_SMOKE==='1';
+const output=process.env.ATLAS_BUILD_OUTPUT||'dist';
 
 module.exports={
   appId:'org.ahjatlas.desktop',
   productName:'AHJ Atlas',
-  directories:{output:'dist',buildResources:'build'},
+  directories:{output,buildResources:'build'},
   asar:true,
   files:[
     'package.json','server.mjs','desktop/**/*','lib/**/*','public/**/*',
