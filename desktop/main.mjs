@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createApp } from '../server.mjs';
 import { startDesktop } from './lifecycle.mjs';
 import { desktopPaths, PRODUCT_NAME } from './paths.mjs';
+import { VERSION } from '../lib/config.mjs';
 
 app.setName(PRODUCT_NAME);
 const userData=app.isPackaged?path.join(process.env.LOCALAPPDATA||app.getPath('appData'),PRODUCT_NAME)
@@ -15,6 +16,7 @@ mkdirSync(userData,{recursive:true});
 app.setPath('userData',userData);
 
 async function checkRuntime(){
+  if(app.getVersion()!==VERSION)throw new Error('Desktop and backend version metadata differ.');
   if(Number(process.versions.node.split('.')[0])<24)throw new Error('Electron must embed Node.js 24 or newer.');
   const db=new DatabaseSync(':memory:');
   try{db.exec('CREATE TABLE probe (value INTEGER); INSERT INTO probe VALUES (24)');
@@ -37,6 +39,7 @@ if(!app.isPackaged&&process.argv.includes('--fake-provider')){
 
 // Electron signals readiness after this module returns; do not top-level await.
 void startDesktop({app,BrowserWindow,dialog,screen,shell,provider,
+  downloadDir:provider&&process.env.ATLAS_DESKTOP_DOWNLOAD_DIR?path.resolve(process.env.ATLAS_DESKTOP_DOWNLOAD_DIR):null,
   diagnostics:process.argv.includes('--desktop-diagnostics'),
   migrationChoice:provider&&process.argv.includes('--migration-smoke')&&process.env.ATLAS_DESKTOP_LEGACY_DIR?'import':null,
   onError:error=>console.error('AHJ Atlas desktop:',String(error?.message||error).replace(/sk-ant-[\w-]+/g,'[redacted]')),
