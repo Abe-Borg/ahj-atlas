@@ -1,0 +1,391 @@
+# AHJ Atlas unsigned Windows installer implementation plan
+
+## Purpose
+
+This is the execution plan for turning the existing local Windows application into an installed desktop application distributed through GitHub Releases. The finished product must preserve the current AHJ Atlas behavior and data model while replacing the end-user requirement to install Node.js, run `npm ci`, and use the Start/Stop command files.
+
+The target artifact is an **unsigned, per-user Windows x64 installer**. It must install without administrator privileges, add a Start menu entry, appear in Windows Installed Apps, launch AHJ Atlas in its own desktop window, and uninstall cleanly. Code signing, Microsoft Store publication, automatic updating, macOS/Linux packages, and product redesign are explicitly out of scope.
+
+This plan is intentionally divided into one-PR sessions. Each session must leave the branch tested and reviewable. Do not combine later sessions merely because implementation is going well.
+
+## Non-negotiable product requirements
+
+1. All existing research, chat, questions, diagnostics, exports, spending controls, source retrieval, browser rendering, persistence, and recovery behavior must remain available.
+2. The installed application must not require a separately installed Node.js runtime or an `npm install` performed by the user.
+3. The application must use a dedicated Electron window rather than opening the user's normal browser.
+4. The existing loopback HTTP architecture should be retained for this project. Do not rewrite the frontend/API boundary as Electron IPC unless a documented blocker makes that unavoidable.
+5. Mutable data must live outside the installation directory in the current user's application-data area and must survive application upgrades and a normal uninstall.
+6. Only one instance may use a workspace at a time. A second application launch should focus the existing window rather than displaying a database-lock failure.
+7. API keys must retain the current Windows DPAPI protection and must never be exposed to the renderer, logs, installer, GitHub Actions, or release artifacts.
+8. The Electron renderer must have Node integration disabled, context isolation enabled, and sandboxing enabled. External web content must never replace the application page in the privileged desktop window.
+9. The installer and executable will be unsigned. Documentation must plainly explain the Windows "Unknown publisher" / SmartScreen experience and must never advise users to disable security software.
+10. Production releases will be attached to GitHub Releases. The workflow must also emit SHA-256 checksums.
+11. No automatic updater is required. Updating means running a newer installer over the existing per-user installation. The user's data must remain intact.
+12. Existing source-development commands should continue to work. The `.cmd` launchers may remain for developers or source users, but they are no longer the supported installed-user entry point.
+
+## Current architecture the implementer must understand first
+
+- `server.mjs` exports `createApp({ dataDir, port, provider, worker })`, binds a loopback server, returns its actual URL, and exposes an asynchronous `close()` method. This is the integration seam for Electron.
+- The server currently serves the static files under `public/` and enforces host/origin checks plus a per-process mutation token. Preserve those controls.
+- `lib/store.mjs` uses the Node built-in `node:sqlite` `DatabaseSync` API and creates `atlas.sqlite` in the supplied data directory.
+- `lib/key-vault.mjs` uses Windows DPAPI through PowerShell and defaults to `%LOCALAPPDATA%\AHJ Atlas\credential.bin`.
+- `lib/research-tools.mjs` dynamically imports `puppeteer-core` and locates an installed Edge or Chrome executable. The installed build must preserve this behavior.
+- The frontend uses normal same-origin navigation and attachment downloads for PDF, XLSX, JSON, and diagnostic exports.
+- The current `launcher.mjs` starts a detached Node backend and opens the system browser. The desktop build must not call this launcher; it should import `createApp()` directly.
+- The package currently requires Node 24 or newer and includes native/runtime-sensitive dependencies, notably `node:sqlite` and `@napi-rs/canvas`. Electron runtime compatibility is therefore a release-blocking gate, not an assumption.
+
+Before editing code, read the repository's applicable `AGENTS.md` files, `README.md`, `package.json`, `launcher.mjs`, `server.mjs`, `lib/store.mjs`, `lib/key-vault.mjs`, `lib/research-tools.mjs`, export routes, and existing tests.
+
+## Fixed technical direction
+
+Use **Electron** as the desktop shell and **electron-builder with NSIS** for an unsigned, per-user installer, unless the compatibility spike proves that this combination cannot satisfy a requirement. A change of packager must be documented in this plan's decision log before implementation continues.
+
+The expected process model is:
+
+```text
+AHJ Atlas.exe (Electron main process)
+  -> obtains Electron single-instance lock
+  -> chooses a stable per-user data directory
+  -> imports createApp() from server.mjs
+  -> starts createApp({ dataDir, port: 0 })
+  -> opens a sandboxed BrowserWindow at the returned loopback URL
+  -> handles downloads and external links
+  -> calls backend.close() during application shutdown
+```
+
+Use `port: 0` so Windows chooses a free ephemeral loopback port. Do not depend on port 4318 in the installed application.
+
+The intended persistent layout is conceptually:
+
+```text
+%LOCALAPPDATA%\AHJ Atlas\
+  data\atlas.sqlite
+  data\instance.lock
+  credential.bin
+  logs\desktop.log (only if a desktop log is actually needed)
+```
+
+Use Electron's Windows `userData`/app-data path APIs rather than hand-building paths when practical, but ensure the selected product name produces a stable path. Do not write mutable state into `resources`, `app.asar`, the installer directory, or `Program Files`.
+
+## Progress tracking rules
+
+This document is the durable progress tracker. Every implementation PR must:
+
+1. Update the session table below: set the current session to `IN PROGRESS` when work starts and `COMPLETE` only when all exit criteria pass.
+2. Check completed checklist items in that session.
+3. Add a short entry to the decision log for any implementation choice that future agents need to understand.
+4. Add unresolved problems to the blocker/handoff log. Never mark a partially satisfied exit criterion complete.
+5. Include the plan update in the same PR as the corresponding implementation.
+6. Use exactly one implementation PR per session. Do not start the next session in the same PR.
+
+### Session status
+
+| Session | Scope | Status | PR / notes |
+|---|---|---|---|
+| 1 | Electron compatibility spike and runnable development shell | NOT STARTED | |
+| 2 | Production desktop lifecycle, security, data paths, and migration | NOT STARTED | |
+| 3 | Downloads, external navigation, desktop UX, and regression coverage | NOT STARTED | |
+| 4 | Unsigned NSIS installer and installed-app validation | NOT STARTED | |
+| 5 | GitHub release automation, checksums, documentation, and release candidate | NOT STARTED | |
+
+### Decision log
+
+| Date | Session | Decision | Reason |
+|---|---|---|---|
+| 2026-09-28 | Planning | Electron + electron-builder/NSIS; unsigned per-user x64 installer; manual upgrades through GitHub Releases | Meets the requested zero-fee deployment model while reusing the existing Node/web application. |
+
+### Blocker and handoff log
+
+Add dated entries here when a problem is left for a later session. Include exact reproduction commands and relevant file paths. Write `None` when a completed session leaves no known blocker.
+
+## Session 1: Electron compatibility spike and development shell
+
+### Objective
+
+Prove that a supported Electron runtime can execute the complete backend dependency graph and create a usable desktop window before investing in installer work.
+
+### Tasks
+
+- [ ] Create a dedicated Electron main-process entry point, preferably under `desktop/`.
+- [ ] Add pinned development dependencies for Electron and electron-builder. Commit the lockfile changes.
+- [ ] Add a development script such as `npm run desktop` that starts Electron without replacing `npm start`.
+- [ ] In the main process, wait for Electron readiness, import `createApp()`, start it with an isolated development data directory and `port: 0`, then load the returned URL in a `BrowserWindow`.
+- [ ] Set `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Do not create a preload bridge unless a concrete feature requires it.
+- [ ] Implement basic shutdown so quitting Electron awaits `backend.close()` and does not leave `instance.lock` behind.
+- [ ] Add an Electron single-instance lock. A second launch must focus/restore the existing window.
+- [ ] Verify that the selected Electron version's embedded Node supports `node:sqlite` and the repository's required Node APIs.
+- [ ] Verify that `@napi-rs/canvas` loads in Electron on Windows x64. Account for ASAR unpacking if required, but defer final packaging rules to Session 4.
+- [ ] Exercise representative fake-provider workflows from the Electron window: bootstrap, project creation, project reload, chat UI, and report rendering.
+- [ ] Exercise PDF, XLSX, and JSON generation at the API level, even if native Save dialogs are deferred.
+- [ ] Verify installed Edge/Chrome discovery and at least one dynamic-page reader smoke path without bundling another browser.
+- [ ] Add focused automated tests for main-process bootstrap logic where practical. Keep side effects injectable so tests do not require a visible window for every assertion.
+- [ ] Document the chosen Electron version and compatibility findings in the decision log.
+
+### Compatibility fallback order
+
+If the initial Electron version cannot support the application:
+
+1. Try a currently supported Electron version whose embedded Node runtime satisfies `node:sqlite` and the package's Node API requirements.
+2. Determine whether a narrowly scoped dependency/API adjustment preserves behavior and is safer than a sidecar.
+3. Only as a last resort propose bundling a separate Node 24 sidecar runtime. Stop and document the impact before implementing a sidecar, because it changes packaging, lifecycle, security, and installer scope.
+
+Do not silently downgrade the application's runtime requirements or replace SQLite during the spike.
+
+### Required checks
+
+- [ ] `npm run check`
+- [ ] `npm test`
+- [ ] New desktop unit/integration checks
+- [ ] Manual Windows x64 launch from `npm run desktop`
+- [ ] Clean shutdown and immediate relaunch without a stale lock
+
+### Exit criteria
+
+Session 1 is complete only when the app can run in Electron on Windows x64 with its existing backend, SQLite opens successfully, representative exports work, native dependencies load, existing automated tests pass, and the compatibility decision is recorded. No installer is expected yet.
+
+## Session 2: Production lifecycle, security, data paths, and migration
+
+### Objective
+
+Turn the spike into a production-quality desktop host whose lifecycle and storage behavior are safe for real user work.
+
+### Tasks
+
+- [ ] Introduce a small, testable desktop bootstrap/lifecycle module rather than concentrating all behavior in one top-level script.
+- [ ] Select the stable production data directory beneath Electron's per-user application-data location. Pass it explicitly to `createApp()`.
+- [ ] Ensure the DPAPI credential remains at a stable per-user path. Avoid accidentally nesting or duplicating `AHJ Atlas` path segments when Electron's product name already supplies one.
+- [ ] Define and test development, packaged, and test data-path behavior.
+- [ ] Add a one-time legacy workspace import flow for users who have an existing source installation with `data/atlas.sqlite`. It must be explicit, non-destructive, and skip import when the installed workspace already exists.
+- [ ] Copy the legacy workspace only while it is not in use, validate the copied database by opening it through the normal store, and leave the original untouched as a backup. Never attempt to merge two SQLite workspaces automatically.
+- [ ] Keep the backend bound to loopback and retain its host/origin/token/request-size/CSP controls.
+- [ ] Restrict the main window to the exact runtime loopback origin. Deny or reroute unexpected navigation.
+- [ ] Open approved public `http:`/`https:` links in the user's default browser. Reject `file:`, `javascript:`, unexpected `data:`, custom, and malformed navigation targets.
+- [ ] Deny arbitrary window creation. Handle intended external links explicitly through Electron's window-open/navigation hooks.
+- [ ] Decide and implement close behavior. Normal window close should gracefully stop local services and exit. If existing semantics require reconciling in-flight work, display an accurate confirmation rather than claiming provider work can be canceled instantly.
+- [ ] Handle `before-quit`, `window-all-closed`, second-instance, renderer crash, backend startup failure, and Windows shutdown/logoff as safely as the platform permits.
+- [ ] Add a bounded startup screen or native error dialog so backend failures do not leave a blank window. Put non-sensitive diagnostics in a stable user-accessible location if logging is added.
+- [ ] Persist and restore reasonable window bounds while ensuring an off-screen window is brought back onto a current display.
+- [ ] Disable production developer tools and development shortcuts unless an explicit diagnostic flag enables them.
+- [ ] Add lifecycle, path, migration, single-instance, and navigation-policy tests.
+
+### Required checks
+
+- [ ] `npm run check`
+- [ ] `npm test`
+- [ ] All desktop tests from Sessions 1 and 2
+- [ ] Manual Windows tests for first run, second launch, normal exit, forced renderer failure, and relaunch
+- [ ] Manual migration test using a disposable copy of a legacy `data/` directory
+- [ ] Confirm the API key is absent from browser storage, logs, diagnostics, and migration output
+
+### Exit criteria
+
+Session 2 is complete when the desktop host uses stable per-user storage, preserves existing security boundaries, handles one-instance and shutdown behavior reliably, offers a safe legacy import path, and passes both automated and manual Windows lifecycle tests.
+
+## Session 3: Downloads, external navigation, desktop UX, and regression coverage
+
+### Objective
+
+Make all currently browser-dependent behaviors work naturally inside the desktop shell without changing product functionality.
+
+### Tasks
+
+- [ ] Implement Electron download handling for PDF, XLSX, JSON, and diagnostic attachments.
+- [ ] Preserve the server-provided sanitized filename and extension, but use a native Save dialog or another explicit user-selected destination. Never silently overwrite an existing file.
+- [ ] Surface download completion, cancellation, and failure in an accessible way. Do not expose local filesystem paths to remote content.
+- [ ] Test filenames with spaces, Unicode, reserved Windows characters, long project names, and collisions.
+- [ ] Confirm source links, help links, Anthropic links, and other intended external destinations open in the system browser while app-internal routes stay in the Electron window.
+- [ ] Confirm clipboard, printing if currently used, keyboard navigation, dialogs, focus restoration, and responsive layouts work in the desktop window.
+- [ ] Confirm the optional installed Edge/Chrome reader continues to use an isolated temporary profile and is not confused with Electron's Chromium executable.
+- [ ] Add an About surface or equivalent small desktop affordance only if necessary to display version and diagnostic information. Do not redesign the application.
+- [ ] Ensure version reporting comes from one authoritative package/app version and remains consistent between Electron, `/api/bootstrap`, diagnostics, and installer metadata.
+- [ ] Add end-to-end desktop smoke coverage. Reuse fake providers and synthetic data; tests must not make paid model requests.
+- [ ] Run the existing browser UI scripts where supported and document any platform prerequisites.
+
+### Required checks
+
+- [ ] `npm run check`
+- [ ] `npm test`
+- [ ] All desktop tests
+- [ ] Existing relevant UI tests, including preview/chat/questions/delete/citations as applicable
+- [ ] Manual export of PDF, XLSX, JSON, and diagnostics from the Electron window
+- [ ] Manual external-link and blocked-navigation tests
+
+### Exit criteria
+
+Session 3 is complete when every existing user-visible workflow can be performed in the Electron window, exports save correctly, external content cannot navigate the app window, and the desktop regression suite covers the critical shell integration.
+
+## Session 4: Unsigned per-user NSIS installer
+
+### Objective
+
+Produce and validate the actual unsigned Windows installer that users will download.
+
+### Installer configuration requirements
+
+- Product name: `AHJ Atlas`.
+- Target initially: Windows x64 only. Do not label the artifact ARM64-compatible without native ARM64 testing.
+- Installation context: current user/per-user, without administrator elevation.
+- Start menu shortcut: required.
+- Desktop shortcut: optional during install or omitted; do not force it without a product decision.
+- Installed Apps / uninstaller registration: required.
+- Artifact name should include product, version, Windows, and architecture, for example `AHJ-Atlas-1.6.0-Windows-x64-Setup.exe`.
+- Publisher/signing: none. Ensure build configuration does not stall while trying to auto-discover a certificate.
+- ASAR: permitted, but native modules and runtime-loaded assets must be unpacked/configured correctly.
+- User data: never placed in or removed with application binaries during routine upgrade.
+- Uninstall: removes application files and shortcuts; preserves projects and credentials by default. Documentation must explain manual data removal.
+- Upgrade: running a newer installer upgrades in place and preserves the same application identity, user data, shortcuts, and uninstall entry.
+
+### Tasks
+
+- [ ] Add electron-builder metadata and NSIS configuration in a maintainable configuration file or `package.json`.
+- [ ] Add a proper multi-resolution Windows `.ico` asset and confirm branding rights. Do not use a low-resolution SVG conversion without inspecting Windows results.
+- [ ] Configure production files narrowly. Include required app code/assets/dependencies; exclude tests, repository data, logs, `.env`, development-only files, and local credentials.
+- [ ] Configure ASAR unpacking for native binaries and any resources that cannot run from the archive.
+- [ ] Ensure production dependencies are present and development-only dependencies are not shipped unnecessarily.
+- [ ] Add deterministic package/build scripts, such as an unpacked-directory build and an installer build.
+- [ ] Produce an unpacked build first and execute the complete desktop smoke suite against it.
+- [ ] Produce the unsigned NSIS installer on Windows.
+- [ ] Install as a non-administrator on a clean Windows test account.
+- [ ] Verify Start menu launch, Installed Apps metadata, icon quality, version, application name, and uninstall entry.
+- [ ] Verify no Node.js installation is required by testing on a machine/account without Node on `PATH`.
+- [ ] Verify the app uses an ephemeral loopback port and still starts when port 4318 is occupied.
+- [ ] Verify exports and dynamic-page reading in the installed build.
+- [ ] Install an older test version, create data, install the new version over it, and confirm all projects, chat, sources, diagnostics, settings, and credentials survive.
+- [ ] Uninstall and confirm application binaries/shortcuts are removed while user data remains. Reinstall and confirm the retained workspace opens.
+- [ ] Record the expected unsigned Windows warning in documentation with neutral, accurate wording. Never automate bypasses or advise disabling Defender/SmartScreen.
+
+### Required checks
+
+- [ ] `npm run check`
+- [ ] `npm test`
+- [ ] All desktop tests against source-mode Electron
+- [ ] Desktop smoke test against the unpacked packaged application
+- [ ] Installer build completes on Windows x64
+- [ ] Fresh non-admin install test
+- [ ] Upgrade-preserves-data test
+- [ ] Uninstall/reinstall-preserves-data test
+- [ ] Installation with port 4318 occupied
+- [ ] Launch on a test system/account without separately installed Node.js
+
+### Exit criteria
+
+Session 4 is complete only when an unsigned per-user installer successfully installs, launches, upgrades, and uninstalls on Windows x64 without admin access or external Node.js, and all application functionality and user data survive the packaging boundary.
+
+## Session 5: GitHub Releases automation and release candidate
+
+### Objective
+
+Make unsigned installer releases repeatable, reviewable, and downloadable from GitHub without adding an automatic updater.
+
+### Release model
+
+Use a Windows GitHub Actions runner to create release artifacts. Prefer a manually dispatched workflow or a protected version-tag workflow that first creates a **draft GitHub Release**. Do not publish automatically until a human has installed and smoke-tested the exact downloaded artifact.
+
+### Tasks
+
+- [ ] Add a Windows release workflow with least-privilege GitHub token permissions.
+- [ ] Pin action versions to immutable commit SHAs where practical and document update ownership.
+- [ ] Install dependencies using `npm ci` and the repository's declared Node version.
+- [ ] Run syntax checks, the full deterministic test suite, and desktop/package checks before artifact publication.
+- [ ] Build the x64 unpacked package and unsigned NSIS installer.
+- [ ] Generate SHA-256 checksums with a standard Windows/PowerShell command and publish `SHA256SUMS.txt` alongside the installer.
+- [ ] Upload CI artifacts for inspection, then attach the installer and checksum file to a draft GitHub Release.
+- [ ] Ensure workflows never package repository `data/`, `.env`, logs, credentials, test outputs, or developer workspaces.
+- [ ] Document a maintainer release checklist: version bump, changelog/release notes, local/CI checks, workflow invocation, artifact download, checksum verification, clean install, upgrade install, smoke test, and manual draft publication.
+- [ ] Document user installation, the unsigned publisher warning, update-by-running-new-installer, data location, backup, uninstall retention, full data removal, checksums, system requirements, and Edge/Chrome behavior.
+- [ ] Update the old source-launch documentation so installed users are not told to install Node or double-click `.cmd` files. Retain a clearly separated source-development section.
+- [ ] Download the artifacts from GitHub rather than using local build outputs for final acceptance. Verify the published checksum and test the exact download.
+- [ ] Create a release-candidate draft and complete the full release checklist.
+
+### GitHub workflow security requirements
+
+- Pull-request workflows must not have permission to create releases.
+- Release creation must be limited to an intentional maintainer action or protected tag.
+- Do not run untrusted pull-request code in a privileged release job.
+- Use only the minimum `contents` permission needed to create the draft release.
+- Do not add code-signing placeholders or secrets for this unsigned release.
+- Artifact and release names must derive from validated version metadata, not arbitrary shell input.
+
+### Required checks
+
+- [ ] Clean GitHub Actions run on the release commit
+- [ ] Installer and `SHA256SUMS.txt` attached to a draft release
+- [ ] Locally verify the downloaded installer's SHA-256 against the downloaded checksum file
+- [ ] Fresh install using the GitHub-downloaded artifact
+- [ ] Upgrade using the GitHub-downloaded artifact
+- [ ] Full installed-app smoke checklist
+- [ ] Review documentation from the perspective of a non-developer user
+
+### Exit criteria
+
+Session 5 is complete when a repeatable GitHub workflow produces a draft release containing the unsigned per-user x64 installer and checksum file, the exact downloaded artifact passes clean-install and upgrade testing, and user/maintainer documentation is complete. Publishing the draft release remains a human decision.
+
+## Required final acceptance matrix
+
+The project is finished only after all rows pass on the release candidate:
+
+| Area | Acceptance condition |
+|---|---|
+| Installation | Standard user installs without administrator approval. |
+| Runtime | Application works without Node.js installed separately. |
+| Launch | Start menu entry opens one desktop window and starts one backend. |
+| Ports | App starts while port 4318 is occupied. |
+| Persistence | Projects, stages, sources, chat, questions, diagnostics, and settings persist across restart and upgrade. |
+| Credentials | Remembered API key remains DPAPI-protected and survives upgrade; it is absent from logs/artifacts. |
+| Research | Fake-provider real-time and batch workflows complete in installed build. |
+| Chat | Project chat works and remains isolated/persistent. |
+| Questions | Answer/dismiss/research-with-answers flows work. |
+| Exports | PDF, XLSX, JSON, and diagnostics save through the desktop shell. |
+| Retrieval | Normal source reads work; installed Edge/Chrome dynamic rendering works when available. |
+| Security | Renderer has no Node integration; unexpected navigation/window creation is blocked; server controls remain enabled. |
+| Shutdown | Normal close releases the database lock; relaunch succeeds. |
+| Upgrade | New installer preserves all user data and app identity. |
+| Uninstall | Binaries/shortcuts are removed; user data is retained and documented. |
+| Release | GitHub draft contains the expected installer and matching SHA-256 checksum. |
+| Warning | Documentation accurately explains that the installer is unsigned. |
+
+## Testing principles
+
+- Existing deterministic fake-provider tests remain mandatory and must not make paid API calls.
+- Never use a real user workspace for installer or migration testing. Use disposable directories and test accounts/VM snapshots.
+- Test the packaged and installed application, not only source-mode Electron.
+- Test the exact artifact downloaded from the draft GitHub Release before publication.
+- A warning caused solely by the intentionally unsigned publisher status is expected; crashes, missing files, broken exports, failed upgrades, or antivirus detections are not automatically acceptable.
+- If an environment limitation prevents a required Windows test, leave the session incomplete and record the precise outstanding test in the blocker log.
+
+## Per-session PR and handoff protocol
+
+At the end of every implementation session:
+
+1. Run all checks required by that session and report exact commands and outcomes.
+2. Update this plan's status table, checklists, decision log, and blocker log.
+3. Commit all session work on the current branch.
+4. Open exactly one PR for that session with scope, architectural decisions, tests, manual checks, risks, and remaining work.
+5. Stop. Do not begin the next session in the same PR.
+6. The user will review and merge the PR.
+7. In the final response, provide a ready-to-copy handoff prompt for the next session. Phrase it conditionally: **after this PR is merged**, start a fresh session from the updated default branch and use the prompt.
+
+Use this handoff prompt template, replacing the bracketed text:
+
+```text
+Continue the AHJ Atlas unsigned Windows installer work in /workspace/ahj-atlas.
+
+Start by updating the local default branch after PR [PR number/title] has been merged. Read every applicable AGENTS.md and then read docs/windows-unsigned-installer-plan.md in full. Confirm that Session [completed number] is marked COMPLETE and review its decision/blocker log entries.
+
+Implement only Session [next number]: [session title]. At the start, mark that session IN PROGRESS in the plan. Follow its tasks, required checks, and exit criteria. Preserve all existing application functionality and do not begin later sessions. Update the plan with completed items, decisions, blockers, and final status. Commit the changes and open exactly one PR for this session. In your final response, report tests and provide the next ready-to-copy post-merge handoff prompt.
+```
+
+For Session 5, replace the next-session prompt with a release handoff summarizing the draft release, exact artifact names/checksums, manual acceptance results, known limitations, and the human steps needed to publish it.
+
+## Explicitly out of scope
+
+- Purchasing or configuring a public code-signing certificate.
+- Suppressing or bypassing Windows SmartScreen, Defender, antivirus, or corporate application-control policy.
+- Microsoft Store packaging/publication.
+- An automatic update service.
+- macOS or Linux desktop installers.
+- ARM64 claims without a separately approved/testing workstream.
+- Replacing Anthropic, changing research prompts/models, redesigning the UI, or changing application functionality unrelated to desktop packaging.
+- Moving the backend to hosted infrastructure.
+- Replacing SQLite or rewriting the frontend/backend interface without a documented, reviewed blocker.
+
