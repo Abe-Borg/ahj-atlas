@@ -5,7 +5,8 @@ import { restoredBounds, saveWindowBounds } from './window-state.mjs';
 function activeWork(backend){
   const services=backend?.services;
   return Boolean(services?.engine?.running?.size||services?.engine?.polling?.size
-    ||services?.engine?.applying?.size||services?.chat?.running?.size);
+    ||services?.engine?.applying?.size||services?.chat?.running?.size
+    ||backend?.store?.hasPendingRequests?.());
 }
 
 export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths,dataDir,provider,
@@ -74,8 +75,8 @@ export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths
       confirming=true;
       void dialog.showMessageBox(window,{type:'warning',title:'Finish current work before closing?',
         message:'A research or chat request is still active.',
-        detail:'Closing waits for the current request to finish so its outcome and charge can be saved. A submitted batch may continue at the provider after the app exits.',
-        buttons:['Keep open','Close after current request'],defaultId:0,cancelId:0,noLink:true}).then(({response})=>{
+        detail:'AHJ Atlas waits for locally active requests to finish and save their outcome. A submitted batch may continue at the provider after the app exits; reopen the app to check it.',
+        buttons:['Keep open','Close AHJ Atlas'],defaultId:0,cancelId:0,noLink:true}).then(({response})=>{
         if(response===1){allowWindowClose=true;app.quit();}
       }).catch(onError).finally(()=>{confirming=false;});
     });

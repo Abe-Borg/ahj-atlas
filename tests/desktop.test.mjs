@@ -1,10 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { startDesktop } from '../desktop/lifecycle.mjs';
 import { navigationDecision, secureWindowNavigation } from '../desktop/navigation.mjs';
 import { desktopPaths } from '../desktop/paths.mjs';
+import { Store } from '../lib/store.mjs';
+import { input } from './fixtures.mjs';
 
 class FakeApp extends EventEmitter{
   constructor(lock=true){super();this.lock=lock;this.quits=0;}
@@ -106,10 +110,33 @@ test('active work requires accurate close confirmation; renderer failure drains 
     createBackend:async()=>({...backend(async()=>{closed++;}),services:{engine:{running:new Set(['job'])}}})});
   const event=preventable();desktop.window.emit('close',event);assert.equal(event.defaultPrevented,true);
   await new Promise(resolve=>setImmediate(resolve));
-  assert.match(messages[0].detail,/waits for the current request/);
+  assert.match(messages[0].detail,/waits for locally active requests/);
   await desktop.closed();assert.equal(closed,1);
   desktop.window.webContents.emit('render-process-gone');
   assert.ok(app.quits>=2);
+});
+
+test('dispatching and pending batch attempts require close confirmation between polls',async t=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-desktop-pending-'));
+  t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const store=new Store(dir),project=store.create({...input,mode:'batch'});
+  const attempt=store.reserve(project.id,'discovery',{mode:'batch',modelKey:'test',payload:{},reserve:1000});
+  const app=new FakeApp(),messages=[];
+  const dialog={showMessageBox:async(_window,options)=>{messages.push(options);return {response:0};}};
+  const desktop=await startDesktop({app,BrowserWindow:FakeWindow,dataDir:dir,dialog,
+    createBackend:async()=>({...backend(async()=>store.close()),store,services:{engine:{running:new Set(),polling:new Set(),applying:new Set()},chat:{running:new Map()}}})});
+  for(const state of ['dispatching','pending']){
+    store.updateAttempt(attempt.id,{state});
+    const event=preventable();desktop.window.emit('close',event);
+    assert.equal(event.defaultPrevented,true,state);
+    await new Promise(resolve=>setImmediate(resolve));
+  }
+  assert.equal(messages.length,2);
+  assert.match(messages[1].detail,/submitted batch may continue/);
+  store.updateAttempt(attempt.id,{state:'settled'});
+  const settled=preventable();desktop.window.emit('close',settled);
+  assert.equal(settled.defaultPrevented,false);
+  app.quit();await desktop.closed();
 });
 
 test('production paths preserve the existing local DPAPI directory and isolate development',()=>{

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { Store } from '../lib/store.mjs';
 import { createApp } from '../server.mjs';
 import { input } from './fixtures.mjs';
-import { destinationState, importLegacyWorkspace, preflightWorkspace } from '../desktop/migration.mjs';
+import { activeWorkspaceLock, destinationState, importLegacyWorkspace, preflightWorkspace } from '../desktop/migration.mjs';
 import { restoredBounds, saveWindowBounds } from '../desktop/window-state.mjs';
 
 function fixture(t){
@@ -65,6 +65,31 @@ test('active legacy lock is refused without changing either workspace',async t=>
   assert.equal(digest(original),before);
   assert.equal(destinationState(f.dataDir),'empty');
   source.close();
+});
+
+test('a verified stale legacy lock is reclaimed for a safe import',async t=>{
+  const f=fixture(t),source=new Store(f.sourceDir),project=source.create(input);
+  source.close();
+  const original=path.join(f.sourceDir,'atlas.sqlite'),before=digest(original);
+  const lock=path.join(f.sourceDir,'instance.lock');
+  writeFileSync(lock,'2147483647');
+  assert.equal(activeWorkspaceLock(f.sourceDir),false);
+  await importLegacyWorkspace(f);
+  assert.equal(existsSync(lock),false);
+  assert.equal(digest(original),before);
+  const destination=new Store(f.dataDir);
+  assert.equal(destination.project(project.id).name,project.name);
+  destination.close();
+});
+
+test('an unrecognized legacy lock is preserved and blocks import',async t=>{
+  const f=fixture(t),source=new Store(f.sourceDir);
+  source.create(input);source.close();
+  const lock=path.join(f.sourceDir,'instance.lock');
+  writeFileSync(lock,'unknown owner');
+  await assert.rejects(importLegacyWorkspace(f),/lock cannot be verified/);
+  assert.equal(readFileSync(lock,'utf8'),'unknown owner');
+  assert.equal(destinationState(f.dataDir),'empty');
 });
 
 test('failed validation never promotes a staged database',async t=>{

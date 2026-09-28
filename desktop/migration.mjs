@@ -37,27 +37,36 @@ export function legacyDataDir(selected){
   return null;
 }
 
-export function activeWorkspaceLock(dir){
+function workspaceLockState(dir){
   const lock=path.join(dir,'instance.lock');
-  if(!existsSync(lock))return false;
+  if(!existsSync(lock))return 'absent';
   const pid=Number(readFileSync(lock,'utf8'));
-  if(!Number.isInteger(pid)||pid<1)return false;
-  try{process.kill(pid,0);return true;}
-  catch(error){return error.code!=='ESRCH';}
+  if(!Number.isInteger(pid)||pid<1)return 'unknown';
+  try{process.kill(pid,0);return 'active';}
+  catch(error){return error.code==='ESRCH'?'stale':'unknown';}
+}
+
+export function activeWorkspaceLock(dir){
+  return ['active','unknown'].includes(workspaceLockState(dir));
 }
 
 function claimLegacyLock(dir){
   const file=path.join(dir,'instance.lock');
-  let handle;
-  try{handle=openSync(file,'wx');writeFileSync(handle,String(process.pid));closeSync(handle);}
-  catch(error){
-    if(handle!==undefined)closeSync(handle);
-    if(error.code==='EEXIST')throw new Error(activeWorkspaceLock(dir)
-      ?'The source workspace is open. Close the source application before importing.'
-      :'The source workspace has a stale lock file. Resolve it before importing.');
-    throw error;
+  for(let attempt=0;attempt<2;attempt++){
+    let handle;
+    try{
+      handle=openSync(file,'wx');writeFileSync(handle,String(process.pid));closeSync(handle);
+      return ()=>{try{if(readFileSync(file,'utf8')===String(process.pid))unlinkSync(file);}catch{}};
+    }catch(error){
+      if(handle!==undefined){closeSync(handle);try{unlinkSync(file);}catch{}}
+      if(error.code!=='EEXIST')throw error;
+      const state=workspaceLockState(dir);
+      if(state==='active')throw new Error('The source workspace is open. Close the source application before importing.');
+      if(state==='unknown')throw new Error('The source workspace lock cannot be verified. Resolve it before importing.');
+      if(attempt===1)throw new Error('The source workspace lock changed during import. Try again after closing the source application.');
+      if(state==='stale')unlinkSync(file);
+    }
   }
-  return ()=>{try{if(readFileSync(file,'utf8')===String(process.pid))unlinkSync(file);}catch{}};
 }
 
 function safeStageRemove(stageDir,userData){
