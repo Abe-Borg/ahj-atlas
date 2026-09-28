@@ -7,6 +7,7 @@ const disciplines=['Architecture','Fire protection','Electrical','Mechanical','P
 const statuses={queued:'Queued',researching:'Researching',waiting_batch:'Batch queued',needs_key:'Needs API key',budget:'Budget reached',attention:'Needs attention',canceled:'Canceled',canceling:'Canceling',partial:'Needs confirmation',complete:'Research complete',failed:'Interrupted',waiting:'Waiting to retry'};
 let state={bootstrap:null,projects:[],selected:null,detail:null,tab:'overview',action:null,formBusy:false}, timer;
 let diagnosticsSnapshot=null,diagnosticsLoad=0,clientErrorCount=0,clientErrorWindow=Date.now();
+let updateState=null;
 const questionDrafts=new Map(),questionBusy=new Set();
 const chatDrafts=new Map(),chatOptions=new Map(),chatPending=new Set(),chatErrors=new Map(),chatRequests=new Map(),chatOlder=new Map();
 let projectLoad=0;
@@ -21,6 +22,32 @@ async function api(url,options={}){
   const data=await response.json();if(!response.ok)throw new Error(data.error||'The request could not be completed.');return data;
 }
 function toast(text){$('#toast').textContent=text;$('#toast').hidden=false;clearTimeout(timer);timer=setTimeout(()=>$('#toast').hidden=true,5000);}
+function renderUpdateStatus(){
+  if(!state.bootstrap?.updatesEnabled)return;
+  const current=state.bootstrap.version,available=Boolean(updateState?.updateAvailable&&updateState.releaseUrl);
+  $('#update-settings').hidden=false;
+  $('#update-banner').hidden=!available;
+  $('#update-release-link').hidden=!available;
+  if(available){
+    $('#update-banner-text').textContent=`AHJ Atlas ${updateState.latestVersion} is available. You have ${current}.`;
+    $('#update-banner-link').href=updateState.releaseUrl;
+    $('#update-release-link').href=updateState.releaseUrl;
+  }
+  const checked=updateState?.checkedAt?` Last checked ${date(updateState.checkedAt)}.`:'';
+  $('#update-status').textContent=updateState?.error?`${updateState.error}${checked}`
+    :available?`Version ${updateState.latestVersion} is available. Download the installer and checksum from the release page.${checked}`
+    :updateState?.latestVersion?`Version ${current} is up to date.${checked}`
+    :updateState?.checkedAt?`No published Windows release is available yet.${checked}`:`Installed version ${current}. No update check has completed yet.`;
+}
+async function checkUpdates(force=false){
+  if(!state.bootstrap?.updatesEnabled)return;
+  const button=$('#check-updates');
+  if(force){button.disabled=true;button.textContent='Checking…';}
+  try{updateState=await api('/api/updates',force?{method:'POST',body:{}}:{});renderUpdateStatus();}
+  catch(error){$('#update-status').textContent=`Could not check for updates: ${error.message}`;}
+  finally{if(force){button.disabled=false;button.textContent='Check for updates';}}
+}
+$('#check-updates').addEventListener('click',()=>checkUpdates(true));
 async function loadDiagnostics(){
   const load=++diagnosticsLoad;diagnosticsSnapshot=null;$('#download-diagnostics').disabled=true;$('#diagnostic-content').innerHTML='<p class="muted" style="margin-top:20px">Loading saved records…</p>';
   try{
@@ -236,7 +263,7 @@ $('#new-project').addEventListener('click',()=>newForm());$('#open-settings').ad
 for(const b of document.querySelectorAll('[data-close]'))b.addEventListener('click',()=>document.getElementById(b.dataset.close).close());
 $('#settings-form').addEventListener('submit',async e=>{e.preventDefault();const b=$('#save-settings');b.disabled=true;b.textContent='Checking connection…';try{await api('/api/settings',{method:'POST',body:{key:$('#api-key').value.trim(),remember:$('#remember-key').checked,defaultBudget:Number($('#default-budget').value),dailyBudget:Number($('#daily-budget').value)}});state.bootstrap=await api('/api/bootstrap');$('#api-key').value='';$('#settings-dialog').close();renderSidebar();toast('Workspace settings saved.');}catch(error){$('#settings-error').textContent=error.message;}finally{b.disabled=false;b.textContent='Save settings';}});
 $('#forget-key').addEventListener('click',async()=>{try{await api('/api/connection',{method:'DELETE',body:{}});state.bootstrap=await api('/api/bootstrap');$('#api-key').value='';$('#remember-key').checked=false;renderSidebar();toast('API key disconnected and removed from saved storage.');}catch(e){$('#settings-error').textContent=e.message;}});
-async function init(){try{state.bootstrap=await api('/api/bootstrap');await refreshProjects();const id=new URLSearchParams(location.hash.slice(1)).get('project');if(id&&state.projects.some(p=>p.id===id))await selectProject(id);else newForm();}catch(e){$('#main').innerHTML=`<div class="error-panel"><h2>Unable to open the workspace</h2><p>${esc(e.message)}</p><p>Keep the local application running, then reload this page.</p></div>`;}}
+async function init(){try{state.bootstrap=await api('/api/bootstrap');if(state.bootstrap.updatesEnabled){renderUpdateStatus();void checkUpdates();setInterval(()=>checkUpdates(),60*60*1000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)void checkUpdates();});}await refreshProjects();const id=new URLSearchParams(location.hash.slice(1)).get('project');if(id&&state.projects.some(p=>p.id===id))await selectProject(id);else newForm();}catch(e){$('#main').innerHTML=`<div class="error-panel"><h2>Unable to open the workspace</h2><p>${esc(e.message)}</p><p>Keep the local application running, then reload this page.</p></div>`;}}
 init().then(()=>{
   const ctx=document.modelContext;if(!ctx?.registerTool)return;
   const controller=new AbortController();

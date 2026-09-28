@@ -21,7 +21,7 @@ function acquireDataLock(dir){
     }
   }throw new Error('Unable to claim the local workspace.');
 }
-export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provider:injectedProvider,worker=true,vaultDir}={}){
+export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provider:injectedProvider,worker=true,vaultDir,updateChecker=null}={}){
   const releaseLock=acquireDataLock(dataDir);
   let store;
   try{store=new Store(dataDir);}catch(error){releaseLock();throw error;}
@@ -50,7 +50,11 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
         let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>32768){send(res,413,{error:'Request is too large.'});return;}raw+=chunk;}
         try{body=raw?JSON.parse(raw):{};}catch{return send(res,400,{error:'The request is not valid JSON.'});}
       }
-      if(url.pathname==='/api/bootstrap'&&req.method==='GET')return send(res,200,{application:'AHJ Atlas',token,version:VERSION,settings:store.settings(),models:MODELS,...services.connection()});
+      if(url.pathname==='/api/bootstrap'&&req.method==='GET')return send(res,200,{application:'AHJ Atlas',token,version:VERSION,updatesEnabled:Boolean(updateChecker),settings:store.settings(),models:MODELS,...services.connection()});
+      if(url.pathname==='/api/updates'&&updateChecker){
+        if(req.method==='GET')return send(res,200,await updateChecker.check());
+        if(req.method==='POST')return send(res,200,await updateChecker.check({force:true}));
+      }
       if(url.pathname==='/api/shutdown'&&req.method==='POST'){send(res,200,{stopping:true});setTimeout(()=>closeApp().catch(()=>{}),20);return;}
       if(url.pathname==='/api/projects'&&req.method==='GET')return send(res,200,store.list().map(({report,input,...p})=>({...p,input,reportSummary:report?.summary||''})));
       if(services && await services.route({req,res,url,body,send}))return;

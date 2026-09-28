@@ -7,6 +7,7 @@ import { createApp } from '../server.mjs';
 import { startDesktop } from './lifecycle.mjs';
 import { desktopPaths, PRODUCT_NAME } from './paths.mjs';
 import { VERSION } from '../lib/config.mjs';
+import { createUpdateChecker } from './update-check.mjs';
 
 app.setName(PRODUCT_NAME);
 const packagedSmokeProfile=app.isPackaged&&process.argv.includes('--fake-provider')&&process.env.ATLAS_DESKTOP_SMOKE_PROFILE
@@ -48,7 +49,7 @@ void startDesktop({app,BrowserWindow,dialog,screen,shell,provider,
   resolvePaths:()=>desktopPaths({app}),
   createBackend:async options=>{
     await checkRuntime();
-    const backend=await createApp(options);
+    const backend=await createApp({...options,updateChecker:app.isPackaged?createUpdateChecker({dataDir:options.dataDir,currentVersion:VERSION}):null});
     try{
       if(provider){
         const {fakeTools,input,report,evidenceText}=await import('../tests/fixtures.mjs');
