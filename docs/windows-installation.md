@@ -1,0 +1,34 @@
+# Install AHJ Atlas on Windows
+
+## Requirements
+
+- A Windows 10 or 11 x64 computer and a standard Windows user account. This package is not an ARM64 build.
+- Internet access and an Anthropic API key for research and project chat. Configure the key in **API & spending** after launch. Research may incur API charges.
+- Edge or Chrome is **not** needed for ordinary search or reading public web pages and PDFs. The optional JavaScript page renderer currently requires an installed Edge or Chrome browser. It is used only when a public page needs JavaScript to show its text.
+
+The installer includes the app runtime. You do not need to install Node.js or run `npm`.
+
+## Download and check the installer
+
+1. Open the project's [GitHub Releases](https://github.com/Abe-Borg/ahj-atlas/releases) page and choose a published Windows release.
+2. Download `AHJ-Atlas-<version>-Windows-x64-Setup.exe` and `SHA256SUMS.txt` from the same release into one folder.
+3. In PowerShell, change to that folder and run `Get-FileHash -Algorithm SHA256 -LiteralPath '.\AHJ-Atlas-<version>-Windows-x64-Setup.exe'`. Replace `<version>` with the release version.
+4. Compare the 64-character hash with the hash on the matching filename line in `SHA256SUMS.txt`. If they differ, do not run the installer; download the files again from the release.
+
+The installer and app are unsigned. Windows may show **Unknown publisher** or a SmartScreen warning. Check the source and checksum before deciding whether to proceed. Your organization may prevent unsigned software from running. Do not disable Windows security protections.
+
+## Install, launch, and update
+
+Run the installer under your normal Windows account. It installs for the current user, adds **AHJ Atlas** to the Start menu, and registers an uninstall entry in **Installed Apps**. Launch it from the Start menu. It opens its own desktop window; there is no `.cmd` launcher for installed users.
+
+To update, close AHJ Atlas and run the newer installer from a published release under the same Windows account. It upgrades the application in place and retains the workspace. There is no automatic updater. Back up your data before an update.
+
+## Data, backup, and removal
+
+Projects, sources, chat, settings, and diagnostics are stored under `%LOCALAPPDATA%\AHJ Atlas\data`. A remembered API key is encrypted for the current Windows user in `%LOCALAPPDATA%\AHJ Atlas\credential.bin`. A normal uninstall leaves this folder intact, so reinstalling as the same user can reopen the workspace.
+
+For a backup, close AHJ Atlas, then copy the entire `%LOCALAPPDATA%\AHJ Atlas` folder to a secure location. Keep the backup private: it contains project data and the protected credential. The encrypted key may not be usable from a different Windows account or computer; re-enter it there if needed.
+
+To remove the app, use Windows **Settings → Apps → Installed Apps → AHJ Atlas → Uninstall**. To remove saved data too, first make any backup you want, then delete `%LOCALAPPDATA%\AHJ Atlas` manually after uninstall. Deleting that folder permanently removes the workspace and remembered key.
+
+For source development instead of the installer, see the [README](../README.md#source-development).

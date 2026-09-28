@@ -1,0 +1,29 @@
+# Unsigned Windows release checklist
+
+This is the maintainer procedure for the Windows x64 per-user installer. The release workflow is [`.github/workflows/windows-unsigned-release.yml`](../.github/workflows/windows-unsigned-release.yml). Its build job runs on pull requests with `contents: read`. Only a manual dispatch on `main` runs the `contents: write` job that creates a **draft** release. It never publishes the draft.
+
+## Prepare and review
+
+1. Update `package.json` and `package-lock.json` to the same numeric `major.minor.patch` version. Keep `.node-version` at a supported Node 24 version unless changing the tested runtime deliberately. Confirm the `electron-builder.config.cjs` artifact name still matches the checksum script.
+2. Add `docs/releases/<version>.md` with user-facing release notes, including the unsigned warning and any known limitations. Review [Windows installation instructions](windows-installation.md) as a non-developer.
+3. Review the four pinned action SHAs in the workflow. The maintainer preparing each release owns updates: verify the upstream action tag and resolved commit, then update the SHA and version comment together. Review `electron-builder` and Electron upgrades separately because they affect the package boundary.
+4. Run `npm ci`, `npm run check`, `npm test`, `npm run test:desktop`, `npm run package:win:smoke`, `npm run package:win:dir`, and `npm run package:win:installer` on Windows x64. `package:win:smoke` includes a synthetic fixture in a disposable unpacked build; the production package audit confirms no tests, data, credentials, logs, `.env`, or developer workspace files enter the installer.
+
+   If an old local `dist/win-unpacked` archive is held open, set `ATLAS_BUILD_OUTPUT` to a fresh directory under this checkout for all three package commands and point the checksum script at that same directory. CI uses the default `dist` path.
+5. Merge the release changes into `main` after the pull-request Actions build passes. GitHub requires a manually dispatched workflow file to exist on the default branch. Do not use a PR artifact as the final release candidate.
+
+## Create and inspect the draft
+
+6. From the Actions tab, run **Windows unsigned installer** on `main`, or run `gh workflow run windows-unsigned-release.yml --ref main`. Confirm the full build job passes on the release commit. It installs with `npm ci`, runs syntax/deterministic/desktop checks, audits unpacked and installer packages, makes `SHA256SUMS.txt` with PowerShell `Get-FileHash`, and uploads both files as a 14-day CI artifact.
+7. Confirm the second job downloaded that same run's CI artifact, reverified the checksum, and attached the installer and `SHA256SUMS.txt` to a **draft** release for `v<version>`. If the release already exists, investigate instead of replacing assets or retargeting a tag silently.
+8. Download **both files from the draft release**, not from a local `dist` directory or the CI artifact. In an empty folder run `./scripts/windows-release-checksums.ps1 -Mode Verify -Directory <download-folder>` from the matching source checkout. Independently compare `Get-FileHash -Algorithm SHA256` against the line in the downloaded `SHA256SUMS.txt`. Record the workflow run URL, release URL, exact artifact filename, and SHA-256 in the plan.
+
+## Test the exact downloaded installer
+
+9. On a clean standard-user Windows x64 account or VM, confirm Node.js is not installed separately (`where.exe node` should find nothing). Install the **downloaded** installer without administrator approval. Check the Start menu entry, window, version, icon, Installed Apps entry, and uninstall entry. The machine may display the expected unsigned publisher warning; do not suppress it.
+10. Use only a disposable profile and synthetic data. Check first launch, one-window behavior, a free loopback port while port 4318 is occupied, normal shutdown, relaunch, and no stale `instance.lock`. Verify settings, projects, sources, chat, questions, diagnostics, PDF/XLSX/JSON and diagnostics downloads, external-link handling, and renderer isolation. Use fake-provider research and chat; do not make paid model calls. Check ordinary source reading and, if installed, Edge/Chrome JavaScript rendering.
+11. Install an older version in a disposable profile (for the first release, use the 1.5.0 upgrade fixture), populate projects and a DPAPI-protected synthetic credential, then upgrade using the **same downloaded** candidate. Confirm all data and the credential survive. Uninstall and confirm binaries and shortcuts disappear while data stays; reinstall and reopen the data.
+12. Record every result and any missing environment in `docs/windows-unsigned-installer-plan.md`. A fresh Node-free Windows environment is still an open gate until actually tested. If any required check remains unavailable or fails, keep the draft unpublished and the plan's Session 5 status incomplete.
+13. Only after the exact draft download passes all gates, obtain the owner's approval and manually publish the draft on GitHub. Publication is never a workflow step.
+
+The CI artifact is for inspection and expires. Users should download only the published GitHub Release assets.

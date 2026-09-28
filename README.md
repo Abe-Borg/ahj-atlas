@@ -4,17 +4,13 @@ A local HTML/CSS/JavaScript application for source-linked AHJ, professional cont
 
 ## Windows installer
 
-The unsigned Windows x64 installer is built as `dist/AHJ-Atlas-1.5.1-Windows-x64-Setup.exe`. A public download is planned for the GitHub release work in Session 5. The installer is per-user, needs no administrator elevation or separate Node.js installation, and creates an **AHJ Atlas** Start menu entry and an Installed Apps uninstall entry. An installed Edge or Chrome browser is optional for reading JavaScript-rendered public pages.
+Download the unsigned, per-user Windows x64 installer and its checksum from a [published GitHub Release](https://github.com/Abe-Borg/ahj-atlas/releases). Follow the [Windows installation guide](docs/windows-installation.md) for checksum verification, the unsigned publisher warning, installation, upgrades, backup, and removal. The installed app includes its runtime; installed users do not need Node.js, `npm`, or the `.cmd` launchers.
 
-The installer and app are unsigned. Windows may show **Unknown publisher** or a SmartScreen warning. Confirm the installer came from a release you trust before choosing whether to run it; your organization may block unsigned applications. Do not disable Windows security protections to install it.
+Research and chat require internet access and an Anthropic API key. Ordinary search and source reading do not require Edge or Chrome. The optional JavaScript page renderer currently uses an installed Edge or Chrome browser.
 
-Run a newer installer over the current installation to upgrade. A normal uninstall removes the app and shortcuts but retains projects and the protected credential in `%LOCALAPPDATA%\AHJ Atlas`. Back up that folder before removing it manually if you want a full data removal. Deleting it permanently removes your saved workspace and remembered key.
+## Source development
 
-## Open the source version
-
-On Windows, double-click **Start AHJ Atlas.cmd**. It starts a hidden local backend and opens http://127.0.0.1:4318. **Stop AHJ Atlas.cmd** drains in-flight work and stops the backend. Closing the browser alone leaves the backend running.
-
-For a fresh installation, install Node.js 24+ from https://nodejs.org, then run `npm ci` in this folder. Run `npm start` to keep the backend in a terminal, or use the launcher. Dependencies are free, pinned in `package-lock.json`. No browser download is required; the optional dynamic-page reader uses installed Edge or Chrome.
+Source development requires Node.js 24 or newer. Run `npm ci` in this checkout, then use `npm start` to keep the local backend in a terminal. On Windows, **Start AHJ Atlas.cmd** starts a hidden backend at http://127.0.0.1:4318 and opens the system browser; **Stop AHJ Atlas.cmd** drains in-flight work and stops it. Closing only the browser leaves that source backend running. These launchers are for source users, not installed-app users.
 
 In **API & spending**, enter an Anthropic API key with access to `claude-sonnet-5` and `claude-opus-5-5`. Enable web search in the Anthropic Console. Model availability is checked without generating a paid response. A Chat subscription does not replace API access.
 
