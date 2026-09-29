@@ -22,9 +22,20 @@ test('custom discipline is stored verbatim after trimming, and invalid input is 
 });
 test('10x output limits and mode-aware write reservations keep the full final allowance',t=>{
   const {store:s}=fixture(t),p=s.create(input),r=researchPayload(s,p,s.stage(p.id,'codes')),final=reviewPayload(s,p);
+  assert.equal(r.model,'claude-sonnet-5-5');assert.equal(final.model,'claude-opus-5-5');
   assert.equal(r.max_tokens,60000);assert.equal(final.max_tokens,100000);assert.equal(reviewAllowance('realtime'),2480000);assert.equal(reviewAllowance('batch'),1390000);
   const b=researchPayload(s,{...p,mode:'batch'},s.stage(p.id,'codes'));assert.equal(b.cache_control.ttl,'1h');assert.equal(r.cache_control.ttl,'5m');assert.ok(reserveMicros(50000,'research','batch',60000,2,'1h')>reserveMicros(50000,'research','batch',60000,2,'5m'));
   assert.throws(()=>s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:r,reserve:3000000,finalBuffer:reviewAllowance(p.mode)}),/PROJECT_BUDGET/);
+});
+test('saved Sonnet 5 research continues on its original model after the upgrade',t=>{
+  const {store:s}=fixture(t),p=s.create(input),stage=s.stage(p.id,'jurisdiction');
+  const legacy={...researchPayload(s,p,stage),model:'claude-sonnet-5'};
+  const attempt=s.reserve(p.id,'jurisdiction',{mode:'realtime',modelKey:'research',payload:legacy,reserve:1});
+  s.updateAttempt(attempt.id,{state:'settled',response:{id:'msg_legacy'}});
+  const messages=[...legacy.messages,{role:'assistant',content:[{type:'redacted_thinking',data:'opaque-signature'}]}];
+  s.updateStage(p.id,'jurisdiction',{messages});
+  const next=researchPayload(s,p,s.stage(p.id,'jurisdiction'));
+  assert.equal(next.model,'claude-sonnet-5');assert.deepEqual(next.system,legacy.system);assert.deepEqual(next.tools,legacy.tools);assert.deepEqual(next.messages,messages);
 });
 
 test('final review caches its evidence and keeps saved signed prefixes across continuations',t=>{

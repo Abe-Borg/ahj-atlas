@@ -88,14 +88,14 @@ test('project names are required at the database and HTTP boundaries',async t=>{
   }
   assert.equal(app.store.create({...input,name:'  Design package  '}).name,'Design package');
 });
-test('project chat uses Sonnet 5 high and includes only that project’s latest context and history',async t=>{
+test('project chat uses Sonnet 5.5 high and includes only that project’s latest context and history',async t=>{
   const {app,provider,a,b}=await setup(t),s=app.store,c=app.services.chat;
   const q=s.project(a.id).questions[0];s.saveQuestion(a.id,{questionId:q.id,status:'answered',answer:'ALPHA_SCOPE_UPDATE'});
   const before=s.project(a.id),stages=s.stages(a.id);
   c.start(a.id,body('ALPHA_CHAT_SECRET'));await settled(c);c.start(b.id,body('BRAVO_CHAT_SECRET'));await settled(c);c.start(a.id,body('Continue this project.'));await settled(c);
   assert.equal(provider.calls.length,3);
   for(const [index,expected,excluded] of [[0,'ALPHA_PRIVATE','BRAVO_PRIVATE'],[1,'BRAVO_PRIVATE','ALPHA_PRIVATE'],[2,'ALPHA_CHAT_SECRET','BRAVO_CHAT_SECRET']]){
-    const {payload,options}=provider.calls[index],text=JSON.stringify(payload);assert.match(text,new RegExp(expected));assert.ok(!text.includes(excluded));assert.equal(payload.model,'claude-sonnet-5');assert.equal(payload.output_config.effort,'high');assert.equal(payload.max_tokens,CHAT_LIMITS.output);assert.equal(payload.thinking.type,'adaptive');assert.ok(options.deadlineMs<=CHAT_LIMITS.activeMs);
+    const {payload,options}=provider.calls[index],text=JSON.stringify(payload);assert.match(text,new RegExp(expected));assert.ok(!text.includes(excluded));assert.equal(payload.model,'claude-sonnet-5-5');assert.equal(payload.output_config.effort,'high');assert.equal(payload.max_tokens,CHAT_LIMITS.output);assert.equal(payload.thinking.type,'adaptive');assert.ok(options.deadlineMs<=CHAT_LIMITS.activeMs);
   }
   assert.match(JSON.stringify(provider.calls[2].payload),/ALPHA_SCOPE_UPDATE/);
   assert.deepEqual(provider.preflights[0][2],{modelKeys:['research'],outputLimits:{research:8000}});
