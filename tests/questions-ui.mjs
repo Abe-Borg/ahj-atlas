@@ -18,7 +18,7 @@ try {
   phase="launch browser";console.log(phase);
   browser=await puppeteer.launch({executablePath:browserPath(),headless:true});phase="open page";page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.setViewport({width:1440,height:1080});
   phase="new project labels";console.log(phase);await page.goto(app.url);await page.waitForSelector('#project-form');await page.click('details.extra>summary');
-  for(const id of ['scope','occupancy','permit-date','country','notes'])assert.match(await page.$eval(`label[for="${id}"]`,e=>e.textContent),/optional/);
+  for(const id of ['scope','occupancy','permit-date','country','site-description','notes'])assert.match(await page.$eval(`label[for="${id}"]`,e=>e.textContent),/optional/);
   assert.match(await page.$eval('details.extra>summary',e=>e.textContent),/optional/);
   phase="question forms";console.log(phase);await page.click(`[data-project="${p.id}"]`);await page.waitForSelector('[data-question-form]');
   const [one,two]=app.store.project(p.id).questions,answer=`#answer-${one.id}`;
