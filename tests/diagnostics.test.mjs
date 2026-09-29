@@ -65,9 +65,11 @@ test('diagnostic exports omit keys, raw prompts, project inputs, documents and t
   const a=s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:{model:'claude-sonnet-5',max_tokens:60000,messages:[{role:'user',content:'PRIVATE PROMPT SENTINEL '+key}],system:'PRIVATE SYSTEM SENTINEL',tools:[]},reserve:1000});
   s.updateAttempt(a.id,{state:'settled',response:{id:'msg_fixture',content:[{type:'thinking',thinking:'PRIVATE THINKING SENTINEL',signature:'PRIVATE SIGNATURE SENTINEL'},{type:'text',text:'PRIVATE RESPONSE SENTINEL'}],usage:{input_tokens:40,output_tokens:20}},request_id:'req_fixture'});
   s.source(p.id,{url:'https://example.com/',text:'PRIVATE DOCUMENT SENTINEL',readFull:true});
+  s.event(p.id,'progress','Codes & standards: PRIVATE PROGRESS SENTINEL');
   s.diagnostic('test.failure',{projectId:p.id,level:'error',headers:{'x-api-key':key},messages:['PRIVATE LOG SENTINEL'],message:'Failure '+key+' Bearer credential-secret at https://user:pass@example.com/?token=other-secret',requestId:'req_fixture'});
   const exported=JSON.stringify(diagnosticReport(s,{projectId:p.id}));
-  for(const secret of [key,'credential-secret','user:pass','other-secret','PRIVATE ADDRESS','PRIVATE PROMPT','PRIVATE SYSTEM','PRIVATE THINKING','PRIVATE SIGNATURE','PRIVATE RESPONSE','PRIVATE DOCUMENT','PRIVATE LOG'])assert.ok(!exported.includes(secret),secret);
+  for(const secret of [key,'credential-secret','user:pass','other-secret','PRIVATE ADDRESS','PRIVATE PROMPT','PRIVATE SYSTEM','PRIVATE THINKING','PRIVATE SIGNATURE','PRIVATE RESPONSE','PRIVATE DOCUMENT','PRIVATE LOG','PRIVATE PROGRESS'])assert.ok(!exported.includes(secret),secret);
+  assert.ok(exported.includes('Research progress note. Its text is omitted'));
   assert.ok(exported.includes('req_fixture'));assert.ok(exported.includes('maxOutputTokens'));assert.ok(exported.includes('input_tokens'));
   assert.ok(!redactText('C:\\Users\\PrivatePerson\\app\\server.mjs').includes('PrivatePerson'));
 });
