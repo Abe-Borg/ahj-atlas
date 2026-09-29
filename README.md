@@ -12,7 +12,7 @@ Research and chat require internet access and an Anthropic API key. Ordinary sea
 
 Source development requires Node.js 24 or newer. Run `npm ci` in this checkout, then use `npm start` to keep the local backend in a terminal. On Windows, **Start AHJ Atlas.cmd** starts a hidden backend at http://127.0.0.1:4318 and opens the system browser; **Stop AHJ Atlas.cmd** drains in-flight work and stops it. Closing only the browser leaves that source backend running. These launchers are for source users, not installed-app users.
 
-In **API & spending**, enter an Anthropic API key with access to `claude-sonnet-5-5` and `claude-opus-5-5`. Enable web search in the Anthropic Console. Model availability is checked without generating a paid response. A Chat subscription does not replace API access.
+In **API & spending**, enter an Anthropic API key with access to `claude-sonnet-5-5` and `claude-opus-5-5` for new work. Enable web search in the Anthropic Console. The connection checks the key through Anthropic's Models API; each request checks access and capabilities for its actual model before a paid response is generated. An in-progress Sonnet 5 conversation can continue with a key that still has access to its original model. A Chat subscription does not replace API access.
 
 Enter the required project name, address and discipline, optional scope/occupancy/permit date, processing mode, and spending allowance. Choose **Other — enter your discipline** for a specialty not listed. The report includes authorities, professional contacts, adopted editions, local amendments, permit requirements, source passages, and unresolved questions. PDF, native XLSX, and JSON exports are supported even for partial research.
 

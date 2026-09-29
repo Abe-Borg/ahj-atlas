@@ -7,7 +7,7 @@ import { Store } from '../lib/store.mjs';
 import { Engine } from '../lib/engine.mjs';
 import { LIMITS, reviewAllowance, reserveMicros } from '../lib/config.mjs';
 import { researchPayload, reviewPayload, validateReport } from '../lib/prompts.mjs';
-import { ProviderError, providerError } from '../lib/provider.mjs';
+import { ProviderError, providerError, validateCapabilities } from '../lib/provider.mjs';
 import { input, FakeProvider, fakeTools, report } from './fixtures.mjs';
 
 function fixture(t){const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-upgrade-'));let store=new Store(dir);const provider=new FakeProvider(),engine=new Engine(store,provider,()=>true,{tools:fakeTools(store),autoStart:false,pollMs:10});t.after(async()=>{await engine.close();store.close();assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-upgrade-')));rmSync(dir,{recursive:true,force:true});});return {store,engine,provider,dir,reopen(){store.close();store=new Store(dir);return store;}};}
@@ -27,8 +27,8 @@ test('10x output limits and mode-aware write reservations keep the full final al
   const b=researchPayload(s,{...p,mode:'batch'},s.stage(p.id,'codes'));assert.equal(b.cache_control.ttl,'1h');assert.equal(r.cache_control.ttl,'5m');assert.ok(reserveMicros(50000,'research','batch',60000,2,'1h')>reserveMicros(50000,'research','batch',60000,2,'5m'));
   assert.throws(()=>s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:r,reserve:3000000,finalBuffer:reviewAllowance(p.mode)}),/PROJECT_BUDGET/);
 });
-test('saved Sonnet 5 research continues on its original model after the upgrade',t=>{
-  const {store:s}=fixture(t),p=s.create(input),stage=s.stage(p.id,'jurisdiction');
+test('saved Sonnet 5 research preflights and continues with an old-model-only key',async t=>{
+  const {store:s,engine:e,provider}=fixture(t),p=s.create(input),stage=s.stage(p.id,'jurisdiction');
   const legacy={...researchPayload(s,p,stage),model:'claude-sonnet-5'};
   const attempt=s.reserve(p.id,'jurisdiction',{mode:'realtime',modelKey:'research',payload:legacy,reserve:1});
   s.updateAttempt(attempt.id,{state:'settled',response:{id:'msg_legacy'}});
@@ -36,6 +36,30 @@ test('saved Sonnet 5 research continues on its original model after the upgrade'
   s.updateStage(p.id,'jurisdiction',{messages});
   const next=researchPayload(s,p,s.stage(p.id,'jurisdiction'));
   assert.equal(next.model,'claude-sonnet-5');assert.deepEqual(next.system,legacy.system);assert.deepEqual(next.tools,legacy.tools);assert.deepEqual(next.messages,messages);
+  const available=[{id:'claude-sonnet-5',max_tokens:128000,capabilities:{thinking:{supported:true,types:{adaptive:{supported:true}}},effort:{medium:{supported:true},high:{supported:true}}}}];
+  provider.preflight=async(mode,context,requirements)=>{assert.deepEqual(requirements,{modelKeys:['research'],modelIds:{research:'claude-sonnet-5'},outputLimits:{research:60000}});validateCapabilities(available,{mode,...requirements});};
+  await e.dispatch(p.id,'jurisdiction');assert.equal(provider.calls[0].model,'claude-sonnet-5');
+});
+test('fresh research checks final-review model access before counting or spending',async t=>{
+  const {store:s,engine:e,provider}=fixture(t),p=s.create(input);
+  const available=[{id:'claude-sonnet-5-5',max_tokens:128000}];
+  provider.preflight=async(mode,context,requirements)=>{assert.deepEqual(requirements.modelKeys,['research','review']);validateCapabilities(available,{mode,...requirements});};
+  provider.count=async()=>{throw new Error('Counting should wait for model access.');};
+  await e.dispatch(p.id,'jurisdiction');
+  assert.equal(s.attempts(p.id).length,0);assert.equal(s.project(p.id).status,'attention');assert.match(s.project(p.id).note,/Claude Opus 5\.5 is unavailable/);
+});
+test('rebuilt review preflights its higher output limit even when the model is unchanged',async t=>{
+  const {store:s,engine:e,provider}=fixture(t),p=s.create(input);completedResearch(s,p.id);s.updateStage(p.id,'verification',{status:'complete'});
+  const legacy={...reviewPayload(s,p),max_tokens:50000};
+  const attempt=s.reserve(p.id,'review',{mode:'realtime',modelKey:'review',payload:legacy,reserve:1});
+  s.updateAttempt(attempt.id,{state:'settled',response:{id:'msg_legacy_review'}});
+  s.updateStage(p.id,'review',{messages:legacy.messages,rounds:1});
+  const available=[{id:'claude-opus-5-5',max_tokens:75000}],limits=[];
+  provider.preflight=async(mode,context,requirements)=>{limits.push(requirements.outputLimits.review);validateCapabilities(available,{mode,...requirements});};
+  let counts=0;provider.count=async()=>{counts++;return LIMITS.checkpointInput;};
+  await e.dispatch(p.id,'review');
+  assert.deepEqual(limits,[50000,100000]);assert.equal(counts,1);assert.equal(provider.calls.length,0);
+  assert.equal(s.project(p.id).status,'attention');assert.match(s.project(p.id).note,/100,000 setting/);
 });
 
 test('final review caches its evidence and keeps saved signed prefixes across continuations',t=>{
