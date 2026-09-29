@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { Anthropic, providerError, validateCapabilities } from '../lib/provider.mjs';
 import { costMicros } from '../lib/config.mjs';
 import { CHAT_TOOLS } from '../lib/chat.mjs';
+import { Store } from '../lib/store.mjs';
+import { createServices } from '../lib/services.mjs';
 
 const payload={model:'claude-opus-5-5',max_tokens:100000,messages:[{role:'user',content:'Synthetic contract test.'}]};
 const initial={type:'message_start',message:{id:'msg_fixture',type:'message',role:'assistant',model:payload.model,content:[],stop_reason:null,stop_sequence:null,usage:{input_tokens:100,output_tokens:0,cache_creation_input_tokens:200,cache_read_input_tokens:300,cache_creation:{ephemeral_5m_input_tokens:50,ephemeral_1h_input_tokens:150},server_tool_use:{web_search_requests:0}}}};
@@ -117,4 +122,28 @@ test('model checks retain capabilities and follow model pagination',async()=>{
   assert.equal((await c.preflight('batch')).length,2);assert.ok(urls[1].includes('after_id=claude-sonnet-5-5'));await c.preflight('realtime');assert.equal(urls.length,2);
   assert.throws(()=>validateCapabilities([{...models[0],max_tokens:1000},models[1]]),/output tokens/);
   assert.throws(()=>validateCapabilities([{...models[0],capabilities:{batch:{supported:false}}},models[1]],{mode:'batch'}),/batch/);
+  const legacy=[{...models[0],id:'claude-sonnet-5'}];
+  assert.throws(()=>validateCapabilities(legacy,{modelKeys:['research']}),/Claude Sonnet 5\.5 is unavailable/);
+  assert.deepEqual(validateCapabilities(legacy,{modelKeys:['research'],modelIds:{research:'claude-sonnet-5'},outputLimits:{research:60000}}),legacy);
+  assert.throws(()=>validateCapabilities([{...legacy[0],max_tokens:1000}],{modelKeys:['research'],modelIds:{research:'claude-sonnet-5'},outputLimits:{research:60000}}),/claude-sonnet-5 allows 1,000 output tokens/);
+});
+test('key connection accepts old-model-only access',async()=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-legacy-key-')),store=new Store(dir);
+  const vault={key:'',persisted:false,set(value){this.key=value;}};
+  const services=await createServices({store,vault,worker:false});
+  const previousFetch=globalThis.fetch;
+  try{
+    globalThis.fetch=async url=>{
+      assert.match(String(url),/^https:\/\/api\.anthropic\.com\/v1\/models\?/);
+      return new Response(JSON.stringify({data:[{id:'claude-sonnet-5',max_tokens:128000},{id:'claude-opus-5-5',max_tokens:128000}],has_more:false}),{headers:{'content-type':'application/json'}});
+    };
+    let result;
+    await services.route({req:{method:'POST'},res:{},url:new URL('http://localhost/api/settings'),body:{key:'sk-ant-fixture-key-0000'},send:(_res,status,body)=>{result={status,body};}});
+    assert.deepEqual(result,{status:200,body:{saved:true}});
+    assert.equal(vault.key,'sk-ant-fixture-key-0000');
+  }finally{
+    globalThis.fetch=previousFetch;
+    await services.close();store.close();
+    assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-legacy-key-')));rmSync(dir,{recursive:true,force:true});
+  }
 });
