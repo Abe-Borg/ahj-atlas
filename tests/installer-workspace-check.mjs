@@ -27,7 +27,8 @@ try{
     const question=store.project(project.id).questions.find(q=>q.question.includes('synthetic office'));
     assert.ok(question);
     store.saveQuestion(project.id,{questionId:question.id,status:'answered',answer:'Example Plans Office (synthetic).'});
-    store.setSettings({defaultBudget:3,dailyBudget:17});
+    // Spending limits from older versions are retired; they must be ignored after upgrade.
+    store.db.prepare('UPDATE settings SET data=? WHERE id=1').run(JSON.stringify({defaultBudget:3,dailyBudget:17}));
     store.diagnostic('installer.fixture',{projectId:project.id,phase:'before-upgrade'});
     const vault=new KeyVault({dir:vaultDir});
     vault.set('sk-ant-session4-synthetic-key',true);
@@ -38,8 +39,8 @@ try{
   assert.ok(store.sources(project.id).some(s=>s.title==='Synthetic adoption record'));
   assert.ok(store.chatTurns(project.id).some(t=>t.answer?.includes('Synthetic desktop chat reply')));
   assert.ok(full.questions.some(q=>q.question.includes('synthetic office')&&q.status==='answered'&&q.answer.includes('Example Plans Office')));
-  assert.equal(store.settings().defaultBudget,3);
-  assert.equal(store.settings().dailyBudget,17);
+  assert.deepEqual(store.settings(),{});
+  assert.ok(Number.isFinite(store.spending().total));
   assert.ok(store.diagnostics().some(d=>d.event==='installer.fixture'));
   const vault=new KeyVault({dir:vaultDir});
   assert.equal(vault.key,'sk-ant-session4-synthetic-key');

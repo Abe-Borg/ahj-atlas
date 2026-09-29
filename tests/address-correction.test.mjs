@@ -74,9 +74,8 @@ test('invalid corrections and simultaneous NFPA or partial-report requests leave
   await assert.rejects(e.resume(p.id,{address:corrected,focus:'fire_protection'}),/no simultaneous scope change/);
   await assert.rejects(e.resume(p.id,{siteDescription:'APN 0123-456-789',focus:'fire_protection'}),/no simultaneous scope change/);
   await assert.rejects(e.resume(p.id,{address:corrected,finishPartial:true}),/partial report would describe the previous location/);
-  await assert.rejects(e.resume(p.id,{address:corrected,budget:.5}),/budget must cover/);
   const after=s.project(p.id);
-  assert.equal(after.address,input.address);assert.deepEqual(after.input,before.project.input);assert.equal(after.budget,before.project.budget);
+  assert.equal(after.address,input.address);assert.deepEqual(after.input,before.project.input);
   assert.deepEqual(s.stages(p.id),before.stages);assert.deepEqual(s.events(p.id),before.events);
 });
 
@@ -137,13 +136,13 @@ async function appSetup(t,provider=new FakeProvider()){
 
 test('the resume endpoint corrects the address and fake-provider research runs for the new location',async t=>{
   const {app,provider,post,id}=await appSetup(t),s=app.store,e=app.services.engine;e.tools=fakeTools(s);
-  const rejected=await post('resume',{budget:8,mode:'realtime',clarification:'',address:'short'});
+  const rejected=await post('resume',{mode:'realtime',clarification:'',address:'short'});
   assert.equal(rejected.status,400);assert.match((await rejected.json()).error,/complete project address/);
   assert.equal(s.project(id).address,input.address);assert.equal(provider.calls.length,0);
-  const response=await post('resume',{budget:8,mode:'realtime',clarification:'',address:corrected,siteDescription:'APN 555-12-345'});
+  const response=await post('resume',{mode:'realtime',clarification:'',address:corrected,siteDescription:'APN 555-12-345'});
   assert.equal(response.status,200);const body=await response.json();assert.equal(body.address,corrected);assert.equal(body.input.siteDescription,'APN 555-12-345');
-  let p;for(let i=0;i<40&&s.stage(id,'review').status!=='complete';i++){await e.tick();await settle(e);p=s.project(id);if(['attention','budget','failed'].includes(p.status))throw new Error(p.note);}
-  assert.equal(s.stage(id,'review').status,'complete');assert.ok(p.report);assert.equal(p.budget,8);
+  let p;for(let i=0;i<40&&s.stage(id,'review').status!=='complete';i++){await e.tick();await settle(e);p=s.project(id);if(['attention','failed'].includes(p.status))throw new Error(p.note);}
+  assert.equal(s.stage(id,'review').status,'complete');assert.ok(p.report);
   const first=provider.calls.find(c=>typeof c.messages[0].content==='string'&&c.messages[0].content.includes('Stage: Jurisdiction'));
   assert.ok(first.messages[0].content.includes(corrected));assert.ok(first.messages[0].content.includes('APN 555-12-345'));assert.match(first.messages[0].content,/corrected the project address/);
   const data=exportData(s,id);assert.equal(data.project.address,corrected);assert.equal(data.project.context.siteDescription,'APN 555-12-345');

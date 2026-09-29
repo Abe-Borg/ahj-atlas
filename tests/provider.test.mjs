@@ -204,7 +204,7 @@ test('connection status verifies a remembered key and follows later rejections',
     assert.equal(checked.status,200);assert.equal(checked.body.keyStatus,'invalid');assert.equal(checked.body.keyConfigured,true);
     assert.match(checked.body.keyMessage,/API key was not accepted/);assert.doesNotMatch(JSON.stringify(checked.body),/sk-ant-/);
     // New projects wait for a working key instead of spending a preflight on a rejected one.
-    assert.equal((await route('/api/projects','POST',{name:'Rejected key',address:'1 Main St, Springfield, IL',discipline:'Mechanical',mode:'realtime',budget:5})).body.status,'needs_key');
+    assert.equal((await route('/api/projects','POST',{name:'Rejected key',address:'1 Main St, Springfield, IL',discipline:'Mechanical',mode:'realtime'})).body.status,'needs_key');
     // Anthropic answered and refused: that is a rejection, not an outage.
     reply='forbidden';await services.verifyKey();
     assert.equal(status(),'invalid');assert.match(services.connection().keyMessage,/does not have permission/);

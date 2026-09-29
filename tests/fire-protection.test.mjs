@@ -82,20 +82,20 @@ test('compact reference-table notation works without confusing NFPA 13 and 13R',
   assert.equal(validateReport(r,[s],[],[],input).fireStandards[0].status,'verified');
   r.fireStandards=[row({edition:'2016',evidence:[{sourceId:'S1',quote:'13R—16 Residential Sprinklers.',pageOrSection:'NFPA referenced standards table'}]})];assert.equal(validateReport(r,[s],[],[],input).fireStandards[0].status,'unverified');
 });
-test('focused refresh resets only code, verification and review while retaining evidence, budgets and cumulative limits',async t=>{
-  const {store:s,engine:e}=fixture(t),p=s.create({...input,budget:10});e.tick=async()=>{};
+test('focused refresh resets only code, verification and review while retaining evidence, costs and cumulative limits',async t=>{
+  const {store:s,engine:e}=fixture(t),p=s.create(input);e.tick=async()=>{};
   for(const st of s.stages(p.id))s.updateStage(p.id,st.id,{status:'complete',output:'Saved '+st.id,messages:[{role:'user',content:'Saved signed history'}],rounds:7});
   s.source(p.id,{url:source.url,text:source.text,readFull:true});s.updateProject(p.id,{report:report(),status:'partial',searches:8,reads:41});const a=s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:500});s.updateAttempt(a.id,{state:'settled',actual:500,applied:1,usage:{server_tool_use:{web_search_requests:8}}});for(let n=0;n<41;n++)s.beginTool(a.id,'saved_read_'+n,'read_source');const before=s.project(p.id);
   await e.resume(p.id,{focus:'fire_protection',mode:'batch'});
   for(const id of ['jurisdiction','contacts']){assert.equal(s.stage(p.id,id).status,'complete');assert.equal(s.stage(p.id,id).rounds,7);}
   for(const id of ['codes','verification','review']){assert.equal(s.stage(p.id,id).status,'queued');assert.deepEqual(s.stage(p.id,id).messages,[]);assert.equal(s.stage(p.id,id).rounds,0);assert.equal(s.stage(p.id,id).output,'Saved '+id);}
-  const after=s.project(p.id);assert.equal(after.cost,before.cost);assert.equal(after.budget,10);assert.equal(after.searches,8);assert.equal(after.reads,41);assert.equal(after.mode,'batch');assert.deepEqual(after.report,before.report);assert.equal(s.sources(p.id).length,1);
+  const after=s.project(p.id);assert.equal(after.cost,before.cost);assert.equal(after.searches,8);assert.equal(after.reads,41);assert.equal(after.mode,'batch');assert.deepEqual(after.report,before.report);assert.equal(s.sources(p.id).length,1);
   await assert.rejects(e.resume(p.id,{focus:'fire_protection',clarification:'A new occupancy'}),/scope change/);
   const b=s.reserve(p.id,'codes',{mode:'batch',modelKey:'research',payload:{},reserve:500});s.updateAttempt(b.id,{state:'unknown'});await assert.rejects(e.resume(p.id,{focus:'fire_protection'}),/outstanding/);
 });
 test('NFPA fields survive compact transport and appear in Excel and PDF exports',async()=>{
   const r=report();r.fireStandards=[row()];assert.deepEqual(decodeReport(encodeReport(r)),r);
-  const data={project:{...input,status:'partial',processingMode:'realtime',estimatedApiCost:0,pendingCostAllowance:0,context:input},report:checked([row()]),sources:[{...source,title:'Synthetic adoption',retrieved:new Date().toISOString(),excerpt:source.text,kind:'web'}],stageBriefs:[],exportedAt:new Date().toISOString(),limitations:'Synthetic data; not regulatory guidance.'};
+  const data={project:{...input,status:'partial',processingMode:'realtime',estimatedApiCost:0,estimatedPendingCost:0,context:input},report:checked([row()]),sources:[{...source,title:'Synthetic adoption',retrieved:new Date().toISOString(),excerpt:source.text,kind:'web'}],stageBriefs:[],exportedAt:new Date().toISOString(),limitations:'Synthetic data; not regulatory guidance.'};
   const book=new ExcelJS.Workbook();await book.xlsx.load(await excelReport(data));const ws=book.getWorksheet('NFPA standards');assert.equal(ws.getCell('B2').value,'2019');assert.equal(ws.getCell('C2').value,'applicable');assert.equal(ws.getCell('L2').value,'S1');assert.equal(ws.rowCount,fireProfile(input).length+1);
   const pdf=await pdfReport(data),{getDocument}=await import('pdfjs-dist/legacy/build/pdf.mjs'),doc=await getDocument({data:new Uint8Array(pdf),isEvalSupported:false,useSystemFonts:true}).promise;let text='';for(let i=1;i<=doc.numPages;i++)text+=(await(await doc.getPage(i)).getTextContent()).items.map(x=>x.str).join(' ');assert.match(text,/Fire protection - NFPA standards/);assert.match(text,/NFPA 72/);assert.match(text,/2019/);await doc.loadingTask.destroy();
 });

@@ -16,7 +16,7 @@ test('local HTTP access requires token, correct origin and JSON; paths remain pr
   assert.equal((await fetch(app.url+'/api/projects',{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':b.token,Origin:'https://evil.example'},body:JSON.stringify(input)})).status,403);
   assert.equal((await fetch(app.url+'/api/projects',{method:'POST',headers:{'Content-Type':'text/plain','X-App-Token':b.token},body:'{}'})).status,415);
   assert.equal((await fetch(app.url+'/data/atlas.sqlite')).status,404);
-  assert.equal((await fetch(app.url+'/api/projects',{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':b.token},body:JSON.stringify({...input,notes:'x'.repeat(40000)})})).status,413);
+  assert.equal((await fetch(app.url+'/api/projects',{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':b.token},body:JSON.stringify({...input,notes:'x'.repeat(300000)})})).status,413);
   const result=await fetch(app.url+'/api/projects',{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':b.token},body:JSON.stringify(input)});assert.equal(result.status,201);
   const p=await result.json(),detail=await(await fetch(app.url+'/api/projects/'+p.id)).json();assert.equal(detail.project.name,input.name);assert.ok(!JSON.stringify(detail).includes('x-api-key'));
 });

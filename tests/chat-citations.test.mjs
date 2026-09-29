@@ -7,6 +7,7 @@ import { Store } from '../lib/store.mjs';
 import { ResearchTools } from '../lib/research-tools.mjs';
 import { initialChatEvidence,citedLookup,chatAnswer } from '../lib/chat-citations.mjs';
 import { input } from './fixtures.mjs';
+import { CHAT_LIMITS } from '../lib/config.mjs';
 
 function fixture(t){
   const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-citations-')),s=new Store(dir),p=s.create(input),q=s.create({...input,name:'Other project'});
@@ -18,12 +19,14 @@ function fixture(t){
 }
 const citation=block=>({type:'search_result_location',source:block.source,title:'Untrusted provider title',search_result_index:0,start_block_index:0,end_block_index:1,cited_text:block.content[0].text});
 
-test('native chat evidence is bounded, cacheable and excludes discovery-only and foreign records',t=>{
-  const {s,p}=fixture(t),first=initialChatEvidence(s,p.id);assert.equal(first.length,1);assert.equal(first[0].cache_control.ttl,'5m');assert.equal(first[0].citations.enabled,true);
+test('native chat evidence covers every retrieved source within its bound and excludes discovery-only and foreign records',t=>{
+  const {s,p}=fixture(t),first=initialChatEvidence(s,p.id);assert.equal(first.length,1);assert.ok(!first[0].cache_control);assert.equal(first[0].citations.enabled,true);
   assert.ok(!JSON.stringify(first).includes('PRIVATE OTHER'));assert.ok(!JSON.stringify(first).includes('Discovery must'));
   assert.deepEqual(initialChatEvidence(s,p.id),first);
   for(let i=0;i<12;i++)s.source(p.id,{url:'https://example.com/long'+i,text:'Long saved source sentence. '.repeat(1000),readFull:true});
-  const results=initialChatEvidence(s,p.id);assert.equal(results.length,6);assert.ok(results.flatMap(r=>r.content).reduce((n,b)=>n+b.text.length,0)<=12000);
+  const results=initialChatEvidence(s,p.id),total=results.flatMap(r=>r.content).reduce((n,b)=>n+b.text.length,0);
+  assert.equal(results.length,13);assert.ok(total<=CHAT_LIMITS.excerptChars);assert.deepEqual(results[0].content,first[0].content);
+  const small=initialChatEvidence(s,p.id,{characters:6500});assert.ok(small.flatMap(r=>r.content).reduce((n,b)=>n+b.text.length,0)<=6500);
 });
 
 test('citation mapping validates the supplied source, block range and quote without trusting URLs or titles',t=>{

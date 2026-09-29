@@ -53,8 +53,8 @@ test('only explicit continuation snapshots responses and reopens research with t
   const {app,post,id}=await setup(t),s=app.store,e=app.services.engine,[one,two]=s.project(id).questions;e.tick=async()=>{};
   s.saveQuestion(id,{questionId:one.id,status:'answered',answer:'Battery storage and sprinklers.'});s.saveQuestion(id,{questionId:two.id,status:'dismissed'});
   assert.ok(!JSON.stringify(reviewPayload(s,s.project(id))).includes('Battery storage and sprinklers.'));
-  assert.equal((await post('resume',{budget:8,mode:'batch'})).status,200);
-  let p=s.project(id);assert.equal(p.questionUpdatesPending,false);assert.equal(p.input.questionResponses.length,2);assert.equal(p.mode,'batch');assert.equal(p.budget,8);
+  assert.equal((await post('resume',{mode:'batch'})).status,200);
+  let p=s.project(id);assert.equal(p.questionUpdatesPending,false);assert.equal(p.input.questionResponses.length,2);assert.equal(p.mode,'batch');
   assert.ok(fireProfile(p.input).some(t=>t.standard==='NFPA 855'));
   assert.ok(!fireProfile({...input,questionResponses:[{status:'dismissed',answer:'Battery storage'}]}).some(t=>t.standard==='NFPA 855'));
   assert.ok(s.stages(id).every(s=>s.status==='queued'&&s.rounds===0&&s.messages.length===0));

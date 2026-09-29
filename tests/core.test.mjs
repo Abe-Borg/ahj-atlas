@@ -33,21 +33,38 @@ test('continuing a completed report only reopens research for a substantive foll
   assert.ok(s.stages(p.id).every(stage=>stage.status==='queued'));
   assert.match(s.project(p.id).input.notes,/unresolved fire district boundary/);
 });
-test('atomic allowances include pending reservations and reserve final review',t=>{
+test('pending estimates are recorded without limiting new requests',t=>{
   const s=setup(t),p=s.create({...input,budget:1});
   s.reserve(p.id,'jurisdiction',{mode:'realtime',modelKey:'research',payload:{},reserve:600000});
-  assert.throws(()=>s.reserve(p.id,'contacts',{mode:'realtime',modelKey:'research',payload:{},reserve:500000}),/PROJECT_BUDGET/);
-  assert.equal(s.project(p.id).reserved,.6);
+  s.reserve(p.id,'contacts',{mode:'realtime',modelKey:'research',payload:{},reserve:50000000});
+  assert.equal(s.project(p.id).reserved,50.6);assert.ok(!Object.hasOwn(s.project(p.id),'budget'));assert.deepEqual(s.settings(),{});
+  assert.doesNotMatch(s.events(p.id).at(-1).message,/allowance|budget/);
 });
 test('global search allocations are reserved across simultaneous stages',t=>{
   const s=setup(t),p=s.create(input),payload={tools:[{name:'web_search',max_uses:25}]};
   s.reserve(p.id,'jurisdiction',{mode:'batch',modelKey:'research',payload,reserve:1000});
   assert.throws(()=>s.reserve(p.id,'codes',{mode:'batch',modelKey:'research',payload,reserve:1000}),/SEARCH_BUDGET/);
 });
-test('a prior-day batch recorded today counts toward today’s daily allowance',t=>{
+test('estimated spending counts charges recorded today, including prior-day batches and deleted projects',t=>{
   const s=setup(t);s.setSettings({dailyBudget:1});const p=s.create(input),a=s.reserve(p.id,'jurisdiction',{mode:'batch',modelKey:'research',payload:{},reserve:800000});
-  s.db.prepare('UPDATE attempts SET created=? WHERE id=?').run('2020-01-01T00:00:00.000Z',a.id);s.updateAttempt(a.id,{state:'settled',actual:800000});
-  assert.throws(()=>s.reserve(p.id,'codes',{mode:'batch',modelKey:'research',payload:{},reserve:300000}),/DAILY_BUDGET/);
+  s.db.prepare('UPDATE attempts SET created=? WHERE id=?').run('2020-01-01T00:00:00.000Z',a.id);
+  assert.deepEqual(s.spending(),{today:0,total:0,pending:.8});
+  s.updateAttempt(a.id,{state:'settled',actual:800000});s.reserve(p.id,'codes',{mode:'batch',modelKey:'research',payload:{},reserve:300000});
+  assert.deepEqual(s.spending(),{today:.8,total:.8,pending:.3});
+  const old=s.create({...input,name:'Older project'}),b=s.reserve(old.id,'jurisdiction',{mode:'realtime',modelKey:'research',payload:{},reserve:1});
+  s.updateAttempt(b.id,{state:'settled',actual:200000,applied:1});s.db.prepare('UPDATE attempts SET charged_at=? WHERE id=?').run('2020-01-01T00:00:00.000Z',b.id);s.deleteProject(old.id);
+  assert.deepEqual(s.spending(),{today:.8,total:1,pending:.3});assert.deepEqual(s.settings(),{});
+});
+test('projects stopped at a former spending limit wait for an explicit continue after upgrade',t=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-atlas-test-'));t.after(()=>{assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-atlas-test-')));rmSync(dir,{recursive:true,force:true});});
+  const s=new Store(dir),p=s.create(input),other=s.create({...input,name:'Running project'});
+  s.db.prepare("UPDATE projects SET status='budget',note='Increase the project budget.',final_hold=2480000,budget=5000000 WHERE id=?").run(p.id);
+  s.db.prepare("UPDATE projects SET status='researching',final_hold=1390000 WHERE id=?").run(other.id);
+  s.db.prepare('UPDATE settings SET data=? WHERE id=1').run('{"defaultBudget":5,"dailyBudget":20}');s.close();
+  const reopened=new Store(dir);try{
+    const q=reopened.project(p.id);assert.equal(q.status,'attention');assert.match(q.note,/Continue research/);assert.equal(reopened.project(other.id).status,'researching');
+    assert.equal(reopened.db.prepare('SELECT SUM(final_hold) n FROM projects').get().n,0);assert.deepEqual(reopened.settings(),{});assert.ok(!Object.hasOwn(q,'budget'));
+  }finally{reopened.close();}
 });
 test('search discovery followed by repeated source reading preserves IDs and provenance',t=>{
   const s=setup(t),p=s.create(input),url='https://example.com/adoption';
