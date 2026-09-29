@@ -186,6 +186,12 @@ test('unknown or unusable charges stay reserved without changing research or ret
     const attempt=s.attempts(a.id)[0];assert.equal((await post(a.id,{attemptId:attempt.id,actualCost:.02,note:'Synthetic confirmed charge',confirmed:true},'resolve-charge')).status,200);assert.equal(s.project(a.id).reserved,0);assert.equal(s.project(a.id).status,'complete');assert.equal(c.view(a.id).turns[0].status,'interrupted');
   });
 });
+test('a declined chat request names its refusal category without further requests',async t=>{
+  const provider=new ChatProvider(()=>chatResponse('',{stop_reason:'refusal',stop_details:{type:'refusal',category:'general_harms'},content:[]}));
+  const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
+  const turn=c.view(a.id).turns[0];assert.equal(turn.status,'limited');assert.match(turn.note,/declined this request \(general_harms\)/);assert.equal(provider.calls.length,1);
+  assert.match(provider.calls[0].payload.system,/even when you feel confident/);assert.equal(provider.calls[0].payload.thinking.display,'omitted');
+});
 test('input, output, lookup and request limits stop additional paid requests',async t=>{
   for(const kind of ['input','output','tools','rounds'])await t.test(kind,async t=>{
     const provider=new ChatProvider(()=>kind==='output'?chatResponse('Truncated',{stop_reason:'max_tokens'}):chatResponse('',{stop_reason:'tool_use',content:Array.from({length:kind==='tools'?9:1},(_,i)=>({type:'tool_use',id:'tool_'+i,name:'read_project',input:{section:'report',offset:0,length:500}}))}));

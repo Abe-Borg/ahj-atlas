@@ -7,6 +7,7 @@ import { Store } from '../lib/store.mjs';
 import { Engine } from '../lib/engine.mjs';
 import { LIMITS, reviewAllowance, reserveMicros } from '../lib/config.mjs';
 import { researchPayload, reviewPayload, validateReport } from '../lib/prompts.mjs';
+import { checkpointFromMessages, progressUpdates } from '../lib/evidence.mjs';
 import { ProviderError, providerError, validateCapabilities } from '../lib/provider.mjs';
 import { input, FakeProvider, fakeTools, report } from './fixtures.mjs';
 
@@ -105,6 +106,31 @@ test('verification budget exhaustion preserves a path to a partial final report'
 test('text-only progress gets at most two coverage continuations without false completion',async t=>{
   const {store:s,engine:e,provider}=fixture(t),p=s.create(input);provider.response=()=>({stop_reason:'end_turn',content:[{type:'text',text:'Next I will check the adopted editions.'}],usage:{input_tokens:100,output_tokens:40}});
   for(let i=0;i<3;i++)await e.dispatch(p.id,'jurisdiction');assert.equal(s.stage(p.id,'jurisdiction').status,'partial');assert.equal(s.stage(p.id,'jurisdiction').continuations,2);assert.ok(s.stage(p.id,'jurisdiction').output.includes('Next I will'));
+});
+test('continuation reminders name the owed coverage and saved open questions',async t=>{
+  const {store:s,engine:e,provider}=fixture(t),p=s.create(input);provider.response=()=>({stop_reason:'end_turn',content:[{type:'text',text:'I will read the contact directory next.'}],usage:{input_tokens:100,output_tokens:40}});
+  s.updateStage(p.id,'jurisdiction',{status:'complete',output:'Synthetic findings.'});
+  s.updateStage(p.id,'contacts',{checkpoint:{brief:'Synthetic working brief for the contact stage.',claims:[],questions:['Which office reviews fire alarm plans?'],sources:[],observations:[]}});
+  await e.dispatch(p.id,'contacts');
+  const reminder=s.stage(p.id,'contacts').messages.at(-1);
+  assert.equal(reminder.role,'user');assert.match(reminder.content,/no tool call/);assert.match(reminder.content,/coverage for contacts and process/);assert.match(reminder.content,/- Which office reviews fire alarm plans\?/);
+});
+test('research requests progress-update notes and records them in Activity and checkpoints',async t=>{
+  const {store:s,engine:e,provider}=fixture(t),p=s.create(input);
+  const research=researchPayload(s,p,s.stage(p.id,'jurisdiction'));
+  assert.deepEqual(research.thinking,{type:'adaptive',display:'updates'});assert.match(research.system[0].text,/<unattended_run>[\s\S]*finish_research alone[\s\S]*<\/unattended_run>$/);
+  assert.match(research.messages[0].content,/even when you feel confident/);
+  completedResearch(s,p.id);s.updateStage(p.id,'verification',{status:'complete',output:'Synthetic verification.'});
+  assert.equal(reviewPayload(s,p).thinking.display,'omitted');
+  const note='Found the district adoption ordinance; reading its amendments next.';
+  provider.response=payload=>payload.messages.length>1?new FakeProvider().response(payload):{stop_reason:'tool_use',content:[{type:'thinking',thinking:'',signature:'reasoning'},{type:'thinking',thinking:note,signature:'update'},{type:'tool_use',id:'tool_read',name:'read_source',input:{url:'https://example.com/adoption'}}],usage:{input_tokens:100,output_tokens:40}};
+  const q=s.create(input);await e.dispatch(q.id,'jurisdiction');
+  const progress=s.events(q.id).filter(v=>v.message.includes(note));
+  assert.equal(progress.length,1);assert.equal(progress[0].message,'Jurisdiction: '+note);assert.ok(s.stage(q.id,'jurisdiction').checkpoint.observations.includes(note));
+  const attempt=s.attempts(q.id).find(a=>a.stage_id==='jurisdiction');s.updateAttempt(attempt.id,{state:'received',applied:0});await e.apply(s.attempt(attempt.id));
+  assert.equal(s.events(q.id).filter(v=>v.message.includes(note)).length,1);
+  const interrupted={role:'assistant',content:[{type:'thinking',thinking:'This part of the response was interrupted before it finished.',signature:'x'},{type:'thinking',thinking:'  ',signature:'y'}]};
+  assert.deepEqual(progressUpdates(interrupted.content),[]);assert.deepEqual(checkpointFromMessages({},[interrupted],[]).observations,[]);
 });
 test('truncation recovery happens only once and charges both results',async t=>{
   const {store:s,engine:e,provider}=fixture(t),p=s.create(input);provider.response=()=>({stop_reason:'max_tokens',content:[{type:'text',text:'Partial findings.'}],usage:{input_tokens:100,output_tokens:600}});
