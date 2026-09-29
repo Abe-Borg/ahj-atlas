@@ -14,7 +14,7 @@ import {researchPayload,reviewPayload,evidencePackage,validateReport} from '../l
 import {input,FakeProvider,fakeTools,report,nfpaReport,evidenceText} from './fixtures.mjs';
 
 function fixture(t){
-  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-evidence-')),store=new Store(dir),provider=new FakeProvider(),engine=new Engine(store,provider,()=>true,{autoStart:false,tools:fakeTools(store)}),project=store.create({...input,budget:10,discipline:'Architecture'});
+  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-evidence-')),store=new Store(dir),provider=new FakeProvider(),engine=new Engine(store,provider,()=>true,{autoStart:false,tools:fakeTools(store)}),project=store.create({...input,discipline:'Architecture'});
   t.after(async()=>{await engine.close();store.close();assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-evidence-')));rmSync(dir,{recursive:true,force:true});});
   return {store,provider,engine,project};
 }

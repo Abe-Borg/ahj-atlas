@@ -47,10 +47,10 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
         const supplied=String(req.headers['x-app-token']||'');
         if(supplied.length!==token.length||!timingSafeEqual(Buffer.from(supplied),Buffer.from(token)))return send(res,403,{error:'Reload the app before trying again.'});
         if(!req.headers['content-type']?.startsWith('application/json'))return send(res,415,{error:'JSON requests are required.'});
-        let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>32768){send(res,413,{error:'Request is too large.'});return;}raw+=chunk;}
+        let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>262144){send(res,413,{error:'Request is too large.'});return;}raw+=chunk;}
         try{body=raw?JSON.parse(raw):{};}catch{return send(res,400,{error:'The request is not valid JSON.'});}
       }
-      if(url.pathname==='/api/bootstrap'&&req.method==='GET')return send(res,200,{application:'AHJ Atlas',token,version:VERSION,updatesEnabled:Boolean(updateChecker),settings:store.settings(),models:MODELS,...services.connection()});
+      if(url.pathname==='/api/bootstrap'&&req.method==='GET')return send(res,200,{application:'AHJ Atlas',token,version:VERSION,updatesEnabled:Boolean(updateChecker),settings:store.settings(),spending:store.spending(),models:MODELS,...services.connection()});
       if(url.pathname==='/api/updates'&&updateChecker){
         if(req.method==='GET')return send(res,200,await updateChecker.check());
         if(req.method==='POST')return send(res,200,await updateChecker.check({force:true}));

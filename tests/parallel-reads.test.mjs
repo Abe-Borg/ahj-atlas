@@ -12,7 +12,7 @@ const read=(id,url)=>({type:'tool_use',id,name:'read_source',input:{url:'https:/
 const document=url=>({url,type:'text/html',modified:'',buffer:Buffer.from('<title>'+url+'</title><p>Exact saved evidence for '+url+'</p>')});
 async function until(check){for(let i=0;i<200;i++){if(check())return;await new Promise(r=>setTimeout(r,2));}throw new Error('Work did not reach the expected boundary.');}
 function fixture(t,fetchImpl){
-  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-parallel-')),s=new Store(dir),tools=new ResearchTools(s,{fetchImpl}),engine=new Engine(s,new FakeProvider(),()=>true,{autoStart:false,tools}),p=s.create({...input,budget:10});
+  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-parallel-')),s=new Store(dir),tools=new ResearchTools(s,{fetchImpl}),engine=new Engine(s,new FakeProvider(),()=>true,{autoStart:false,tools}),p=s.create(input);
   t.after(async()=>{await engine.close();s.close();assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-parallel-')));rmSync(dir,{recursive:true,force:true});});
   function attempt(calls,stage='codes'){
     const a=s.reserve(p.id,stage,{mode:'realtime',modelKey:'research',reserve:1,payload:{tools:TOOL_DEFS,messages:[{role:'user',content:'Synthetic parallel reads'}]}});

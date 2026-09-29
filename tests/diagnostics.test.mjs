@@ -52,7 +52,7 @@ test('cache diagnostics expose allowlisted reasons separately from actual usage'
   const unknown=responseSummary({...base,diagnostics:{cache_miss_reason:{type:'PRIVATE',cache_missed_input_tokens:'PRIVATE'}}});assert.deepEqual(unknown.cacheDiagnostics,{state:'unrecognized'});
 });
 test('a failed legacy report can resume with compact grammar without repeating completed research',async t=>{
-  const s=storeFixture(t),p=s.create({...input,budget:10}),provider=new FakeProvider(),engine=new Engine(s,provider,()=>true,{autoStart:false,tools:fakeTools(s)});t.after(()=>engine.close());
+  const s=storeFixture(t),p=s.create(input),provider=new FakeProvider(),engine=new Engine(s,provider,()=>true,{autoStart:false,tools:fakeTools(s)});t.after(()=>engine.close());
   s.source(p.id,{url:'https://example.com/adoption',title:'Fixture',text:evidenceText,readFull:true});
   for(const stage of s.stages(p.id))s.updateStage(p.id,stage.id,{status:stage.id==='review'?'blocked':'complete',output:'Saved research'});
   s.updateProject(p.id,{status:'attention',note:'The compiled grammar is too large.'});

@@ -15,9 +15,9 @@ async function setup(t){
 }
 const reservation={mode:'realtime',modelKey:'research',payload:{},reserve:100000};
 
-test('deletion removes all project records, preserves other projects and daily charges',async t=>{
+test('deletion removes all project records, preserves other projects and keeps charges in spending totals',async t=>{
   const app=await setup(t),s=app.store,p=s.create(input),other=s.create({...input,name:'Keep me'});
-  const turn=s.createChatTurn(p.id,{clientId:'first',message:'Test',allowance:1});
+  const turn=s.createChatTurn(p.id,{clientId:'first',message:'Test'});
   const a=s.reserve(p.id,'chat',{...reservation,chatTurnId:turn.id});
   s.updateAttempt(a.id,{state:'settled',actual:900000,applied:1});
   s.updateChatTurn(p.id,turn.id,{status:'complete',answer:'Saved answer'});
@@ -35,10 +35,10 @@ test('deletion removes all project records, preserves other projects and daily c
   assert.deepEqual(s.db.prepare('PRAGMA foreign_key_check').all(),[]);
   assert.equal((await fetch(app.url+'/api/projects/'+p.id)).status,404);
   assert.equal((await app.remove(p.id)).status,404);
-  s.setSettings({dailyBudget:1});
-  assert.throws(()=>s.reserve(other.id,'jurisdiction',{...reservation,reserve:200000}),/DAILY_BUDGET/);
-  // Yesterday's deleted charges must not reduce today's allowance.
+  // The deleted project's charge stays in today's and all-time estimated spending.
+  assert.deepEqual(s.spending(),{today:.9,total:.9,pending:0});
   s.db.prepare("UPDATE deleted_project_charges SET charged_at='2000-01-01T00:00:00.000Z'").run();
+  assert.deepEqual(s.spending(),{today:0,total:.9,pending:0});
   assert.ok(s.reserve(other.id,'jurisdiction',{...reservation,reserve:200000}));
 });
 
@@ -50,7 +50,7 @@ test('deletion rejects outstanding research, chat and work before a request is r
   s.updateAttempt(a.id,{state:'settled',applied:1});
   const key=p.id+':jurisdiction';app.services.engine.running.add(key);
   try{assert.equal((await app.remove(p.id)).status,409);}finally{app.services.engine.running.delete(key);}
-  const turn=s.createChatTurn(p.id,{clientId:'active',message:'Test',allowance:1});
+  const turn=s.createChatTurn(p.id,{clientId:'active',message:'Test'});
   assert.equal((await app.remove(p.id)).status,409);
   s.updateChatTurn(p.id,turn.id,{status:'stopped'});
   assert.equal((await app.remove(p.id)).status,200);

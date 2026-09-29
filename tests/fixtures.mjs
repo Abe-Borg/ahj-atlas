@@ -1,7 +1,7 @@
 import { fireProfile } from '../lib/fire-protection.mjs';
 import { encodeReport } from '../lib/report-format.mjs';
 export const evidenceText='The Example District is the authority for 100 Test Avenue. The district adopts the Fixture Building Code, 2021 edition, effective January 1, 2022. The public contact is Example Plans Office, plans@example.com, telephone 555-0100. These are synthetic test records, not real regulatory findings.';
-export const input={name:'Workflow verification · synthetic data',address:'100 Test Avenue, Example District, Test State 00000',discipline:'Fire protection',country:'United States',scope:'Renovation / alteration',occupancy:'Office',permitDate:'2026-10-01',budget:5,mode:'realtime'};
+export const input={name:'Workflow verification · synthetic data',address:'100 Test Avenue, Example District, Test State 00000',discipline:'Fire protection',country:'United States',scope:'Renovation / alteration',occupancy:'Office',permitDate:'2026-10-01',mode:'realtime'};
 export function report(){const e=[{sourceId:'S1',quote:'The Example District is the authority for 100 Test Avenue.',pageOrSection:'Test fixture'}];return {
   summary:'Synthetic workflow verification. This is not project guidance.',
   jurisdiction:{description:'Example District — synthetic jurisdiction.',authority:'Example District',status:'verified',notes:'Synthetic data only.',evidence:e},

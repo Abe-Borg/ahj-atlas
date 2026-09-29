@@ -23,7 +23,7 @@ try{
     const downloaded=await fetch('/api/diagnostics/download');
     return {rendererNode:typeof process,rendererRequire:typeof require,version:bootstrap.version,
       keyConfigured:bootstrap.keyConfigured,browserAvailable:bootstrap.browserAvailable,
-      settings:bootstrap.settings,projects:projects.map(p=>p.name),report:detail.project.report?.summary,
+      settings:bootstrap.settings,spending:bootstrap.spending,projects:projects.map(p=>p.name),report:detail.project.report?.summary,
       sources:detail.sources.length,chatTurns:detail.chat?.turns?.length,
       question:detail.project.questions.find(q=>q.question.includes('synthetic office')),
       diagnosticVersion:diagnostics.application?.version,diagnosticCount:diagnostics.events?.length,
@@ -40,8 +40,8 @@ try{
   assert.ok(result.sources>=2);
   assert.ok(result.chatTurns>=1);
   assert.equal(result.question?.status,'answered');
-  assert.equal(result.settings.defaultBudget,3);
-  assert.equal(result.settings.dailyBudget,17);
+  assert.deepEqual(result.settings,{});
+  assert.ok(Number.isFinite(result.spending?.total));
   assert.ok(result.diagnosticCount>=1);
   assert.deepEqual(result.exports.pdf.magic,[37,80,68,70,45]);
   assert.deepEqual(result.exports.xlsx.magic.slice(0,2),[80,75]);
