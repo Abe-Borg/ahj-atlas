@@ -48,6 +48,19 @@ test('fresh research checks final-review model access before counting or spendin
   await e.dispatch(p.id,'jurisdiction');
   assert.equal(s.attempts(p.id).length,0);assert.equal(s.project(p.id).status,'attention');assert.match(s.project(p.id).note,/Claude Opus 5\.5 is unavailable/);
 });
+test('rebuilt review preflights its higher output limit even when the model is unchanged',async t=>{
+  const {store:s,engine:e,provider}=fixture(t),p=s.create(input);completedResearch(s,p.id);s.updateStage(p.id,'verification',{status:'complete'});
+  const legacy={...reviewPayload(s,p),max_tokens:50000};
+  const attempt=s.reserve(p.id,'review',{mode:'realtime',modelKey:'review',payload:legacy,reserve:1});
+  s.updateAttempt(attempt.id,{state:'settled',response:{id:'msg_legacy_review'}});
+  s.updateStage(p.id,'review',{messages:legacy.messages,rounds:1});
+  const available=[{id:'claude-opus-5-5',max_tokens:75000}],limits=[];
+  provider.preflight=async(mode,context,requirements)=>{limits.push(requirements.outputLimits.review);validateCapabilities(available,{mode,...requirements});};
+  let counts=0;provider.count=async()=>{counts++;return LIMITS.checkpointInput;};
+  await e.dispatch(p.id,'review');
+  assert.deepEqual(limits,[50000,100000]);assert.equal(counts,1);assert.equal(provider.calls.length,0);
+  assert.equal(s.project(p.id).status,'attention');assert.match(s.project(p.id).note,/100,000 setting/);
+});
 
 test('final review caches its evidence and keeps saved signed prefixes across continuations',t=>{
   const {store:s}=fixture(t),p=s.create({...input,budget:10});
