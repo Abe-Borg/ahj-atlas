@@ -132,6 +132,13 @@ test('research requests progress-update notes and records them in Activity and c
   const interrupted={role:'assistant',content:[{type:'thinking',thinking:'This part of the response was interrupted before it finished.',signature:'x'},{type:'thinking',thinking:'  ',signature:'y'}]};
   assert.deepEqual(progressUpdates(interrupted.content),[]);assert.deepEqual(checkpointFromMessages({},[interrupted],[]).observations,[]);
 });
+test('a truncated research response keeps its finished progress notes for the recovery',async t=>{
+  const {store:s,engine:e,provider}=fixture(t),p=s.create(input),note='Located the county fire code amendment; checking its effective date.';
+  provider.response=()=>({stop_reason:'max_tokens',content:[{type:'thinking',thinking:note,signature:'update'},{type:'tool_use',id:'tool_cut',name:'read_source',input:{}},{type:'thinking',thinking:'This part of the response was interrupted before it finished.',signature:'cut'}],usage:{input_tokens:100,output_tokens:60000}});
+  await e.dispatch(p.id,'jurisdiction');
+  const stage=s.stage(p.id,'jurisdiction');assert.equal(stage.status,'queued');assert.equal(stage.recoveries,1);assert.deepEqual(stage.messages,[]);
+  assert.deepEqual(stage.checkpoint.observations,[note]);assert.equal(s.events(p.id).filter(v=>v.message==='Jurisdiction: '+note).length,1);
+});
 test('truncation recovery happens only once and charges both results',async t=>{
   const {store:s,engine:e,provider}=fixture(t),p=s.create(input);provider.response=()=>({stop_reason:'max_tokens',content:[{type:'text',text:'Partial findings.'}],usage:{input_tokens:100,output_tokens:600}});
   await e.dispatch(p.id,'jurisdiction');await e.dispatch(p.id,'jurisdiction');assert.equal(s.stage(p.id,'jurisdiction').status,'partial');assert.equal(s.stage(p.id,'jurisdiction').recoveries,1);assert.equal(s.attempts(p.id).length,2);assert.ok(s.project(p.id).cost>0);
