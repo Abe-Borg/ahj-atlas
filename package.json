@@ -1,7 +1,8 @@
 {
   "name": "ahj-atlas",
   "productName": "AHJ Atlas",
-  "author": "AHJ Atlas",
+  "author": "Abraham Borg",
+  "license": "SEE LICENSE IN LICENSE",
   "version": "1.5.2",
   "private": true,
   "type": "module",

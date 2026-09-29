@@ -20,6 +20,14 @@ test('local HTTP access requires token, correct origin and JSON; paths remain pr
   const result=await fetch(app.url+'/api/projects',{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':b.token},body:JSON.stringify(input)});assert.equal(result.status,201);
   const p=await result.json(),detail=await(await fetch(app.url+'/api/projects/'+p.id)).json();assert.equal(detail.project.name,input.name);assert.ok(!JSON.stringify(detail).includes('x-api-key'));
 });
+test('the About dialog and plain-text license are served locally without exposing other root files',async t=>{
+  const {app}=await setup(t),license=await fetch(app.url+'/license');
+  assert.equal(license.status,200);assert.equal(license.headers.get('content-type'),'text/plain; charset=utf-8');
+  const text=await license.text();assert.match(text,/^AHJ Atlas Software License/);assert.match(text,/Copyright \(c\) 2026 Abraham Borg\. All rights reserved\./);
+  const page=await(await fetch(app.url+'/')).text();
+  for(const expected of ['id="about-dialog"','id="open-about"','Copyright © 2026 Abraham Borg.','href="https://github.com/Abe-Borg"','href="https://www.linkedin.com/in/abrahamborg/"'])assert.ok(page.includes(expected),expected);
+  for(const hidden of ['/LICENSE','/package.json','/server.mjs'])assert.equal((await fetch(app.url+hidden)).status,404);
+});
 test('second app instance cannot recover or corrupt the first instance’s live jobs',async t=>{
   const {app,dir}=await setup(t),p=app.store.create(input),a=app.store.reserve(p.id,'jurisdiction',{mode:'realtime',modelKey:'research',payload:{},reserve:1000});
   await assert.rejects(createApp({dataDir:dir,port:0,provider:new FakeProvider(),worker:false}),/already using/);assert.equal(app.store.attempt(a.id).state,'dispatching');
