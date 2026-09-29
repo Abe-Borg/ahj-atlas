@@ -28,7 +28,7 @@ test('chat sends compatible strict tool schemas to both token counting and gener
     }
     return url.endsWith('/count_tokens')?new Response(JSON.stringify({input_tokens:1000}),{headers:{'content-type':'application/json'}}):eventsResponse([initial,...ending]);
   });
-  const chatRequest={...payload,model:'claude-sonnet-5',max_tokens:8000,tools:CHAT_TOOLS};
+  const chatRequest={...payload,model:'claude-sonnet-5-5',max_tokens:8000,tools:CHAT_TOOLS};
   assert.equal(await c.count(chatRequest),1000);
   assert.equal((await c.message(chatRequest)).data.stop_reason,'end_turn');
   assert.deepEqual(paths,['/v1/messages/count_tokens','/v1/messages']);
@@ -112,9 +112,9 @@ test('whole-stream deadline still applies after response headers',async()=>{
   const keepAlive=setTimeout(()=>{},500);try{await assert.rejects(c.message(payload),e=>e.ambiguous);}finally{clearTimeout(keepAlive);}
 });
 test('model checks retain capabilities and follow model pagination',async()=>{
-  const urls=[],models=[{id:'claude-sonnet-5',max_tokens:128000,capabilities:{batch:{supported:true}}},{id:'claude-opus-5-5',max_tokens:128000,capabilities:{structured_outputs:{supported:true}}}];
+  const urls=[],models=[{id:'claude-sonnet-5-5',max_tokens:128000,capabilities:{batch:{supported:true}}},{id:'claude-opus-5-5',max_tokens:128000,capabilities:{structured_outputs:{supported:true}}}];
   const c=client(async url=>{urls.push(url);return new Response(JSON.stringify(urls.length===1?{data:[models[0]],has_more:true,last_id:models[0].id}:{data:[models[1]],has_more:false}),{headers:{'content-type':'application/json'}});});
-  assert.equal((await c.preflight('batch')).length,2);assert.ok(urls[1].includes('after_id=claude-sonnet-5'));await c.preflight('realtime');assert.equal(urls.length,2);
+  assert.equal((await c.preflight('batch')).length,2);assert.ok(urls[1].includes('after_id=claude-sonnet-5-5'));await c.preflight('realtime');assert.equal(urls.length,2);
   assert.throws(()=>validateCapabilities([{...models[0],max_tokens:1000},models[1]]),/output tokens/);
   assert.throws(()=>validateCapabilities([{...models[0],capabilities:{batch:{supported:false}}},models[1]],{mode:'batch'}),/batch/);
 });
