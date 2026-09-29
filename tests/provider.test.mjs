@@ -141,9 +141,64 @@ test('key connection accepts old-model-only access',async()=>{
     await services.route({req:{method:'POST'},res:{},url:new URL('http://localhost/api/settings'),body:{key:'sk-ant-fixture-key-0000'},send:(_res,status,body)=>{result={status,body};}});
     assert.deepEqual(result,{status:200,body:{saved:true}});
     assert.equal(vault.key,'sk-ant-fixture-key-0000');
+    assert.equal(services.connection().keyStatus,'connected');
   }finally{
     globalThis.fetch=previousFetch;
     await services.close();store.close();
     assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-legacy-key-')));rmSync(dir,{recursive:true,force:true});
+  }
+});
+test('provider reports whether Anthropic accepted the key, ignoring outages',async()=>{
+  const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});
+  let reply='ok';const seen=[];
+  const c=client(async url=>reply==='ok'?(String(url).includes('/v1/models')?json({data:[],has_more:false}):eventsResponse([initial,...ending])):reply==='rejected'?json({type:'error',error:{type:'authentication_error',message:'invalid x-api-key'}},401):json({error:{type:'overloaded_error',message:'Try later'}},529),{onKeyStatus:(...args)=>seen.push(args)});
+  await c.check();await c.message(payload);
+  reply='overloaded';
+  await assert.rejects(c.check(),e=>e.status===529);await assert.rejects(c.message(payload),e=>e.status===529);
+  reply='rejected';
+  await assert.rejects(c.check(),e=>e.status===401);await assert.rejects(c.message(payload),e=>e.status===401);
+  assert.deepEqual(seen.map(([key,status])=>[key,status]),[['fake-unit-key','connected'],['fake-unit-key','connected'],['fake-unit-key','invalid'],['fake-unit-key','invalid']]);
+  assert.match(seen[2][2],/API key was not accepted/);
+});
+test('connection status verifies a remembered key and follows later rejections',async()=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-key-status-')),store=new Store(dir),previousFetch=globalThis.fetch;
+  const vault={key:'sk-ant-remembered-key-0000',persisted:true,set(value){this.key=value;},clear(){this.key='';this.persisted=false;}};
+  let reply='rejected',release=null;
+  const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});
+  globalThis.fetch=async()=>{
+    if(reply==='held')await new Promise(resolve=>{release=resolve;});
+    if(reply==='offline')throw new TypeError('fetch failed',{cause:Object.assign(new Error('lookup failed'),{code:'ENOTFOUND'})});
+    return reply==='rejected'?json({type:'error',error:{type:'authentication_error',message:'invalid x-api-key'}},401):json({data:[],has_more:false});
+  };
+  let services;
+  const route=async(pathname,method,body={})=>{let result;await services.route({req:{method,headers:{}},res:{},url:new URL('http://localhost'+pathname),body,send:(_res,status,value)=>{result={status,body:value};}});return result;};
+  try{
+    services=await createServices({store,vault,worker:false});
+    assert.equal(services.connection().keyStatus,'checking');
+    const checked=await route('/api/connection/check','POST');
+    assert.equal(checked.status,200);assert.equal(checked.body.keyStatus,'invalid');assert.equal(checked.body.keyConfigured,true);
+    assert.match(checked.body.keyMessage,/API key was not accepted/);assert.doesNotMatch(JSON.stringify(checked.body),/sk-ant-/);
+    // New projects wait for a working key instead of spending a preflight on a rejected one.
+    assert.equal((await route('/api/projects','POST',{name:'Rejected key',address:'1 Main St, Springfield, IL',discipline:'Mechanical',mode:'realtime',budget:5})).body.status,'needs_key');
+    reply='offline';await services.verifyKey();
+    assert.equal(services.connection().keyStatus,'unreachable');assert.match(services.connection().keyMessage,/api\.anthropic\.com/);
+    reply='ok';await services.verifyKey();
+    assert.deepEqual([services.connection().keyStatus,services.connection().keyMessage],['connected','']);
+    // Any later 401 from real work disconnects the key again.
+    reply='rejected';await assert.rejects(services.engine.provider.check(),e=>e.status===401);
+    assert.equal((await route('/api/connection','GET')).body.keyStatus,'invalid');
+    // A check that finishes after the key was replaced cannot mark the new key.
+    reply='held';const stale=services.verifyKey();await new Promise(resolve=>setImmediate(resolve));
+    vault.key='sk-ant-replacement-key-0000';reply='rejected';release();await stale;
+    assert.equal(services.connection().keyStatus,'checking');
+    assert.equal((await route('/api/connection','DELETE')).status,200);
+    assert.deepEqual([services.connection().keyStatus,services.connection().keyConfigured],['missing',false]);
+    const changes=store.diagnostics().filter(e=>e.event==='connection.changed').map(e=>e.details.status).reverse();
+    assert.deepEqual(changes,['invalid','unreachable','connected','invalid']);
+    assert.doesNotMatch(JSON.stringify(store.diagnostics()),/sk-ant-(remembered|replacement)/);
+  }finally{
+    globalThis.fetch=previousFetch;
+    await services?.close();store.close();
+    assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-key-status-')));rmSync(dir,{recursive:true,force:true});
   }
 });

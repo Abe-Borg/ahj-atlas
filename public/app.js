@@ -83,9 +83,35 @@ function renderSidebar(){
   $('#project-count').textContent=state.projects.length;
   $('#project-list').innerHTML=state.projects.length?state.projects.map(p=>`<button class="project-nav ${state.selected===p.id?'active':''}" data-project="${esc(p.id)}"><strong>${esc(p.name)}</strong><small>${esc(p.discipline)} · ${esc(statuses[p.status]||p.status)}</small></button>`).join(''):'<p class="sidebar-empty">Your projects will appear here.</p>';
   for(const b of document.querySelectorAll('[data-project]'))b.addEventListener('click',()=>selectProject(b.dataset.project));
-  $('#connection-label').textContent=state.bootstrap?.keyConfigured?'Claude connected':'Connect Claude';$('.connection-light').classList.toggle('on',Boolean(state.bootstrap?.keyConfigured));
+  const view=connectionView(),button=$('#open-settings');$('#connection-label').textContent=view.label;button.title=view.title;button.dataset.status=view.status;
+  const light=$('.connection-light');light.classList.toggle('on',view.status==='connected');light.classList.toggle('off',['missing','invalid'].includes(view.status));light.classList.toggle('pending',['checking','unreachable'].includes(view.status));
 }
-async function startProject(e){e.preventDefault();if(!state.bootstrap.keyConfigured){openSettings();return;}const button=$('#start-research');button.disabled=true;button.textContent='Creating project…';try{const body=Object.fromEntries(new FormData(e.target));body.budget=Number(body.budget);if(body.discipline==='Other'){body.discipline=body.customDiscipline.trim();}delete body.customDiscipline;const p=await api('/api/projects',{method:'POST',body});await refreshProjects();await selectProject(p.id);}catch(error){$('#project-error').textContent=error.message;}finally{button.disabled=false;button.innerHTML='Start research <span aria-hidden="true">↗</span>';}}
+function connectionView(){
+  const b=state.bootstrap,status=b?.keyStatus||(b?.keyConfigured?'checking':'missing');
+  return {status,...({
+    connected:{label:'Claude connected',title:'Anthropic accepted your API key.'},
+    checking:{label:'Checking Claude…',title:'Checking your saved API key with Anthropic.'},
+    unreachable:{label:'Claude unreachable',title:b?.keyMessage||'Anthropic could not be reached to check your API key. It will be checked again automatically.'},
+    invalid:{label:'Claude disconnected',title:b?.keyMessage||'Anthropic did not accept your API key. Enter a new key to reconnect.'},
+    missing:{label:'Claude disconnected',title:'No API key is connected. Enter your Anthropic API key to connect.'},
+  }[status]||{label:'Claude disconnected',title:'Enter your Anthropic API key to connect.'})};
+}
+let connectionChecked=0,connectionRetryMs=60000;
+async function refreshConnection(verify=false){
+  // A saved key the network could not verify is retried quietly, backing off from 1 to 15 minutes.
+  const retry=verify||state.bootstrap.keyStatus==='unreachable'&&Date.now()-connectionChecked>connectionRetryMs;
+  if(retry)connectionChecked=Date.now();
+  const next=retry?await api('/api/connection/check',{method:'POST',body:{}}):await api('/api/connection');
+  if(next.keyStatus!=='unreachable')connectionRetryMs=60000;else if(retry&&!verify)connectionRetryMs=Math.min(connectionRetryMs*2,15*60000);
+  const changed=['keyConfigured','keyStatus','keyMessage','persisted'].some(k=>next[k]!==state.bootstrap[k]);Object.assign(state.bootstrap,next);
+  if(changed){renderSidebar();if($('#settings-dialog').open)renderConnectionNote();}
+}
+function renderConnectionNote(){
+  const note=$('#connection-note'),view=connectionView(),show=['invalid','unreachable'].includes(view.status);
+  note.hidden=!show;note.textContent=show?view.title:'';note.classList.toggle('error',view.status==='invalid');
+  $('#api-key').placeholder=({connected:'Connected · enter a key to replace it',checking:'Checking saved key · enter a key to replace it',unreachable:'Saved key not yet verified · enter a key to replace it',invalid:'Key not accepted · enter a new key'})[view.status]||'sk-ant-…';
+}
+async function startProject(e){e.preventDefault();if(['missing','invalid'].includes(connectionView().status)){openSettings();return;}const button=$('#start-research');button.disabled=true;button.textContent='Creating project…';try{const body=Object.fromEntries(new FormData(e.target));body.budget=Number(body.budget);if(body.discipline==='Other'){body.discipline=body.customDiscipline.trim();}delete body.customDiscipline;const p=await api('/api/projects',{method:'POST',body});await refreshProjects();await selectProject(p.id);}catch(error){$('#project-error').textContent=error.message;}finally{button.disabled=false;button.innerHTML='Start research <span aria-hidden="true">↗</span>';}}
 async function refreshProjects(){state.projects=await api('/api/projects');renderSidebar();}
 async function selectProject(id){const load=++projectLoad;state.selected=id;state.detail=null;state.tab=state.tab==='chat'?'chat':'overview';history.replaceState(null,'',`/#project=${encodeURIComponent(id)}`);renderSidebar();$('#main').innerHTML='<div class="loading">Opening project…</div>';try{const detail=await api(`/api/projects/${id}`);if(load!==projectLoad||state.selected!==id)return;state.detail=detail;renderProject();}catch(e){if(load===projectLoad)$('#main').innerHTML=`<div class="error-panel">${esc(e.message)}</div>`;}}
 function statusClass(status){return ['complete','verified'].includes(status)?'green':['partial','budget','attention','conflicting','inferred','unverified','needs_key'].includes(status)?'amber':['failed','canceled'].includes(status)?'red':'';}
@@ -257,13 +283,13 @@ async function refreshSelected(){
   const stamp=d=>JSON.stringify([d?.project.updated,d?.project.cost,d?.project.reserved,d?.events[0],d?.stages.map(s=>[s.status,s.rounds]),d?.chat]);
   const changed=stamp(next)!==stamp(state.detail);state.detail=next;if(changed)renderProject();
 }
-setInterval(()=>{if(!document.hidden&&state.bootstrap)refreshSelected().catch(()=>{});},5000);
-function openSettings(){const b=state.bootstrap;$('#default-budget').value=b.settings.defaultBudget;$('#daily-budget').value=b.settings.dailyBudget;$('#remember-label').hidden=!b.windows;$('#remember-key').checked=Boolean(b.persisted);$('#api-key').value='';$('#api-key').placeholder=b.keyConfigured?'Connected · enter a key to replace it':'sk-ant-…';$('#key-note').textContent=b.persisted?'Your key is protected for this Windows account.':'Kept in memory for this session. Never included in reports.';$('#settings-error').textContent='';$('#settings-dialog').showModal();}
+setInterval(()=>{if(!document.hidden&&state.bootstrap){refreshSelected().catch(()=>{});refreshConnection().catch(()=>{});}},5000);
+function openSettings(){const b=state.bootstrap;$('#default-budget').value=b.settings.defaultBudget;$('#daily-budget').value=b.settings.dailyBudget;$('#remember-label').hidden=!b.windows;$('#remember-key').checked=Boolean(b.persisted);$('#api-key').value='';renderConnectionNote();$('#key-note').textContent=b.persisted?'Your key is protected for this Windows account.':'Kept in memory for this session. Never included in reports.';$('#settings-error').textContent='';$('#settings-dialog').showModal();}
 $('#new-project').addEventListener('click',()=>newForm());$('#open-settings').addEventListener('click',openSettings);$('#settings-top').addEventListener('click',openSettings);
 for(const b of document.querySelectorAll('[data-close]'))b.addEventListener('click',()=>document.getElementById(b.dataset.close).close());
 $('#settings-form').addEventListener('submit',async e=>{e.preventDefault();const b=$('#save-settings');b.disabled=true;b.textContent='Checking connection…';try{await api('/api/settings',{method:'POST',body:{key:$('#api-key').value.trim(),remember:$('#remember-key').checked,defaultBudget:Number($('#default-budget').value),dailyBudget:Number($('#daily-budget').value)}});state.bootstrap=await api('/api/bootstrap');$('#api-key').value='';$('#settings-dialog').close();renderSidebar();toast('Workspace settings saved.');}catch(error){$('#settings-error').textContent=error.message;}finally{b.disabled=false;b.textContent='Save settings';}});
 $('#forget-key').addEventListener('click',async()=>{try{await api('/api/connection',{method:'DELETE',body:{}});state.bootstrap=await api('/api/bootstrap');$('#api-key').value='';$('#remember-key').checked=false;renderSidebar();toast('API key disconnected and removed from saved storage.');}catch(e){$('#settings-error').textContent=e.message;}});
-async function init(){try{state.bootstrap=await api('/api/bootstrap');if(state.bootstrap.updatesEnabled){renderUpdateStatus();void checkUpdates();setInterval(()=>checkUpdates(),60*60*1000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)void checkUpdates();});}await refreshProjects();const id=new URLSearchParams(location.hash.slice(1)).get('project');if(id&&state.projects.some(p=>p.id===id))await selectProject(id);else newForm();}catch(e){$('#main').innerHTML=`<div class="error-panel"><h2>Unable to open the workspace</h2><p>${esc(e.message)}</p><p>Keep the local application running, then reload this page.</p></div>`;}}
+async function init(){try{state.bootstrap=await api('/api/bootstrap');if(state.bootstrap.keyStatus==='checking')void refreshConnection(true).catch(()=>{});if(state.bootstrap.updatesEnabled){renderUpdateStatus();void checkUpdates();setInterval(()=>checkUpdates(),60*60*1000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)void checkUpdates();});}await refreshProjects();const id=new URLSearchParams(location.hash.slice(1)).get('project');if(id&&state.projects.some(p=>p.id===id))await selectProject(id);else newForm();}catch(e){$('#main').innerHTML=`<div class="error-panel"><h2>Unable to open the workspace</h2><p>${esc(e.message)}</p><p>Keep the local application running, then reload this page.</p></div>`;}}
 init().then(()=>{
   const ctx=document.modelContext;if(!ctx?.registerTool)return;
   const controller=new AbortController();
