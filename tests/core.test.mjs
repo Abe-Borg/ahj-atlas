@@ -87,6 +87,10 @@ test('project address terms rank passages in accented and non-Latin scripts',()=
   assert.ok(ranked('〒100-0005 東京都千代田区丸の内1-9-1','所在地は東京都千代田区丸の内一丁目です。'));
   assert.ok(ranked('千代田区 データセンター','新しいデータセンターの防火計画。'));
   assert.ok(ranked('กรุงเทพมหานคร 10110','ศูนย์ข้อมูลในกรุงเทพมหานครแห่งใหม่'));
+  assert.ok(ranked('ភ្នំពេញ 12000','មជ្ឈមណ្ឌលទិន្នន័យរាជធានីភ្នំពេញថ្មី'));
+  // Combining marks: Devanagari vowel signs, and accents composed or decomposed on either side.
+  assert.ok(ranked('नई दिल्ली 110001','नई दिल्ली में नया डेटा सेंटर'));
+  for(const [address,text] of [['Bogotá','Bogotá'],['Bogotá','Bogotá'],['Bogotá','Bogotá']])assert.ok(ranked('Carrera 7, '+address+', Colombia','Aplica en la ciudad de '+text+' para revisión.'),address+' / '+text);
   // Unicode edges still reject a longer word, including one continuing with an accented letter.
   assert.equal(ranked('12 Main St, Leon, KS','Registro del distrito Leonés para revisión.'),false);
 });
