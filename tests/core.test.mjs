@@ -7,7 +7,8 @@ import { Store } from '../lib/store.mjs';
 import { Engine } from '../lib/engine.mjs';
 import { costMicros, reserveMicros } from '../lib/config.mjs';
 import { validateReport, researchPayload } from '../lib/prompts.mjs';
-import { isPublicIP, validatePublicUrl, htmlText } from '../lib/research-tools.mjs';
+import { isPublicIP, validatePublicUrl, htmlText, isUnitedStates, ResearchTools } from '../lib/research-tools.mjs';
+import { selectPassages } from '../lib/evidence.mjs';
 import { ProviderError } from '../lib/provider.mjs';
 import { input, evidenceText, report, FakeProvider, fakeTools } from './fixtures.mjs';
 
@@ -74,6 +75,32 @@ test('public URL reader rejects loopback, metadata and private targets before ne
 });
 test('HTML extraction removes active content while retaining source links',()=>{
   const r=htmlText('<title>Agency &amp; office</title><script>steal()</script><p>Adoption text.</p><a href="/codes">Codes</a>','https://example.com/');assert.equal(r.title,'Agency & office');assert.ok(!r.text.includes('steal'));assert.equal(r.links[0].url,'https://example.com/codes');
+});
+test('project address terms rank passages in accented and non-Latin scripts',()=>{
+  const filler='Home Senate Assembly Committees Documents Help\n'.repeat(250);
+  const ranked=(address,sentence)=>selectPassages(filler+sentence+'\n'+filler,{limit:1500,input:{address}}).text.includes(sentence);
+  assert.ok(ranked('950 Walnut Ridge Dr, Hartland WI','Village of Hartland, Waukesha County — commercial plan review.'));
+  assert.ok(ranked('Carrera 7 # 32-16, Bogotá, D.C., Colombia','Aplica en la ciudad de Bogotá, D.C. para revisión de planos.'));
+  assert.ok(ranked('1000 Rue Sherbrooke O, Montréal, QC','Service de sécurité incendie de Montréal — examen des plans.'));
+  assert.ok(ranked('Av. Constituyentes 100, Querétaro, Qro.','Protección Civil del Estado de Querétaro revisa los planos.'));
+  // Unspaced scripts: the address run continues straight into more Japanese or Thai text.
+  assert.ok(ranked('〒100-0005 東京都千代田区丸の内1-9-1','所在地は東京都千代田区丸の内一丁目です。'));
+  assert.ok(ranked('千代田区 データセンター','新しいデータセンターの防火計画。'));
+  assert.ok(ranked('กรุงเทพมหานคร 10110','ศูนย์ข้อมูลในกรุงเทพมหานครแห่งใหม่'));
+  assert.ok(ranked('ភ្នំពេញ 12000','មជ្ឈមណ្ឌលទិន្នន័យរាជធានីភ្នំពេញថ្មី'));
+  // Combining marks: Devanagari vowel signs, and accents composed or decomposed on either side.
+  assert.ok(ranked('नई दिल्ली 110001','नई दिल्ली में नया डेटा सेंटर'));
+  for(const [address,text] of [['Bogotá','Bogotá'],['Bogotá','Bogotá'],['Bogotá','Bogotá']])assert.ok(ranked('Carrera 7, '+address+', Colombia','Aplica en la ciudad de '+text+' para revisión.'),address+' / '+text);
+  // Unicode edges still reject a longer word, including one continuing with an accented letter.
+  assert.equal(ranked('12 Main St, Leon, KS','Registro del distrito Leonés para revisión.'),false);
+});
+test('Census address lookup accepts common United States spellings only',async t=>{
+  for(const c of ['United States','united states of america','US','U.S.','USA','U.S.A.','U. S. A.','America','The United States'])assert.equal(isUnitedStates(c),true,c);
+  for(const c of ['Canada','México','South America','Australia','USSR',''])assert.equal(isUnitedStates(c),false,c);
+  const s=setup(t),urls=[],tools=new ResearchTools(s,{fetchImpl:async url=>{urls.push(url);return {buffer:Buffer.from('{"result":{"addressMatches":[]}}')};}});
+  for(const country of ['U.S.A.','America',''])assert.match(JSON.parse((await tools.locate(s.create({...input,country}).id,{})).text).sourceId,/^S\d+$/,country);
+  assert.equal(urls.length,3);assert.ok(urls.every(url=>url.startsWith('https://geocoding.geo.census.gov/')));
+  assert.match((await tools.locate(s.create({...input,country:'Canada'}).id,{})).text,/covers the United States/);assert.equal(urls.length,3);
 });
 test('real-time workflow runs through tools and structured review without paid requests',async t=>{
   const s=setup(t),provider=new FakeProvider(),tools=fakeTools(s),e=new Engine(s,provider,()=>true,{tools,autoStart:false}),p=s.create(input);t.after(()=>e.close());
