@@ -75,6 +75,22 @@ test('cache comparison metadata reaches generation and survives streaming withou
   const result=await c.message(request);assert.deepEqual(sent[1].body.diagnostics,request.diagnostics);assert.deepEqual(result.data.diagnostics,diagnostics);assert.equal(result.data.usage.cache_read_input_tokens,300);
 });
 
+test('the progress-update display sends its beta header to generation, token counting and batches only',async()=>{
+  const seen=[];
+  const c=client(async(url,options)=>{
+    seen.push({path:new URL(url).pathname,beta:new Headers(options.headers).get('anthropic-beta'),key:new Headers(options.headers).get('x-api-key')});
+    if(String(url).endsWith('/count_tokens'))return new Response(JSON.stringify({input_tokens:100}),{headers:{'content-type':'application/json'}});
+    if(String(url).endsWith('/batches'))return new Response(JSON.stringify({id:'msgbatch_fixture',processing_status:'in_progress'}),{headers:{'content-type':'application/json'}});
+    return eventsResponse([initial,...ending]);
+  });
+  const updates={...payload,thinking:{type:'adaptive',display:'updates'}},omitted={...payload,thinking:{type:'adaptive',display:'omitted'}};
+  await c.count(updates);await c.message(updates);await c.batch([{id:'a1',payload:omitted},{id:'a2',payload:updates}]);
+  await c.count(omitted);await c.message(omitted);await c.batch([{id:'a3',payload:omitted}]);
+  assert.deepEqual(seen.map(r=>r.path),['/v1/messages/count_tokens','/v1/messages','/v1/messages/batches','/v1/messages/count_tokens','/v1/messages','/v1/messages/batches']);
+  assert.deepEqual(seen.map(r=>r.beta),['thinking-display-updates-2026-08-18','thinking-display-updates-2026-08-18','thinking-display-updates-2026-08-18',null,null,null]);
+  assert.ok(seen.every(r=>r.key==='fake-unit-key'));
+});
+
 test('streamed native saved-source citations retain their location and exact cited text',async()=>{
   const citation={type:'search_result_location',source:'ahj-source:project:S1:hash',title:'Saved source',search_result_index:0,start_block_index:0,end_block_index:1,cited_text:'Exact saved evidence.'};
   const events=[initial,{type:'content_block_start',index:0,content_block:{type:'text',text:''}},{type:'content_block_delta',index:0,delta:{type:'text_delta',text:'Supported finding.'}},{type:'content_block_delta',index:0,delta:{type:'citations_delta',citation}},{type:'content_block_stop',index:0},...ending];

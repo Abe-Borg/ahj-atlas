@@ -217,6 +217,12 @@ test('unknown or unusable charges stay pending without blocking chat, changing r
     const attempt=s.attempts(a.id)[0];assert.equal((await post(a.id,{attemptId:attempt.id,actualCost:.02,note:'Synthetic confirmed charge',confirmed:true},'resolve-charge')).status,200);assert.equal(s.project(a.id).reserved,0);assert.equal(s.project(a.id).status,'complete');assert.equal(c.view(a.id).turns[0].status,'interrupted');
   });
 });
+test('a declined chat request names its refusal category without further requests',async t=>{
+  const provider=new ChatProvider(()=>chatResponse('',{stop_reason:'refusal',stop_details:{type:'refusal',category:'general_harms'},content:[]}));
+  const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
+  const turn=c.view(a.id).turns[0];assert.equal(turn.status,'limited');assert.match(turn.note,/declined this request \(general_harms\)/);assert.equal(provider.calls.length,1);
+  assert.match(provider.calls[0].payload.system,/even when you feel confident/);assert.equal(provider.calls[0].payload.thinking.display,'omitted');
+});
 test('replies wrap up with a final answer at the lookup, request and time limits',async t=>{
   for(const kind of ['lookups','requests','time'])await t.test(kind,async t=>{
     let clock=Date.now();if(kind==='time')t.mock.method(Date,'now',()=>clock);

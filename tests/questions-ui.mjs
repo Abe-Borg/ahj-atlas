@@ -20,6 +20,10 @@ try {
   phase="new project labels";console.log(phase);await page.goto(app.url);await page.waitForSelector('#project-form');await page.click('details.extra>summary');
   for(const id of ['scope','occupancy','permit-date','country','site-description','notes'])assert.match(await page.$eval(`label[for="${id}"]`,e=>e.textContent),/optional/);
   assert.match(await page.$eval('details.extra>summary',e=>e.textContent),/optional/);
+  phase="building use dropdown";console.log(phase);
+  assert.equal(await page.$eval('#occupancy',e=>e.value),'Hyperscale data center');assert.equal(await page.$eval('#custom-occupancy-field',e=>e.hidden),true);assert.equal(await page.$eval('#custom-occupancy',e=>e.disabled),true);
+  await page.select('#occupancy','Other');assert.equal(await page.$eval('#custom-occupancy-field',e=>e.hidden),false);assert.deepEqual(await page.$eval('#custom-occupancy',e=>[e.disabled,e.required,document.activeElement===e]),[false,true,true]);
+  await page.select('#occupancy','');assert.equal(await page.$eval('#custom-occupancy-field',e=>e.hidden),true);assert.equal(await page.$eval('#custom-occupancy',e=>e.disabled),true);
   phase="question forms";console.log(phase);await page.click(`[data-project="${p.id}"]`);await page.waitForSelector('[data-question-form]');
   const [one,two]=app.store.project(p.id).questions,answer=`#answer-${one.id}`;
   await page.type(answer,'Wet-pipe sprinklers and one electric fire pump.');
