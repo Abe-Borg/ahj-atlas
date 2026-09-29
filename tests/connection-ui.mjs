@@ -20,11 +20,13 @@ try{
   browser=await puppeteer.launch({executablePath:browserPath(),headless:true,pipe:true});
   const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.setViewport({width:1280,height:800});
   await page.goto(app.url);await page.waitForSelector('#name');
+  assert.equal(await page.evaluate(async()=>(await(await fetch('/')).text()).includes('<span id="connection-label">Checking Claude…</span>')),true);
   let s=await state(page);console.log('no key:',s);assert.equal(s.label,'Claude disconnected');assert.match(s.cls,/\boff\b/);
   // A remembered key that Anthropic rejects.
   app.services.vault.key='sk-ant-revoked-key-000000';
-  await page.reload();await page.waitForFunction(()=>document.querySelector('#connection-label').textContent==='Claude disconnected');
-  s=await state(page);console.log('bad key:',s);assert.match(s.title,/not accepted/);assert.match(s.cls,/\boff\b/);
+  // Wait on the reason, not the label: the label alone could match before the app finishes loading.
+  await page.reload();await page.waitForFunction(()=>/not accepted/.test(document.querySelector('#open-settings').title));
+  s=await state(page);console.log('bad key:',s);assert.equal(s.label,'Claude disconnected');assert.match(s.cls,/\boff\b/);
   await page.locator('#open-settings').click();await page.waitForSelector('#settings-dialog[open]');
   const note=await page.$eval('#connection-note',e=>({hidden:e.hidden,text:e.textContent,cls:e.className}));console.log('dialog note:',note,await page.$eval('#api-key',e=>e.placeholder));
   assert.equal(note.hidden,false);assert.match(note.text,/not accepted/);

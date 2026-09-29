@@ -84,32 +84,32 @@ function renderSidebar(){
   $('#project-list').innerHTML=state.projects.length?state.projects.map(p=>`<button class="project-nav ${state.selected===p.id?'active':''}" data-project="${esc(p.id)}"><strong>${esc(p.name)}</strong><small>${esc(p.discipline)} · ${esc(statuses[p.status]||p.status)}</small></button>`).join(''):'<p class="sidebar-empty">Your projects will appear here.</p>';
   for(const b of document.querySelectorAll('[data-project]'))b.addEventListener('click',()=>selectProject(b.dataset.project));
   const view=connectionView(),button=$('#open-settings');$('#connection-label').textContent=view.label;button.title=view.title;button.dataset.status=view.status;
-  const light=$('.connection-light');light.classList.toggle('on',view.status==='connected');light.classList.toggle('off',['missing','invalid'].includes(view.status));light.classList.toggle('pending',['checking','unreachable'].includes(view.status));
+  const light=$('.connection-light');light.classList.toggle('on',view.status==='connected');light.classList.toggle('off',['missing','invalid'].includes(view.status));light.classList.toggle('pending',['checking','unavailable'].includes(view.status));
 }
 function connectionView(){
   const b=state.bootstrap,status=b?.keyStatus||(b?.keyConfigured?'checking':'missing');
   return {status,...({
     connected:{label:'Claude connected',title:'Anthropic accepted your API key.'},
     checking:{label:'Checking Claude…',title:'Checking your saved API key with Anthropic.'},
-    unreachable:{label:'Claude unreachable',title:b?.keyMessage||'Anthropic could not be reached to check your API key. It will be checked again automatically.'},
+    unavailable:{label:'Claude unavailable',title:b?.keyMessage||'Anthropic could not be reached to check your API key. It will be checked again automatically.'},
     invalid:{label:'Claude disconnected',title:b?.keyMessage||'Anthropic did not accept your API key. Enter a new key to reconnect.'},
     missing:{label:'Claude disconnected',title:'No API key is connected. Enter your Anthropic API key to connect.'},
   }[status]||{label:'Claude disconnected',title:'Enter your Anthropic API key to connect.'})};
 }
 let connectionChecked=0,connectionRetryMs=60000;
 async function refreshConnection(verify=false){
-  // A saved key the network could not verify is retried quietly, backing off from 1 to 15 minutes.
-  const retry=verify||state.bootstrap.keyStatus==='unreachable'&&Date.now()-connectionChecked>connectionRetryMs;
+  // A saved key that could not be checked (network failure or a temporary Anthropic error) is retried quietly, backing off from 1 to 15 minutes.
+  const retry=verify||state.bootstrap.keyStatus==='unavailable'&&Date.now()-connectionChecked>connectionRetryMs;
   if(retry)connectionChecked=Date.now();
   const next=retry?await api('/api/connection/check',{method:'POST',body:{}}):await api('/api/connection');
-  if(next.keyStatus!=='unreachable')connectionRetryMs=60000;else if(retry&&!verify)connectionRetryMs=Math.min(connectionRetryMs*2,15*60000);
+  if(next.keyStatus!=='unavailable')connectionRetryMs=60000;else if(retry&&!verify)connectionRetryMs=Math.min(connectionRetryMs*2,15*60000);
   const changed=['keyConfigured','keyStatus','keyMessage','persisted'].some(k=>next[k]!==state.bootstrap[k]);Object.assign(state.bootstrap,next);
   if(changed){renderSidebar();if($('#settings-dialog').open)renderConnectionNote();}
 }
 function renderConnectionNote(){
-  const note=$('#connection-note'),view=connectionView(),show=['invalid','unreachable'].includes(view.status);
+  const note=$('#connection-note'),view=connectionView(),show=['invalid','unavailable'].includes(view.status);
   note.hidden=!show;note.textContent=show?view.title:'';note.classList.toggle('error',view.status==='invalid');
-  $('#api-key').placeholder=({connected:'Connected · enter a key to replace it',checking:'Checking saved key · enter a key to replace it',unreachable:'Saved key not yet verified · enter a key to replace it',invalid:'Key not accepted · enter a new key'})[view.status]||'sk-ant-…';
+  $('#api-key').placeholder=({connected:'Connected · enter a key to replace it',checking:'Checking saved key · enter a key to replace it',unavailable:'Saved key not yet verified · enter a key to replace it',invalid:'Key not accepted · enter a new key'})[view.status]||'sk-ant-…';
 }
 async function startProject(e){e.preventDefault();if(['missing','invalid'].includes(connectionView().status)){openSettings();return;}const button=$('#start-research');button.disabled=true;button.textContent='Creating project…';try{const body=Object.fromEntries(new FormData(e.target));body.budget=Number(body.budget);if(body.discipline==='Other'){body.discipline=body.customDiscipline.trim();}delete body.customDiscipline;const p=await api('/api/projects',{method:'POST',body});await refreshProjects();await selectProject(p.id);}catch(error){$('#project-error').textContent=error.message;}finally{button.disabled=false;button.innerHTML='Start research <span aria-hidden="true">↗</span>';}}
 async function refreshProjects(){state.projects=await api('/api/projects');renderSidebar();}

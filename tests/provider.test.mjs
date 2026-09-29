@@ -159,6 +159,9 @@ test('provider reports whether Anthropic accepted the key, ignoring outages',asy
   await assert.rejects(c.check(),e=>e.status===401);await assert.rejects(c.message(payload),e=>e.status===401);
   assert.deepEqual(seen.map(([key,status])=>[key,status]),[['fake-unit-key','connected'],['fake-unit-key','connected'],['fake-unit-key','invalid'],['fake-unit-key','invalid']]);
   assert.match(seen[2][2],/API key was not accepted/);
+  // Each report carries when its request started so callers can order outcomes.
+  assert.ok(seen.every(args=>Number.isFinite(args[3])));
+  assert.ok(seen[0][3]<=seen[1][3]&&seen[1][3]<=seen[2][3]&&seen[2][3]<=seen[3][3]);
 });
 test('connection status verifies a remembered key and follows later rejections',async()=>{
   const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-key-status-')),store=new Store(dir),previousFetch=globalThis.fetch;
@@ -166,35 +169,55 @@ test('connection status verifies a remembered key and follows later rejections',
   let reply='rejected',release=null;
   const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});
   globalThis.fetch=async()=>{
-    if(reply==='held')await new Promise(resolve=>{release=resolve;});
-    if(reply==='offline')throw new TypeError('fetch failed',{cause:Object.assign(new Error('lookup failed'),{code:'ENOTFOUND'})});
-    return reply==='rejected'?json({type:'error',error:{type:'authentication_error',message:'invalid x-api-key'}},401):json({data:[],has_more:false});
+    const mode=reply;
+    // A held request is authorized now and answers successfully once released.
+    if(mode==='held')await new Promise(resolve=>{release=resolve;});
+    if(mode==='offline')throw new TypeError('fetch failed',{cause:Object.assign(new Error('lookup failed'),{code:'ENOTFOUND'})});
+    if(mode==='rejected')return json({type:'error',error:{type:'authentication_error',message:'invalid x-api-key'}},401);
+    if(mode==='forbidden')return json({type:'error',error:{type:'permission_error',message:'Missing models permission'}},403);
+    if(mode==='overloaded')return json({type:'error',error:{type:'overloaded_error',message:'Overloaded'}},529);
+    return json({data:[],has_more:false});
   };
   let services;
   const route=async(pathname,method,body={})=>{let result;await services.route({req:{method,headers:{}},res:{},url:new URL('http://localhost'+pathname),body,send:(_res,status,value)=>{result={status,body:value};}});return result;};
+  const status=()=>services.connection().keyStatus;
   try{
     services=await createServices({store,vault,worker:false});
-    assert.equal(services.connection().keyStatus,'checking');
+    assert.equal(status(),'checking');
     const checked=await route('/api/connection/check','POST');
     assert.equal(checked.status,200);assert.equal(checked.body.keyStatus,'invalid');assert.equal(checked.body.keyConfigured,true);
     assert.match(checked.body.keyMessage,/API key was not accepted/);assert.doesNotMatch(JSON.stringify(checked.body),/sk-ant-/);
     // New projects wait for a working key instead of spending a preflight on a rejected one.
     assert.equal((await route('/api/projects','POST',{name:'Rejected key',address:'1 Main St, Springfield, IL',discipline:'Mechanical',mode:'realtime',budget:5})).body.status,'needs_key');
+    // Anthropic answered and refused: that is a rejection, not an outage.
+    reply='forbidden';await services.verifyKey();
+    assert.equal(status(),'invalid');assert.match(services.connection().keyMessage,/does not have permission/);
+    // Transport failures and temporary server answers leave the key unverified.
+    reply='overloaded';await services.verifyKey();
+    assert.equal(status(),'unavailable');assert.match(services.connection().keyMessage,/temporarily overloaded/);
     reply='offline';await services.verifyKey();
-    assert.equal(services.connection().keyStatus,'unreachable');assert.match(services.connection().keyMessage,/api\.anthropic\.com/);
+    assert.equal(status(),'unavailable');assert.match(services.connection().keyMessage,/api\.anthropic\.com/);
     reply='ok';await services.verifyKey();
-    assert.deepEqual([services.connection().keyStatus,services.connection().keyMessage],['connected','']);
+    assert.deepEqual([status(),services.connection().keyMessage],['connected','']);
+    // A stream authorized before a revocation cannot clear a newer rejection when it finishes.
+    reply='held';const older=services.engine.provider.check();await new Promise(resolve=>setImmediate(resolve));
+    reply='rejected';await assert.rejects(services.engine.provider.check(),e=>e.status===401);
+    assert.equal(status(),'invalid');
+    release();await older;
+    assert.equal(status(),'invalid');
+    // A request started after the rejection may reconnect it.
+    reply='ok';await services.engine.provider.check();assert.equal(status(),'connected');
     // Any later 401 from real work disconnects the key again.
     reply='rejected';await assert.rejects(services.engine.provider.check(),e=>e.status===401);
     assert.equal((await route('/api/connection','GET')).body.keyStatus,'invalid');
     // A check that finishes after the key was replaced cannot mark the new key.
     reply='held';const stale=services.verifyKey();await new Promise(resolve=>setImmediate(resolve));
-    vault.key='sk-ant-replacement-key-0000';reply='rejected';release();await stale;
-    assert.equal(services.connection().keyStatus,'checking');
+    vault.key='sk-ant-replacement-key-0000';release();await stale;
+    assert.equal(status(),'checking');
     assert.equal((await route('/api/connection','DELETE')).status,200);
-    assert.deepEqual([services.connection().keyStatus,services.connection().keyConfigured],['missing',false]);
+    assert.deepEqual([status(),services.connection().keyConfigured],['missing',false]);
     const changes=store.diagnostics().filter(e=>e.event==='connection.changed').map(e=>e.details.status).reverse();
-    assert.deepEqual(changes,['invalid','unreachable','connected','invalid']);
+    assert.deepEqual(changes,['invalid','unavailable','connected','invalid','connected','invalid']);
     assert.doesNotMatch(JSON.stringify(store.diagnostics()),/sk-ant-(remembered|replacement)/);
   }finally{
     globalThis.fetch=previousFetch;
