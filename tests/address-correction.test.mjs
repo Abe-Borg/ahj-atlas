@@ -13,6 +13,7 @@ import { projectTerms, selectPassages } from '../lib/evidence.mjs';
 import { ResearchTools } from '../lib/research-tools.mjs';
 import { projectSection } from '../lib/chat.mjs';
 import { exportData, excelReport, pdfReport } from '../lib/exports.mjs';
+import { diagnosticReport } from '../lib/diagnostics.mjs';
 import { input, report, FakeProvider, fakeTools, ChatProvider, chatResponse } from './fixtures.mjs';
 
 const corrected='200 Corrected Road, Revised Township, Test State 00001';
@@ -36,10 +37,12 @@ test('an address correction updates the saved address, reopens jurisdiction and 
   assert.deepEqual(next.input.previousAddresses,[input.address]);
   assert.ok(s.stages(p.id).every(stage=>stage.status==='queued'&&stage.rounds===0&&stage.messages.length===0));
   const [event]=addressEvents(s,p.id);assert.ok(event.message.includes(input.address)&&event.message.includes(corrected));
-  // Diagnostics record only that the location changed; addresses stay in project Activity.
+  // Downloaded diagnostics record only that the location changed; addresses stay in project Activity.
   const resumed=s.diagnostics(p.id).find(d=>d.event==='project.resumed');
   assert.equal(resumed.details.addressChanged,true);assert.equal(resumed.details.scopeChanged,true);
-  assert.ok(!JSON.stringify(s.diagnostics(p.id)).includes('Corrected Road'));
+  const diagnostics=JSON.stringify(diagnosticReport(s,{projectId:p.id}));
+  for(const value of ['Corrected Road','100 Test Avenue'])assert.ok(!diagnostics.includes(value),value);
+  assert.match(diagnostics,/Project location changed\. Addresses and parcel details are omitted from diagnostics\./);
   const jurisdiction=researchPayload(s,next,s.stage(p.id,'jurisdiction')).messages[0].content;
   assert.ok(jurisdiction.includes(corrected));assert.match(jurisdiction,/corrected the project address\. projectInputs\.address is the current location/);
   assert.match(reviewPayload(s,next).messages[0].content[0].text,/evidence_package\.project\.address is the current location/);
@@ -117,6 +120,7 @@ test('a parcel or site description is saved, correctable, and used for prompts a
   assert.equal(s.project(p.id).input.siteDescription,'Lot 7, Riverbend Tract');assert.equal(s.project(p.id).address,input.address);assert.equal(s.project(p.id).input.previousAddresses,undefined);
   assert.ok(s.stages(p.id).every(stage=>stage.status==='queued'));
   assert.ok(s.events(p.id).some(ev=>ev.message.includes('APN 0123-456-789')&&ev.message.includes('Lot 7, Riverbend Tract')));
+  assert.ok(!JSON.stringify(diagnosticReport(s)).includes('Riverbend'));
   complete(s,p.id);await e.resume(p.id,{siteDescription:''});
   assert.equal(s.project(p.id).input.siteDescription,'');assert.ok(s.events(p.id).some(ev=>ev.message.includes('removed')));
   await e.resume(p.id,{siteDescription:'y'.repeat(600)});assert.equal(s.project(p.id).input.siteDescription.length,500);
