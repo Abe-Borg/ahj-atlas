@@ -29,6 +29,14 @@ try{
   assert.equal(await page.$eval('#settings-dialog',element=>element.open),false);
   await page.keyboard.press('Tab');
   assert.ok(await page.evaluate(()=>Boolean(document.activeElement)));
+  await page.click('#open-about');
+  assert.equal(await page.$eval('#about-dialog',element=>element.open),true);
+  assert.equal(await page.$eval('#about-version',element=>element.textContent),VERSION);
+  assert.match(await page.$eval('#about-dialog',element=>element.textContent),/Copyright © 2026 Abraham Borg\./);
+  await page.click('#about-terms summary');
+  await page.waitForFunction(()=>document.querySelector('#about-license-text')?.textContent.startsWith('AHJ Atlas Software License'));
+  await page.keyboard.press('Escape');
+  assert.equal(await page.$eval('#about-dialog',element=>element.open),false);
 
   const seeded=await page.$$eval('[data-project]',els=>els.map(el=>({id:el.dataset.project,name:el.textContent})).find(p=>p.name.includes('Electron synthetic report')));
   assert.ok(seeded);
@@ -94,5 +102,5 @@ try{
   assert.equal(new URL(page.url()).pathname,'/help');
   await page.evaluate(()=>{const link=document.createElement('a');link.href='file:///C:/Windows/win.ini';link.click();});
   assert.equal(new URL(page.url()).pathname,'/help');
-  console.log(JSON.stringify({renderer:'sandboxed',version:VERSION,bootstrap:'passed',diagnostics:'passed',report:'rendered',chat:'sent and reloaded',project:'created and reloaded',keyboardDialog:'passed',responsive:'1000px and 390px',internalHelp:'same window',externalAndFileNavigation:'app page retained',exports},null,2));
+  console.log(JSON.stringify({renderer:'sandboxed',version:VERSION,bootstrap:'passed',diagnostics:'passed',report:'rendered',chat:'sent and reloaded',project:'created and reloaded',keyboardDialog:'passed',about:'version, copyright and license shown',responsive:'1000px and 390px',internalHelp:'same window',externalAndFileNavigation:'app page retained',exports},null,2));
 }finally{browser.disconnect();}
