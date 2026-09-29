@@ -21,7 +21,7 @@ Sonnet 5.5 and Opus 5.5 have 1M-token context windows and 128K output limits and
 
 **Wrap-up instead of hard stops.** A reply used to end as "Limit reached" with no answer when the model asked for one lookup too many or called a tool on its last request. Now every requested lookup gets a result (an error once the allowance is spent), and the last request sends `tool_choice: {type: "none"}` with an instruction to answer from the evidence gathered. Forced `any`/`tool` choices return a 400 on these models; `none` is unaffected and compatible with adaptive thinking. Changing `tool_choice` invalidates the cached messages for that one final request.
 
-**No per-lookup countdown.** The old loop appended "N requests and M lookups remain" after every tool result. Anthropic's Sonnet 5.5 guidance warns that harness text after every tool result can be read as a prompt-injection attempt. The app now sends at most two mid-conversation `role: "system"` messages, which Sonnet 5.5 and Opus 5.5 support without a beta header: one advance notice near the limits, and the final instruction. Tool results carry only results and citation metadata.
+**No per-lookup countdown.** The old loop appended "N requests and M lookups remain" after every tool result. Anthropic's Sonnet 5.5 guidance warns that harness text after every tool result can be read as a prompt-injection attempt. The app now sends at most two mid-conversation `role: "system"` messages, which Sonnet 5.5 and Opus 5.5 support without a beta header: one advance notice near the limits, and the final instruction. Tool results carry only results and citation metadata. As Anthropic's documentation recommends, if a model rejects the role (a 400 saying `role 'system' is not supported`), the notes are added to the pending user turn as `<system-reminder>` text after the tool results. The switch happens at the free token count, before any paid request carries a note.
 
 **Prompt.** The limits in the system prompt now come from the configuration. "Answer concisely" is replaced by depth matched to the question. Following the Sonnet 5.5 notes on tool use in chat, the prompt tells the model to check specifics with its tools even when confident. General professional knowledge is allowed when labeled and kept apart from project evidence; for a code or standard it must name the edition and defer to the AHJ-adopted edition. Tables stay off because the chat renderer shows only paragraphs, bullets and bold text.
 
@@ -41,7 +41,7 @@ On upgrade, projects stopped at a former limit become **Needs attention** with a
 
 ## Not yet verified against the live API
 
-- Token counting and streaming with a mid-conversation `role: "system"` message and `tool_choice: none` after tool results. The documentation says both are supported on these models.
+- Token counting and streaming with a mid-conversation `role: "system"` message and `tool_choice: none` after tool results. The documentation says both are supported on these models, and a rejected system role falls back to user-turn reminders.
 - A first message with many citable excerpt blocks (about 300 at the 160,000-character bound).
 - The effort capability flags returned by the Models API for `max` and `xhigh`.
 

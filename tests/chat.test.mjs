@@ -247,6 +247,20 @@ test('replies wrap up with a final answer at the lookup, request and time limits
     if(kind==='time'){assert.equal(provider.calls.length,4);assert.ok(provider.calls.every(call=>call.options.deadlineMs>=CHAT_LIMITS.answerMs));}
   });
 });
+test('a model that rejects mid-conversation system messages gets the wrap-up notes as user-turn reminders',async t=>{
+  const provider=new ChatProvider(lookupUntilFinal());
+  provider.count=async payload=>{if(payload.messages.some(m=>m.role==='system'))throw new ProviderError("Anthropic rejected the request. role 'system' is not supported on this model",{status:400});return 1000;};
+  const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
+  const turn=c.view(a.id).turns[0],last=provider.calls.at(-1).payload;
+  assert.equal(turn.status,'complete');assert.equal(provider.calls.length,CHAT_LIMITS.requests);assert.ok(provider.calls.every(call=>call.payload.messages.every(m=>m.role!=='system')));
+  const reminders=last.messages.flatMap(m=>Array.isArray(m.content)?m.content:[]).filter(b=>b.type==='text'&&b.text?.startsWith('<system-reminder>'));
+  assert.equal(reminders.length,2);assert.match(reminders[0].text,/nearing its limits/);assert.match(reminders[1].text,/final answer/);
+  assert.equal(last.messages.at(-1).content.at(-1),reminders[1]);assert.equal(last.messages.at(-1).content[0].type,'tool_result');assert.deepEqual(last.tool_choice,{type:'none'});
+  // Other token-count failures still fail the reply rather than switching note delivery.
+  const failing=new ChatProvider();failing.count=async()=>{throw new ProviderError('Anthropic rejected the request. Invalid request.',{status:400});};
+  const other=await setup(t,failing);other.app.services.chat.start(other.a.id,body());await settled(other.app.services.chat);
+  assert.equal(other.app.services.chat.view(other.a.id).turns[0].status,'failed');assert.equal(failing.calls.length,0);
+});
 test('context and output limits stop a reply without further paid requests',async t=>{
   for(const kind of ['input','output'])await t.test(kind,async t=>{
     const provider=new ChatProvider(()=>chatResponse('Truncated',{stop_reason:'max_tokens'}));
