@@ -6,6 +6,7 @@ import os from 'node:os';
 import { Store } from '../lib/store.mjs';
 import { Engine } from '../lib/engine.mjs';
 import { ResearchTools,TOOL_DEFS } from '../lib/research-tools.mjs';
+import { LIMITS } from '../lib/config.mjs';
 import { input,FakeProvider } from './fixtures.mjs';
 
 const read=(id,url)=>({type:'tool_use',id,name:'read_source',input:{url:'https://example.com/'+url}});
@@ -48,9 +49,9 @@ test('simultaneous stages cannot overspend the final project read slot',async t=
 test('verification reserves its last read and cancellation stops subsequent pairs',async t=>{
   const seen=[];
   const first=fixture(t,async url=>{seen.push(url);return document(url);});
-  const old=first.attempt([],'verification');for(let i=0;i<11;i++)first.s.beginTool(old.id,'old'+i,'read_source');first.s.updateAttempt(old.id,{state:'settled',applied:1});
+  const old=first.attempt([],'verification');for(let i=0;i<LIMITS.verificationReads-1;i++)first.s.beginTool(old.id,'old'+i,'read_source');first.s.updateAttempt(old.id,{state:'settled',applied:1});
   await first.engine.apply(first.attempt([read('a','a'),read('b','b')],'verification'));
-  assert.equal(seen.length,1);assert.equal(first.s.stageUsage(first.p.id,'verification').reads,12);
+  assert.equal(seen.length,1);assert.equal(first.s.stageUsage(first.p.id,'verification').reads,LIMITS.verificationReads);
   const releases=[],second=fixture(t,url=>new Promise(r=>releases.push(()=>r(document(url)))));
   const a=second.attempt([read('a','a'),read('b','b'),read('c','c')]),work=second.engine.apply(a);
   await until(()=>releases.length===2);second.s.updateProject(second.p.id,{cancel_requested:true,status:'canceled'});releases.forEach(r=>r());await work;

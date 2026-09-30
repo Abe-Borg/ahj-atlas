@@ -5,9 +5,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { Store } from '../lib/store.mjs';
 import { Engine } from '../lib/engine.mjs';
-import { costMicros, reserveMicros } from '../lib/config.mjs';
+import { costMicros, reserveMicros, LIMITS } from '../lib/config.mjs';
 import { validateReport, researchPayload } from '../lib/prompts.mjs';
-import { isPublicIP, validatePublicUrl, htmlText, isUnitedStates, ResearchTools } from '../lib/research-tools.mjs';
+import { isPublicIP, validatePublicUrl, htmlText, isUnitedStates, ResearchTools, searchLocation, searchTool } from '../lib/research-tools.mjs';
 import { selectPassages } from '../lib/evidence.mjs';
 import { ProviderError } from '../lib/provider.mjs';
 import { input, evidenceText, report, FakeProvider, fakeTools } from './fixtures.mjs';
@@ -41,7 +41,7 @@ test('pending estimates are recorded without limiting new requests',t=>{
   assert.doesNotMatch(s.events(p.id).at(-1).message,/allowance|budget/);
 });
 test('global search allocations are reserved across simultaneous stages',t=>{
-  const s=setup(t),p=s.create(input),payload={tools:[{name:'web_search',max_uses:25}]};
+  const s=setup(t),p=s.create(input),payload={tools:[{name:'web_search',max_uses:LIMITS.searches/2+5}]};
   s.reserve(p.id,'jurisdiction',{mode:'batch',modelKey:'research',payload,reserve:1000});
   assert.throws(()=>s.reserve(p.id,'codes',{mode:'batch',modelKey:'research',payload,reserve:1000}),/SEARCH_BUDGET/);
 });
@@ -151,4 +151,26 @@ test('restart marks unknown dispatch but preserves known pending batch',t=>{
 test('truncated tool calls are never executed or labeled complete',async t=>{
   const s=setup(t),p=s.create(input),tools=fakeTools(s),provider=new FakeProvider(),e=new Engine(s,provider,()=>true,{tools,autoStart:false});t.after(()=>e.close());
   const payload=researchPayload(s,p,s.stage(p.id,'jurisdiction')),a=s.reserve(p.id,'jurisdiction',{mode:'realtime',modelKey:'research',payload,reserve:100000});const response=provider.response(payload);response.stop_reason='max_tokens';e.record(a,response);await e.apply(s.attempt(a.id));assert.equal(tools.calls,0);assert.equal(s.stage(p.id,'jurisdiction').status,'queued');assert.equal(s.stage(p.id,'jurisdiction').recoveries,1);
+});
+
+test('page reads keep table columns and collect links from menus and footers',()=>{
+  const r=htmlText('<nav><a href="/fire">Fire Prevention</a></nav><h1>Adopted codes</h1><table><tr><th>Code</th>\n<th>Edition</th></tr><tr><td>International Fire Code</td>\n  <td>2024</td></tr></table><footer><a href="/permits">Permits</a></footer>','https://city.example.gov/');
+  assert.match(r.text,/Code \| Edition/);assert.match(r.text,/International Fire Code \| 2024/);assert.ok(!r.text.includes('Fire Prevention'));assert.ok(!/\|\s*$/m.test(r.text));
+  assert.deepEqual(r.allLinks.map(l=>l.url).sort(),['https://city.example.gov/fire','https://city.example.gov/permits']);assert.deepEqual(r.links.map(l=>l.title).sort(),['Fire Prevention','Permits']);
+});
+test('a page read shows its most relevant links and remembers every link for chat',async t=>{
+  const s=setup(t),p=s.create(input),anchors=Array.from({length:150},(_,n)=>`<a href="/doc/${n}">Document ${n}</a>`).join('');
+  const tools=new ResearchTools(s,{fetchImpl:async url=>({url,buffer:Buffer.from(`<title>City</title><p>Permit records.</p><nav>${anchors}</nav>`),type:'text/html',modified:''})});
+  const result=JSON.parse((await tools.read(p.id,{url:'https://city.example.gov/'})).text);
+  assert.equal(result.links.length,LIMITS.pageLinks);assert.equal(s.knownLinks(p.id).length,150);assert.ok(s.knownUrl(p.id,'https://city.example.gov/doc/149'));
+});
+test('web search is localized to a US project city and state read from its address',()=>{
+  assert.deepEqual(searchLocation({address:'123 Main St, Springfield, IL 62701',country:'United States'}),{type:'approximate',city:'Springfield',region:'Illinois',country:'US'});
+  assert.deepEqual(searchLocation({address:'4000 Data Center Way, Mesa, Arizona 85215, USA'}),{type:'approximate',city:'Mesa',region:'Arizona',country:'US'});
+  assert.deepEqual(searchLocation({address:'Parcel 12, New Albany OH 43054',country:'USA'}),{type:'approximate',city:'New Albany',region:'Ohio',country:'US'});
+  assert.deepEqual(searchLocation({address:'1 Main St, Washington, DC 20001'}),{type:'approximate',city:'Washington',region:'District of Columbia',country:'US'});
+  // No recognizable state: the country alone. Another country: no location at all.
+  assert.deepEqual(searchLocation({address:'100 Test Avenue, Example District, Test State 00000'}),{type:'approximate',country:'US'});
+  assert.equal(searchLocation({address:'1 King St W, Toronto, ON M5H 1A1',country:'Canada'}),null);assert.ok(!Object.hasOwn(searchTool(4,{address:'Toronto',country:'Canada'}),'user_location'));
+  assert.deepEqual(searchTool(4,{address:'123 Main St, Springfield, IL 62701'}),{type:'web_search_20250305',name:'web_search',max_uses:4,allowed_callers:['direct'],user_location:{type:'approximate',city:'Springfield',region:'Illinois',country:'US'}});
 });
