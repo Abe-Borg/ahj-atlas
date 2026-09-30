@@ -15,6 +15,8 @@ const chatDrafts=new Map(),chatOptions=new Map(),chatPending=new Set(),chatError
 // Retry requests by project and declined turn. Each keeps its idempotency key, so a
 // click after a lost response cannot create and charge for a second reply.
 const chatRetries=new Map();
+// Proposal cards by project, turn and proposal: an Apply in progress, its error, and the chosen mode.
+const proposalBusy=new Set(),proposalErrors=new Map(),proposalModes=new Map();
 let projectLoad=0;
 function recordClientError(message,location='',line=0){
   if(!state.bootstrap)return;if(Date.now()-clientErrorWindow>60000){clientErrorCount=0;clientErrorWindow=Date.now();}if(++clientErrorCount>10)return;
@@ -179,7 +181,7 @@ function activityView(detail){
 }
 function renderProject(){
   if(!state.detail)return;const {project:p,stages,sources,attempts}=state.detail,r=p.report;
-  const focused=document.activeElement,editing=focused?.matches('[data-question-form] textarea, #chat-form textarea, #chat-form input')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
+  const focused=document.activeElement,editing=focused?.matches('[data-question-form] textarea, #chat-form textarea, #chat-form input, .chat-proposal select, .chat-proposal button')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
   const chatHistory=$('#chat-history'),chatScroll=chatHistory?{top:chatHistory.scrollTop,bottom:chatHistory.scrollHeight-chatHistory.scrollTop-chatHistory.clientHeight<40}:null;
   const openDetails=[...document.querySelectorAll('#main details[open]')].map(d=>d.closest('[id]')?.id).filter(Boolean);
   const active=['queued','researching','waiting_batch','waiting'].includes(p.status),uncertain=attempts.some(a=>a.state==='unknown');
@@ -250,15 +252,49 @@ function chatRetry(t,modes,busy){
   const m=modes.find(m=>m.id===t.retryMode);if(!m)return '';
   return `<div class="chat-retry"><button type="button" class="button secondary" data-chat-retry="${esc(t.id)}" ${busy?'disabled':''}>Try again with ${esc(m.label)}</button><span class="field-help">Sends the same message to ${esc(m.model)}${m.id==='opus'?', at about twice Sonnet 5.5’s per-token price':''}.</span></div>`;
 }
-function chatTurn(t,modes,busy,turns=[]){
+const proposalTitles={answer_question:'Answer a question',dismiss_question:'Dismiss a question',research:'Start a research round',nfpa_research:'Start focused NFPA research',correct_location:'Correct the project location'};
+const paidProposal=x=>['research','nfpa_research','correct_location'].includes(x.action);
+// Why a proposal cannot be applied now, or '' when it can. The server checks again on Apply.
+function proposalBlocked(x,detail){
+  const p=detail.project;
+  if(!paidProposal(x)){
+    const q=(p.questions||[]).find(q=>q.id===x.questionId);if(!q)return 'This question is no longer in the saved report.';
+    const status=x.action==='answer_question'?'answered':'dismissed';
+    return q.status===status&&(status==='dismissed'||q.answer===x.answer)?'This response is already saved.':'';
+  }
+  if(x.stale)return 'Research has run since this was proposed. Ask chat again if it still applies.';
+  if(detail.chat?.active||chatPending.has(p.id))return 'Available when the current reply finishes.';
+  if(['queued','researching','waiting_batch','waiting','canceling','needs_key'].includes(p.status)||detail.attempts.some(a=>['dispatching','pending','received','unknown'].includes(a.state)))return 'Available when the current research and outstanding requests have settled.';
+  if(x.action==='nfpa_research'&&!(detail.fireProfile?.length&&detail.stages.filter(s=>['jurisdiction','contacts'].includes(s.id)).every(s=>s.status==='complete')))return 'Requires completed jurisdiction and contact research on a fire protection project.';
+  const site=p.input?.siteDescription||'';
+  if(x.action==='correct_location'&&(x.address||p.address)===p.address&&(x.siteDescription||site)===site)return 'The project already uses this location.';
+  return '';
+}
+// A proposal is shown exactly as saved; Apply sends only its identifiers, never this text.
+function chatProposal(t,x,detail){
+  const p=detail.project,key=`${p.id}:${t.id}:${x.id}`,dom=`${t.id}-${x.id}`,paid=paidProposal(x),applied=x.status==='applied',busy=proposalBusy.has(key);
+  const blocked=applied?'':proposalBlocked(x,detail),otherBusy=paid&&[...proposalBusy].some(k=>k!==key&&k.startsWith(p.id+':'));
+  const q=(p.questions||[]).find(q=>q.id===x.questionId),text=(label,value)=>`<p class="chat-proposal-label">${label}</p><p class="chat-proposal-text">${esc(value)}</p>`;
+  let body='';
+  if(!paid)body=`<p class="chat-proposal-question">${esc(x.question||q?.question||'')}</p>${x.action==='answer_question'?text('Proposed answer',x.answer):''}${!applied&&q&&q.status!=='open'?`<p class="field-help">Currently ${q.status==='answered'?`answered: “${esc(q.answer)}”`:'dismissed'}.</p>`:''}`;
+  else if(x.action==='research')body=text('New project context',x.clarification);
+  else if(x.action==='nfpa_research')body='<p class="chat-proposal-summary">Research the individual NFPA standards, check the evidence, and rebuild the report. Saved jurisdiction and contact research are retained.</p>';
+  else body=`${x.address?`${text('Proposed address',x.address)}${applied?'':`<p class="field-help">Currently: ${esc(p.address)}</p>`}`:''}${x.siteDescription?`${text('Proposed parcel number (APN) or site description',x.siteDescription)}${applied?'':`<p class="field-help">Currently: ${esc(p.input?.siteDescription||'none')}</p>`}`:''}`;
+  const mode=proposalModes.get(key)||p.mode;
+  const cost=paid&&!applied?`<p class="field-help">Applying starts a paid research round that rebuilds the report${x.action==='correct_location'?', reopening jurisdiction research for the new location':''}. ${money(p.cost)} estimated for this project so far.${p.questionResponses?.length?' Saved answers and dismissals are included automatically.':''}</p><div class="chat-proposal-mode"><label for="proposal-mode-${dom}">Processing mode</label><select id="proposal-mode-${dom}" data-proposal-mode ${busy?'disabled':''}>${[['realtime','Research now'],['batch','Research later (batch)']].map(([v,l])=>`<option value="${v}" ${mode===v?'selected':''}>${l}</option>`).join('')}</select></div>`:'';
+  const action=applied?`<span class="status-pill green">Applied ${esc(date(x.applied))}</span>`:`<button type="button" class="button primary" id="proposal-apply-${dom}" data-proposal-apply ${busy||blocked||otherBusy?'disabled':''}>${busy?'Applying…':paid?'Apply and start research':'Apply'}</button>${blocked?`<span class="field-help">${esc(blocked)}</span>`:''}`;
+  return `<article class="chat-proposal" data-proposal="${esc(x.id)}" data-proposal-turn="${esc(t.id)}"><span class="eyebrow">PROPOSED ACTION</span><h3>${esc(proposalTitles[x.action]||'Proposed change')}</h3>${body}${x.reason?`<p class="field-help">Reason: ${esc(x.reason)}</p>`:''}${cost}<div class="chat-proposal-actions">${action}</div><div class="inline-error" role="alert">${esc(proposalErrors.get(key)||'')}</div></article>`;
+}
+function chatProposals(t,detail){return detail&&t.status!=='running'&&t.proposals?.length?`<div class="chat-proposals" aria-label="Proposed actions">${t.proposals.map(x=>chatProposal(t,x,detail)).join('')}</div>`:'';}
+function chatTurn(t,modes,busy,turns=[],detail=null){
   const running=t.status==='running';
-  return `<article class="chat-turn" data-chat-turn="${esc(t.id)}"><div class="chat-message chat-user"><div class="chat-message-label">YOU <time>${esc(date(t.created))}</time></div><div class="chat-prose chat-user-text">${esc(t.user)}</div></div><div class="chat-message chat-assistant"><div class="chat-message-label">ASSISTANT${t.modeLabel?` <span class="chat-mode-label">${esc(t.modeLabel)}</span>`:''} ${running?'<span class="status-pill">Working…</span>':''}</div>${running?chatLive(t):`${t.answer?`<div class="chat-prose">${chatAnswer(t)}</div>`:''}${t.note?`<p class="chat-note ${['failed','attention'].includes(t.status)?'chat-error':t.status==='declined'?'chat-declined':''}">${esc(t.note)}</p>`:''}`}${t.status==='declined'&&!turns.some(x=>x.created>t.created&&x.user===t.user&&x.mode===t.retryMode)?chatRetry(t,modes,busy):''}${t.status==='attention'?'<button class="text-button" data-chat-activity>Review Activity</button>':''}${!running?`<p class="field-help">${esc(chatStatusLabels[t.status]||t.status)} · ${money(t.cost)} estimated${t.reserved?' · '+money(t.reserved)+' pending':''}</p>`:''}</div></article>`;
+  return `<article class="chat-turn" data-chat-turn="${esc(t.id)}"><div class="chat-message chat-user"><div class="chat-message-label">YOU <time>${esc(date(t.created))}</time></div><div class="chat-prose chat-user-text">${esc(t.user)}</div></div><div class="chat-message chat-assistant"><div class="chat-message-label">ASSISTANT${t.modeLabel?` <span class="chat-mode-label">${esc(t.modeLabel)}</span>`:''} ${running?'<span class="status-pill">Working…</span>':''}</div>${running?chatLive(t):`${t.answer?`<div class="chat-prose">${chatAnswer(t)}</div>`:''}${t.note?`<p class="chat-note ${['failed','attention'].includes(t.status)?'chat-error':t.status==='declined'?'chat-declined':''}">${esc(t.note)}</p>`:''}`}${chatProposals(t,detail)}${t.status==='declined'&&!turns.some(x=>x.created>t.created&&x.user===t.user&&x.mode===t.retryMode)?chatRetry(t,modes,busy):''}${t.status==='attention'?'<button class="text-button" data-chat-activity>Review Activity</button>':''}${!running?`<p class="field-help">${esc(chatStatusLabels[t.status]||t.status)} · ${money(t.cost)} estimated${t.reserved?' · '+money(t.reserved)+' pending':''}</p>`:''}</div></article>`;
 }
 function chatView(detail){
   const p=detail.project,c=detail.chat||{},turns=chatTurns(detail),busy=Boolean(c.active)||chatPending.has(p.id),options=chatOptions.get(p.id)||{};
   const earlier=chatOlder.get(p.id)?.hasEarlier??c.hasEarlier,modes=c.modes||[],limits=c.limits||{},mode=modes.find(m=>m.id===options.mode)||modes[0];
   const chatCost=(detail.attempts||[]).filter(a=>a.stage_id==='chat').reduce((n,a)=>n+a.actual,0)/1e6;
-  return `<section class="chat-panel panel"><div class="chat-heading"><div><span class="eyebrow">PROJECT CONVERSATION</span><h2>Chat about ${esc(p.name)}</h2><p class="field-help" id="chat-mode-help">${mode?esc(modeHelp(mode)):''}</p></div><span class="status-pill green">Project context only</span></div><div class="chat-context"><p>Ask about your report, sources, research notes, or saved answers. The assistant looks through all saved project records, can search the web and read public pages when they don’t answer the question, and cites the evidence.</p><p class="field-help">Pages chat reads join this project’s source register. Search results are shown as leads, not evidence. Continue research to update the report.</p></div><div class="chat-history" id="chat-history" role="log" aria-label="Project chat" aria-live="polite">${earlier?'<button class="text-button chat-earlier" id="chat-earlier">Show earlier messages</button>':''}${turns.length?turns.map(t=>chatTurn(t,modes,busy,turns)).join(''):empty('Your project, in conversation','Ask which findings need attention, compare the saved code editions, or get help interpreting a cited passage.')}</div><form id="chat-form" class="chat-composer" data-chat-project="${p.id}"><label for="chat-message">Message about ${esc(p.name)}</label><textarea id="chat-message" name="message" rows="3" maxlength="${limits.messageChars||30000}" required placeholder="What should I resolve before submitting this project?" ${busy?'disabled':''}>${esc(chatDrafts.get(p.id)||'')}</textarea><div class="chat-options"><label for="chat-mode">Reply depth</label><select id="chat-mode" ${busy?'disabled':''}>${modes.map(m=>`<option value="${esc(m.id)}" ${m.id===mode?.id?'selected':''}>${esc(m.label)} — ${esc(m.model)}, ${esc(effortLabel(m.effort).toLowerCase())} reasoning</option>`).join('')}</select></div><details id="chat-limits"><summary>How replies work and what they cost</summary><p class="field-help">Each reply can use up to ${esc(limits.requests)} requests, ${esc(limits.toolCalls)} lookups, ${esc(limits.searches)} web searches (${esc(limits.searchesPerRequest)} per request), ${esc(limits.webReads)} public page reads and about ${esc(limits.minutes)} minutes of lookups, then writes its final answer from what it found. There is no spending limit; each reply shows its estimated cost. Web searches cost $10 per 1,000 plus the tokens of their results. Chat’s web allowance is separate from research’s.</p><p class="field-help">Standard suits most questions. Deep reasons longer and costs more. Opus 5.5 costs about twice as much per token as Sonnet 5.5; use it for the hardest analysis. Replies use real-time pricing, including for batch projects.</p><p class="field-help">The project’s evidence is cached for an hour, so follow-up questions in the same hour cost less than the first. Pages a reply reads change the evidence, so the next reply rebuilds that cache.</p></details><div id="chat-error" class="inline-error" role="alert">${esc(chatErrors.get(p.id)||'')}</div><div class="chat-send-row"><p class="field-help">${money(p.cost)} estimated for this project · ${money(chatCost)} from chat${p.reserved?' · '+money(p.reserved)+' pending':''}</p>${c.active?'<button type="button" class="button secondary" id="chat-stop">Stop reply</button>':`<button type="submit" class="button primary" ${busy?'disabled':''}>${busy?'Sending…':'Send message'}</button>`}</div></form></section>`;
+  return `<section class="chat-panel panel"><div class="chat-heading"><div><span class="eyebrow">PROJECT CONVERSATION</span><h2>Chat about ${esc(p.name)}</h2><p class="field-help" id="chat-mode-help">${mode?esc(modeHelp(mode)):''}</p></div><span class="status-pill green">Project context only</span></div><div class="chat-context"><p>Ask about your report, sources, research notes, or saved answers. The assistant looks through all saved project records, can search the web and read public pages when they don’t answer the question, and cites the evidence.</p><p class="field-help">Pages chat reads join this project’s source register. Search results are shown as leads, not evidence. Chat can propose answers, dismissals, research rounds and location corrections as cards; nothing changes until you apply one.</p></div><div class="chat-history" id="chat-history" role="log" aria-label="Project chat" aria-live="polite">${earlier?'<button class="text-button chat-earlier" id="chat-earlier">Show earlier messages</button>':''}${turns.length?turns.map(t=>chatTurn(t,modes,busy,turns,detail)).join(''):empty('Your project, in conversation','Ask which findings need attention, compare the saved code editions, or get help interpreting a cited passage.')}</div><form id="chat-form" class="chat-composer" data-chat-project="${p.id}"><label for="chat-message">Message about ${esc(p.name)}</label><textarea id="chat-message" name="message" rows="3" maxlength="${limits.messageChars||30000}" required placeholder="What should I resolve before submitting this project?" ${busy?'disabled':''}>${esc(chatDrafts.get(p.id)||'')}</textarea><div class="chat-options"><label for="chat-mode">Reply depth</label><select id="chat-mode" ${busy?'disabled':''}>${modes.map(m=>`<option value="${esc(m.id)}" ${m.id===mode?.id?'selected':''}>${esc(m.label)} — ${esc(m.model)}, ${esc(effortLabel(m.effort).toLowerCase())} reasoning</option>`).join('')}</select></div><details id="chat-limits"><summary>How replies work and what they cost</summary><p class="field-help">Each reply can use up to ${esc(limits.requests)} requests, ${esc(limits.toolCalls)} lookups, ${esc(limits.searches)} web searches (${esc(limits.searchesPerRequest)} per request), ${esc(limits.webReads)} public page reads and about ${esc(limits.minutes)} minutes of lookups, then writes its final answer from what it found. There is no spending limit; each reply shows its estimated cost. Web searches cost $10 per 1,000 plus the tokens of their results. Chat’s web allowance is separate from research’s.</p><p class="field-help">Standard suits most questions. Deep reasons longer and costs more. Opus 5.5 costs about twice as much per token as Sonnet 5.5; use it for the hardest analysis. Replies use real-time pricing, including for batch projects.</p><p class="field-help">The project’s evidence is cached for an hour, so follow-up questions in the same hour cost less than the first. Pages a reply reads change the evidence, so the next reply rebuilds that cache.</p></details><div id="chat-error" class="inline-error" role="alert">${esc(chatErrors.get(p.id)||'')}</div><div class="chat-send-row"><p class="field-help">${money(p.cost)} estimated for this project · ${money(chatCost)} from chat${p.reserved?' · '+money(p.reserved)+' pending':''}</p>${c.active?'<button type="button" class="button secondary" id="chat-stop">Stop reply</button>':`<button type="submit" class="button primary" ${busy?'disabled':''}>${busy?'Sending…':'Send message'}</button>`}</div></form></section>`;
 }
 async function sendChat(id,request,fromComposer=false){
   chatPending.add(id);chatErrors.delete(id);renderProject();
@@ -268,6 +304,23 @@ async function sendChat(id,request,fromComposer=false){
     if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;await refreshSelected();}
   }catch(error){chatErrors.set(id,error.message);}
   finally{chatPending.delete(id);if(state.selected===id&&state.detail?.project.id===id)renderProject();}
+}
+// Apply is the user's approval. The server applies the saved proposal, identified by turn and id.
+async function applyProposal(id,card){
+  const turnId=card.dataset.proposalTurn,proposalId=card.dataset.proposal,key=`${id}:${turnId}:${proposalId}`;
+  const proposal=chatTurns(state.detail).find(t=>t.id===turnId)?.proposals?.find(x=>x.id===proposalId);
+  if(!proposal||proposalBusy.has(key))return;
+  const mode=proposalModes.get(key)||state.detail.project.mode;
+  proposalBusy.add(key);proposalErrors.delete(key);renderProject();
+  try{
+    const chat=await api(`/api/projects/${id}/chat/apply`,{method:'POST',body:{turnId,proposalId,...(paidProposal(proposal)?{mode}:{})}});
+    // Turns shown through "Show earlier messages" are outside the latest view the server returns.
+    const older=chatOlder.get(id);if(older)older.turns=older.turns.map(t=>t.id===turnId?{...t,proposals:t.proposals.map(x=>x.id===proposalId?{...x,status:'applied',applied:new Date().toISOString()}:x)}:t);
+    if(proposal.questionId)questionDrafts.delete(id+':'+proposal.questionId);
+    if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;await refreshSelected();}
+    toast({answer_question:'Answer saved.',dismiss_question:'Question dismissed. You can reopen it on Overview.',research:'Research started.',nfpa_research:'Focused NFPA research started.',correct_location:'Location corrected. Research started.'}[proposal.action]||'Project updated.');
+  }catch(error){proposalErrors.set(key,error.message);}
+  finally{proposalBusy.delete(key);if(state.selected===id&&state.detail?.project.id===id)renderProject();}
 }
 function bindChat(){
   const form=$('#chat-form');if(!form)return;const id=form.dataset.chatProject;
@@ -290,6 +343,8 @@ function bindChat(){
   $('#chat-stop')?.addEventListener('click',async()=>{const turnId=state.detail.chat.active;try{const chat=await api(`/api/projects/${id}/chat/stop`,{method:'POST',body:{turnId}});if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;renderProject();}}catch(e){chatErrors.set(id,e.message);if(state.selected===id)renderProject();}});
   $('#chat-earlier')?.addEventListener('click',async e=>{e.target.disabled=true;try{const before=chatTurns(state.detail)[0]?.id,chat=await api(`/api/projects/${id}/chat?before=${encodeURIComponent(before)}`),previous=chatOlder.get(id)?.turns||[];chatOlder.set(id,{turns:[...chat.turns,...previous],hasEarlier:chat.hasEarlier});if(state.selected===id&&state.detail?.project.id===id){renderProject();$('#chat-history').scrollTop=0;}}catch(e){chatErrors.set(id,e.message);if(state.selected===id)renderProject();}});
   for(const button of document.querySelectorAll('[data-chat-activity]'))button.addEventListener('click',()=>{state.tab='activity';renderProject();});
+  for(const select of document.querySelectorAll('[data-proposal-mode]'))select.addEventListener('change',e=>{const card=e.target.closest('[data-proposal]');proposalModes.set(`${id}:${card.dataset.proposalTurn}:${card.dataset.proposal}`,e.target.value);});
+  for(const button of document.querySelectorAll('[data-proposal-apply]'))button.addEventListener('click',()=>applyProposal(id,button.closest('[data-proposal]')));
 }
 function researchComplete(){return Boolean(state.detail)&&state.detail.stages.filter(s=>s.id!=='review').every(s=>s.status==='complete');}
 function openAction(type,attemptId){
@@ -314,7 +369,7 @@ $('#action-form').addEventListener('submit',async e=>{
       await api(`/api/projects/${a.id}`,{method:'DELETE'});
       $('#action-dialog').close();
       for(const cache of [chatDrafts,chatOptions,chatPending,chatErrors,chatRequests,chatOlder])cache.delete(a.id);
-      for(const map of [questionDrafts,chatRetries])for(const key of map.keys())if(key.startsWith(a.id+':'))map.delete(key);
+      for(const map of [questionDrafts,chatRetries,proposalBusy,proposalErrors,proposalModes])for(const key of map.keys())if(key.startsWith(a.id+':'))map.delete(key);
       state.projects=state.projects.filter(p=>p.id!==a.id);
       if(state.selected===a.id)newForm();else renderSidebar();
       await refreshProjects();toast('Project deleted.');return;
