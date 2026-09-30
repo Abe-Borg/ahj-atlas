@@ -190,17 +190,19 @@ test('resume reuses a saved final review blocked by stricter validation, and oth
   await e.resume(p.id,{});const saved=s.project(p.id);
   assert.equal(provider.calls.length,calls+1);assert.equal(s.stage(p.id,'review').status,'complete');assert.equal(saved.report.codes[0].edition,'2021');assert.deepEqual(saved.report.researchHealth.reviewOmissions,['coverage']);
   assert.ok(s.diagnostics(p.id).some(d=>d.event==='report.recovered'));assert.ok(s.events(p.id).some(ev=>/no new request was sent/.test(ev.message)));
-  // Changed context never reuses a saved review of the previous evidence.
-  s.updateStage(p.id,'review',{status:'blocked',note:'The review did not return a valid, evidence-linked report. Saved research is available; resume to retry only the review.'});
-  await e.resume(p.id,{clarification:'The building has a new fire pump.'});assert.equal(s.stage(p.id,'review').status,'queued');
+  // Changed context or evidence never reuses a saved review of the previous evidence.
+  const block=()=>s.updateStage(p.id,'review',{status:'blocked',note:'The review did not return a valid, evidence-linked report. Saved research is available; resume to retry only the review.'});
+  block();await new Promise(r=>setTimeout(r,5));s.source(p.id,{url:'https://example.com/chat-read',title:'Read in chat',text:evidenceText,readFull:true});
+  await e.resume(p.id,{});assert.equal(s.stage(p.id,'review').status,'queued');assert.equal(s.diagnostics(p.id).find(d=>d.event==='report.recovery_skipped').details.reason,'evidence_changed');
+  block();await e.resume(p.id,{clarification:'The building has a new fire pump.'});assert.equal(s.stage(p.id,'review').status,'queued');assert.equal(s.stage(p.id,'codes').status,'queued');
 });
 test('a completion rejected on the last allowed request is kept as unverified leads, while earlier rejections retry',async t=>{
-  const {store:s,provider,engine:e}=fixture(t),p=s.create(input),q=s.create(input);s.updateStage(p.id,'codes',{rounds:LIMITS.rounds-1});
+  const {store:s,provider,engine:e}=fixture(t),p=s.create(input),q=s.create(input);s.updateStage(p.id,'codes',{rounds:LIMITS.rounds-1,output:'Earlier text-only turn. '.repeat(12000)});
   provider.response=()=>{const r=finished();r.content[0].input.standards=[{standard:'NFPA 13 and NFPA 14',applicability:'unresolved',finding:'Grouped finding without a separate edition for each standard.'}];return r;};
   await e.dispatch(p.id,'codes');const stage=s.stage(p.id,'codes');
   assert.deepEqual(provider.calls[0].tools.map(t=>t.name),['finish_research']);assert.equal(stage.status,'partial');assert.match(stage.note,/did not pass the coverage check \(Each standards check/);
-  assert.match(stage.output,/UNVERIFIED COMPLETION BRIEF[\s\S]*Saved source S1 establishes[\s\S]*NFPA 13 and NFPA 14 \| unresolved/);
-  assert.match(evidencePackage(s,s.project(p.id)).stages.find(x=>x.stage==='codes').findings,/UNVERIFIED COMPLETION BRIEF/);
+  assert.match(stage.output,/^UNVERIFIED COMPLETION BRIEF[\s\S]*Saved source S1 establishes[\s\S]*NFPA 13 and NFPA 14 \| unresolved[\s\S]*Earlier text-only turn/);assert.ok(stage.output.length<=240000);
+  assert.match(evidencePackage(s,s.project(p.id)).stages.find(x=>x.stage==='codes').findings,/UNVERIFIED COMPLETION BRIEF[\s\S]*NFPA 13 and NFPA 14 \| unresolved/);
   await e.dispatch(q.id,'codes');assert.equal(s.stage(q.id,'codes').status,'queued');assert.equal(s.stage(q.id,'codes').output,'');
 });
 test('review finalization retains saved lookups while removing tools on the final allowed request',t=>{
