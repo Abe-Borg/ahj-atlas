@@ -1,6 +1,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import { mkdirSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { app, BrowserWindow, dialog, screen, shell } from 'electron';
 import { DatabaseSync } from 'node:sqlite';
 import { createApp } from '../server.mjs';
@@ -29,6 +30,14 @@ async function checkRuntime(){
   if(!createCanvas(1,1).getContext('2d'))throw new Error('@napi-rs/canvas failed its native load probe.');
 }
 
+// A verified update installer runs only after the workspace has closed, so it
+// never replaces files the app is still using.
+let pendingInstaller=null;
+const launchInstaller=app.isPackaged&&process.platform==='win32'&&!packagedSmokeProfile?(file,args)=>{
+  pendingInstaller={file,args};
+  setTimeout(()=>app.quit(),250);
+}:null;
+
 let provider;
 if((!app.isPackaged||packagedSmokeProfile)&&process.argv.includes('--fake-provider')){
   const {FakeProvider,chatResponse}=await import('../tests/fixtures.mjs');
@@ -46,10 +55,12 @@ void startDesktop({app,BrowserWindow,dialog,screen,shell,provider,
   diagnostics:process.argv.includes('--desktop-diagnostics'),
   migrationChoice:provider&&process.argv.includes('--migration-smoke')&&process.env.ATLAS_DESKTOP_LEGACY_DIR?'import':null,
   onError:error=>console.error('AHJ Atlas desktop:',String(error?.message||error).replace(/sk-ant-[\w-]+/g,'[redacted]')),
+  beforeExit:()=>{if(pendingInstaller)spawn(pendingInstaller.file,pendingInstaller.args,{detached:true,stdio:'ignore'}).unref();},
   resolvePaths:()=>desktopPaths({app}),
   createBackend:async options=>{
     await checkRuntime();
-    const backend=await createApp({...options,updateChecker:app.isPackaged?createUpdateChecker({dataDir:options.dataDir,currentVersion:VERSION}):null});
+    const backend=await createApp({...options,updateChecker:app.isPackaged?createUpdateChecker({dataDir:options.dataDir,currentVersion:VERSION,
+      downloadDir:launchInstaller?path.join(userData,'updates'):null,launchInstaller}):null});
     try{
       if(provider){
         const {fakeTools,input,report,evidenceText}=await import('../tests/fixtures.mjs');

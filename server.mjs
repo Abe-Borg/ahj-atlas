@@ -55,6 +55,12 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
         if(req.method==='GET')return send(res,200,await updateChecker.check());
         if(req.method==='POST')return send(res,200,await updateChecker.check({force:true}));
       }
+      if(url.pathname==='/api/updates/download'&&updateChecker&&req.method==='POST')return send(res,200,await updateChecker.download());
+      if(url.pathname==='/api/updates/install'&&updateChecker&&req.method==='POST'){
+        // Installing closes the app; in-flight research or chat would lose its response.
+        if(services.engine.running.size||services.engine.applying.size||services.chat.running.size)return send(res,409,{error:'Research or a chat reply is still running. Let it finish, or stop it, before installing the update.'});
+        return send(res,200,await updateChecker.install());
+      }
       if(url.pathname==='/api/shutdown'&&req.method==='POST'){send(res,200,{stopping:true});setTimeout(()=>closeApp().catch(()=>{}),20);return;}
       if(url.pathname==='/api/projects'&&req.method==='GET')return send(res,200,store.list().map(({report,input,...p})=>({...p,input,reportSummary:report?.summary||''})));
       if(services && await services.route({req,res,url,body,send}))return;

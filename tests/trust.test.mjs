@@ -45,6 +45,8 @@ const inlineFacts=[
   ['updateUiMs','public/app.js',/setInterval\(\(\)=>checkUpdates\(\),([\d*]+)\)/],
   ['updateIntervalMs','desktop/update-check.mjs',/CHECK_INTERVAL_MS=([\d*]+)/],
   ['updateTimeoutMs','desktop/update-check.mjs',/AbortSignal.timeout\((\d+)\)/],
+  ['updateDownloadIdleMs','desktop/update-check.mjs',/DOWNLOAD_IDLE_MS=([\d*]+)/],
+  ['updateMaxBytes','desktop/update-check.mjs',/MAX_INSTALLER_BYTES=([\d*]+)/],
   ['sourceIdleMs','lib/research-tools.mjs',/req.setTimeout\((\d+)/],
   ['redirects','lib/research-tools.mjs',/if\(redirects>(\d+)\)/],
   ['cacheMs','lib/research-tools.mjs',/Date.now\(\)-cached.time<(\d+)/],
@@ -88,6 +90,7 @@ test('quoted literal bounds match executable sources',()=>{
   assert.equal(new Anthropic(()=> '').base,'https://'+F.hosts.anthropic);
   assert.equal(new URL(source('lib/research-tools.mjs').match(/const url='([^']+geocoder[^']+)'/)[1]).hostname,F.hosts.census);
   assert.equal(new URL(source('desktop/update-check.mjs').match(/RELEASES_API='([^']+)'/)[1]).hostname,F.hosts.updates);
+  assert.equal(new URL(source('desktop/update-check.mjs').match(/REPOSITORY='([^']+)'/)[1]).hostname,F.hosts.releaseDownloads);
 });
 
 test('quoted storage paths exist in their implementation',()=>{
@@ -131,7 +134,7 @@ test('runtime inventory coverage, five rows and ledger references',()=>{
   const listed=[...ledger.matchAll(/^\| ([UA]\d\d) \|/gm)].map(m=>m[1]);
   assert.deepEqual(RUNTIME.map(r=>r.id),listed);assert.equal(new Set(listed).size,listed.length);
   for(const r of RUNTIME){assert.ok(r.you&&r.runs&&r.sent&&r.ai&&r.bounds);const card=html.split(`data-claim="${r.id}"`)[1].split('</article>')[0];for(const label of ['You do','What runs','What is sent','AI involved','Bounded by'])assert.ok(card.includes(`<dt>${label}</dt>`),r.id+label);}
-  for(const id of ['U01','U02','U04','U10','U13','U18','U19','U20','U21','U22','U23','U24','U26','A04','A05','A06'])assert.equal(RUNTIME.find(r=>r.id===id).ai,'None.');
+  for(const id of ['U01','U02','U04','U10','U13','U18','U19','U20','U21','U22','U23','U24','U26','U27','A04','A05','A06'])assert.equal(RUNTIME.find(r=>r.id===id).ai,'None.');
   for(const [id] of SHORT_POINTS)assert.ok(ledger.includes(`| ${id} |`));
   for(const s of SECTIONS)for(const id of s.claim.split(' '))assert.ok(ledger.includes(`| ${id} |`));
   assert.equal(SECTIONS.length,12);assert.equal(SHORT_POINTS.length,7);

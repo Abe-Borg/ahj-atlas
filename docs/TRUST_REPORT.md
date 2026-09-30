@@ -4,7 +4,7 @@ AHJ Atlas now has a short **Why trust it?** topic in its User guide and footer. 
 
 ## Inventory
 
-[TRUST_CLAIMS.md](TRUST_CLAIMS.md) was written before copy. It inventories 26 user-action groups and six automatic-behavior groups, each represented by a numbered runtime card with all five required rows. Groups name individual controls that share the same execution/data boundary; authorities/questions are sections of Overview, not invented tabs. Supporting-passage expansion, selectors, save/cancel, exports, deletion, external links, startup migration and OS launch/close are included.
+[TRUST_CLAIMS.md](TRUST_CLAIMS.md) was written before copy. It inventories 27 user-action groups and six automatic-behavior groups, each represented by a numbered runtime card with all five required rows. Groups name individual controls that share the same execution/data boundary; authorities/questions are sections of Overview, not invented tabs. Supporting-passage expansion, selectors, save/cancel, exports, deletion, external links, startup migration and OS launch/close are included.
 
 There are two current models for new work: `claude-sonnet-5-5` and `claude-opus-5-5`. Earlier saved research conversations can retain their original model/prefix until rebuilt. Research, evidence-check, final-review and every chat-depth payload are checked against the fact snapshot.
 

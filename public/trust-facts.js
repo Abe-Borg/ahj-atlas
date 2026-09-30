@@ -117,7 +117,8 @@ export const FACTS = {
   "hosts": {
     "anthropic": "api.anthropic.com",
     "census": "geocoding.geo.census.gov",
-    "updates": "api.github.com"
+    "updates": "api.github.com",
+    "releaseDownloads": "github.com"
   },
   "serverHost": "127.0.0.1",
   "serverPort": 4318,
@@ -136,6 +137,8 @@ export const FACTS = {
   "updateUiMs": 3600000,
   "updateIntervalMs": 86400000,
   "updateTimeoutMs": 10000,
+  "updateDownloadIdleMs": 60000,
+  "updateMaxBytes": 1073741824,
   "sourceIdleMs": 25000,
   "redirects": 5,
   "cacheMs": 300000,
