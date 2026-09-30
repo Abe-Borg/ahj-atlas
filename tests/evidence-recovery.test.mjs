@@ -11,6 +11,7 @@ import {LIMITS} from '../lib/config.mjs';
 import {ResearchTools,sourceLinks} from '../lib/research-tools.mjs';
 import {selectPassages,allocateEvidence,mergeEvidence,validateProgress} from '../lib/evidence.mjs';
 import {researchPayload,reviewPayload,evidencePackage,validateReport} from '../lib/prompts.mjs';
+import {encodeReport} from '../lib/report-format.mjs';
 import {input,FakeProvider,fakeTools,report,nfpaReport,evidenceText} from './fixtures.mjs';
 
 function fixture(t){
@@ -160,6 +161,47 @@ test('final reviewer can recover an omitted passage from saved evidence, then re
   await e.dispatch(p.id,'review');assert.equal(s.stage(p.id,'review').status,'queued');assert.equal(s.project(p.id).reads,0);
   await e.dispatch(p.id,'review');assert.equal(s.stage(p.id,'review').status,'complete');assert.equal(s.project(p.id).report.codes[0].edition,'2021');assert.equal(s.project(p.id).reserved,0);
   assert.ok(provider.calls[0].tools.every(t=>t.name==='read_saved_source'));
+});
+const reviewText=(sections=[])=>{const wire=encodeReport(report());wire.items=wire.items.filter(row=>!sections.includes(row.section));return JSON.stringify(wire);};
+test('a final review that omits its jurisdiction and coverage rows is kept with both rebuilt as unconfirmed',async t=>{
+  const {store:s,project:p,provider,engine:e}=fixture(t);s.source(p.id,{url:'https://example.com/adoption',text:evidenceText,readFull:true});
+  s.updateStage(p.id,'verification',{status:'complete',note:'Coverage: jurisdiction unresolved; contacts supported; codes unresolved; process unresolved'});
+  provider.response=()=>({id:'msg_review',stop_reason:'end_turn',usage,content:[{type:'text',text:reviewText(['jurisdiction','coverage'])}]});
+  await e.dispatch(p.id,'review');const saved=s.project(p.id).report;
+  assert.equal(s.stage(p.id,'review').status,'complete');assert.equal(saved.jurisdiction.status,'unverified');assert.match(saved.jurisdiction.description,/did not return a jurisdiction finding/);
+  assert.ok(saved.gaps.some(g=>g.question==='Confirm the governing jurisdiction.'));assert.equal(saved.codes[0].status,'inferred');
+  assert.match(saved.coverage.jurisdiction,/^Not summarized by the final review\. Research recorded unresolved questions/);assert.match(saved.coverage.contacts,/source support/);
+  assert.deepEqual(saved.researchHealth.reviewOmissions,['jurisdiction','coverage']);
+  assert.deepEqual(s.diagnostics(p.id).find(d=>d.event==='report.sections_rebuilt').details.sections,['jurisdiction','coverage']);
+  const complete=validateReport(report(),[{id:'S1',url:'https://example.com/adoption',text:evidenceText,read_full:true}]);assert.equal(complete.coverage.process,'Synthetic fixture only');assert.ok(!complete.researchHealth.reviewOmissions);
+});
+test('resume reuses a saved final review blocked by stricter validation, and otherwise pays for a new review',async t=>{
+  const {store:s,project:p,provider,engine:e}=fixture(t);s.source(p.id,{url:'https://example.com/adoption',text:evidenceText,readFull:true});
+  for(const id of ['jurisdiction','contacts','codes','verification'])s.updateStage(p.id,id,{status:'complete'});
+  const wire=JSON.parse(reviewText());wire.items.push(wire.items[0]);
+  provider.response=()=>({id:'msg_review',stop_reason:'end_turn',usage,content:[{type:'text',text:JSON.stringify(wire)}]});
+  await e.dispatch(p.id,'review');assert.equal(s.stage(p.id,'review').status,'blocked');assert.equal(s.project(p.id).status,'attention');
+  e.tick=async()=>{};const calls=provider.calls.length;
+  // Still invalid under the current rules: resume falls back to a new paid review.
+  await e.resume(p.id,{});assert.equal(s.stage(p.id,'review').status,'queued');assert.ok(s.diagnostics(p.id).some(d=>d.event==='report.recovery_failed'));assert.equal(provider.calls.length,calls);
+  await e.dispatch(p.id,'review');assert.equal(s.stage(p.id,'review').status,'blocked');
+  // A response an earlier version rejected (here, a missing coverage row) is revalidated without a request.
+  const attempt=s.attempts(p.id).at(-1);s.updateAttempt(attempt.id,{response:{...attempt.response,content:[{type:'text',text:reviewText(['coverage'])}]}});
+  await e.resume(p.id,{});const saved=s.project(p.id);
+  assert.equal(provider.calls.length,calls+1);assert.equal(s.stage(p.id,'review').status,'complete');assert.equal(saved.report.codes[0].edition,'2021');assert.deepEqual(saved.report.researchHealth.reviewOmissions,['coverage']);
+  assert.ok(s.diagnostics(p.id).some(d=>d.event==='report.recovered'));assert.ok(s.events(p.id).some(ev=>/no new request was sent/.test(ev.message)));
+  // Changed context never reuses a saved review of the previous evidence.
+  s.updateStage(p.id,'review',{status:'blocked',note:'The review did not return a valid, evidence-linked report. Saved research is available; resume to retry only the review.'});
+  await e.resume(p.id,{clarification:'The building has a new fire pump.'});assert.equal(s.stage(p.id,'review').status,'queued');
+});
+test('a completion rejected on the last allowed request is kept as unverified leads, while earlier rejections retry',async t=>{
+  const {store:s,provider,engine:e}=fixture(t),p=s.create(input),q=s.create(input);s.updateStage(p.id,'codes',{rounds:LIMITS.rounds-1});
+  provider.response=()=>{const r=finished();r.content[0].input.standards=[{standard:'NFPA 13 and NFPA 14',applicability:'unresolved',finding:'Grouped finding without a separate edition for each standard.'}];return r;};
+  await e.dispatch(p.id,'codes');const stage=s.stage(p.id,'codes');
+  assert.deepEqual(provider.calls[0].tools.map(t=>t.name),['finish_research']);assert.equal(stage.status,'partial');assert.match(stage.note,/did not pass the coverage check \(Each standards check/);
+  assert.match(stage.output,/UNVERIFIED COMPLETION BRIEF[\s\S]*Saved source S1 establishes[\s\S]*NFPA 13 and NFPA 14 \| unresolved/);
+  assert.match(evidencePackage(s,s.project(p.id)).stages.find(x=>x.stage==='codes').findings,/UNVERIFIED COMPLETION BRIEF/);
+  await e.dispatch(q.id,'codes');assert.equal(s.stage(q.id,'codes').status,'queued');assert.equal(s.stage(q.id,'codes').output,'');
 });
 test('review finalization retains saved lookups while removing tools on the final allowed request',t=>{
   const {store:s,project:p}=fixture(t);s.updateStage(p.id,'review',{checkpoint:{lookups:[{sourceId:'S1',text:'An exact late adoption clause.'}]}});
