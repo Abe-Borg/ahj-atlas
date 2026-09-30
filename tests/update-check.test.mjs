@@ -191,6 +191,11 @@ test('install is refused while research is running and otherwise hands the insta
   const busy=await post('/api/updates/install');
   assert.equal(busy.status,409);assert.match((await busy.json()).error,/still running/);assert.deepEqual(u.launches,[]);
   app.services.engine.running.clear();
+  // Work that starts while the installer is being re-hashed also blocks the hand-off.
+  let checks=0;Object.defineProperty(app.services.chat.running,'size',{configurable:true,get:()=>checks++?1:0});
+  const late=await post('/api/updates/install');
+  assert.equal(late.status,409);assert.equal(checks,2);assert.deepEqual(u.launches,[]);assert.equal(checker.status().installing,false);
+  delete app.services.chat.running.size;
   const installed=await post('/api/updates/install');
   assert.equal(installed.status,200);assert.equal(u.launches.length,1);
 });

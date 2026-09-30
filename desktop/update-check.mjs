@@ -186,7 +186,8 @@ export function createUpdateChecker({dataDir,currentVersion,downloadDir=null,lau
   };
   // Rechecks the saved installer, records the attempt, then hands it to the
   // desktop shell, which runs it after the app has closed its workspace.
-  const install=async()=>{
+  // beforeLaunch runs after hashing; returning false leaves the app running.
+  const install=async({beforeLaunch=null}={})=>{
     requireInstaller();
     if(installing)return status();
     if(download.state!=='ready'||!ready)throw new UpdateError('Download the update before installing it.');
@@ -198,6 +199,7 @@ export function createUpdateChecker({dataDir,currentVersion,downloadDir=null,lau
       ready=null;try{persist();}catch{}
       throw new UpdateError(download.error);
     }
+    if(beforeLaunch&&!beforeLaunch())return status();
     installing={fromVersion:currentVersion,toVersion:ready.version,startedAt:new Date(now()).toISOString()};
     try{persist();}catch{installing=null;throw new UpdateError('Could not record the update. Try again.');}
     launchInstaller(target,INSTALLER_ARGS);

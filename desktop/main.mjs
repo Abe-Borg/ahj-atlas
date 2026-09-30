@@ -35,7 +35,8 @@ async function checkRuntime(){
 let pendingInstaller=null;
 const launchInstaller=app.isPackaged&&process.platform==='win32'&&!packagedSmokeProfile?(file,args)=>{
   pendingInstaller={file,args};
-  setTimeout(()=>app.quit(),250);
+  // Start closing on the next turn, once the install response is written, so no new work starts meanwhile.
+  setTimeout(()=>app.quit(),0);
 }:null;
 
 let provider;
