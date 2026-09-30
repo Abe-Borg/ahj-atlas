@@ -10,6 +10,7 @@ import { chatPayload,projectSection,ProjectChat } from '../lib/chat.mjs';
 import { CLARIFICATION_PREFIX } from '../lib/chat-actions.mjs';
 import { CHAT_LIMITS } from '../lib/config.mjs';
 import { diagnosticReport } from '../lib/diagnostics.mjs';
+import ExcelJS from 'exceljs';
 import { input,report,chatResponse,ChatProvider } from './fixtures.mjs';
 
 const body=(message='What should I resolve?')=>({clientId:randomUUID(),message});
@@ -213,6 +214,10 @@ test('a report note is saved only when the user applies it, is kept apart from t
   assert.deepEqual(projectSection(s,a.id,'notes').map(n=>n.title),['Sprinkler standard edition']);
   const probe=s.createChatTurn(a.id,{clientId:randomUUID(),message:'Next'});assert.match(chatPayload(s,probe).messages.at(-1).content[0].text,/Sprinkler standard edition/);s.updateChatTurn(a.id,probe.id,{status:'complete'});
   const exported=await(await fetch(`${app.url}/api/projects/${a.id}/export?format=json`)).json();assert.deepEqual(exported.notes.map(n=>[n.title,n.note]),[['Sprinkler standard edition',text]]);
+  // Each export says where a note came from, so a standalone workbook is not read as reviewed findings.
+  assert.match(exported.notes[0].origin,/project chat.*not re-verified by research/);
+  const book=new ExcelJS.Workbook();await book.xlsx.load(Buffer.from(await(await fetch(`${app.url}/api/projects/${a.id}/export?format=xlsx`)).arrayBuffer()));const notes=book.getWorksheet('Notes');
+  assert.deepEqual(notes.getRow(1).values.slice(1),['Title','Note','Origin','Saved']);assert.deepEqual(notes.getRow(2).values.slice(1,4),['Sprinkler standard edition',text,exported.notes[0].origin]);
   // A research round that rebuilds the report keeps the notes; a second identical note is refused.
   s.updateProject(a.id,{report:{...report(),summary:'Rebuilt report'}});assert.equal(s.notes(a.id).length,1);
   provider.fn=(payload,n)=>n===3?chatResponse('',{stop_reason:'tool_use',content:[note('Again',text)]}):chatResponse('Done.');

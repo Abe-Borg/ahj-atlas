@@ -61,7 +61,7 @@ export const FACTS = {
     "checkpointInput": 200000,
     "contextResets": 2,
     "reviewRounds": 4,
-    "pageChars": 24000,
+    "pageChars": 60000,
     "readChars": 8000,
     "pageLinks": 60,
     "savedLinks": 1000,

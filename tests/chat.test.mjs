@@ -460,18 +460,21 @@ test('a reply ends lookups before one more request of web fetches could exceed i
   assert.ok(app.store.chatUsage(a.id,turn.id).reads<=CHAT_LIMITS.webReads);
 });
 
-test('chat preloads a larger share of a long source and reads up to 60,000 characters in one lookup, while research keeps 24,000',async t=>{
+test('chat preloads a larger share of a long source, and chat lookups and research reads each return up to 60,000 characters',async t=>{
   const {app,a}=await setup(t),s=app.store,c=app.services.chat;
   const long=Array.from({length:3000},(_,n)=>`Section ${n}: the county adopted the 2024 fire code with local amendment ${n}.`).join('\n');
   const saved=s.source(a.id,{url:'https://county.example.gov/long-ordinance',title:'Long ordinance',text:long,readFull:true});
   // More than the old 32,000-character share reaches chat's first message from one source.
   const block=initialChatEvidence(s,a.id).find(b=>b.title===`${saved.id}: Long ordinance`);assert.ok(block.content.map(x=>x.text).join('').length>32000);
   assert.equal(CHAT_LIMITS.excerptChars,400000);assert.equal(CHAT_LIMITS.webReads,30);
-  // One lookup returns up to toolChars; research's own reader stays at its page size.
+  // One chat lookup returns up to toolChars; one research read returns up to pageChars.
   const lookup=JSON.parse(await c.lookup(a.id,'read_saved_source',{sourceId:saved.id,query:'',offset:0,length:CHAT_LIMITS.toolChars}));assert.equal(lookup.text.length,CHAT_LIMITS.toolChars);
   await assert.rejects(c.lookup(a.id,'read_saved_source',{sourceId:saved.id,query:'',offset:0,length:CHAT_LIMITS.toolChars+1}),/Invalid lookup arguments/);
   assert.equal(c.tools.pageChars,CHAT_LIMITS.toolChars);assert.equal(new ResearchTools(s).pageChars,LIMITS.pageChars);
-  assert.match(CHAT_TOOLS.find(x=>x.name==='read_source').description,/length permits up to 60,000/);assert.match(TOOL_DEFS.find(x=>x.name==='read_source').description,/length permits up to 24,000/);
+  assert.match(CHAT_TOOLS.find(x=>x.name==='read_source').description,/length permits up to 60,000/);assert.match(TOOL_DEFS.find(x=>x.name==='read_source').description,/length permits up to 60,000/);
   const fetched=fakeWeb(app,{'https://county.example.gov/long-page':{...page('Long page',long),url:''}});s.saveLinks(a.id,[{url:'https://county.example.gov/long-page'}]);
   const read=JSON.parse(await c.lookup(a.id,'read_source',{url:'https://county.example.gov/long-page',length:CHAT_LIMITS.toolChars}));assert.equal(read.text.length,CHAT_LIMITS.toolChars);assert.deepEqual(fetched,['https://county.example.gov/long-page']);
+  const research=new ResearchTools(s,{fetchImpl:async url=>({...page('Long page',long),url})});
+  const researched=JSON.parse((await research.read(a.id,{url:'https://county.example.gov/research-page',length:LIMITS.pageChars})).text);assert.equal(LIMITS.pageChars,60000);assert.equal(researched.text.length,LIMITS.pageChars);assert.ok(researched.truncated);assert.equal(researched.nextOffset,LIMITS.pageChars);
+  assert.equal(JSON.parse((await research.read(a.id,{url:'https://county.example.gov/research-page'})).text).text.length,LIMITS.readChars);
 });
