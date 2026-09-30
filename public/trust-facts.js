@@ -1,0 +1,179 @@
+// Audited copy of executable settings. tests/trust.test.mjs pins these to their sources.
+export const FACTS = {
+  "models": {
+    "research": {
+      "id": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5",
+      "input": 2,
+      "output": 10,
+      "cacheRead": 0.2
+    },
+    "review": {
+      "id": "claude-opus-5-5",
+      "label": "Claude Opus 5.5",
+      "input": 4,
+      "output": 20,
+      "cacheRead": 0.2
+    }
+  },
+  "stages": [
+    {
+      "id": "jurisdiction",
+      "label": "Jurisdiction",
+      "effort": "high",
+      "model": "research"
+    },
+    {
+      "id": "contacts",
+      "label": "Contacts & process",
+      "effort": "medium",
+      "model": "research"
+    },
+    {
+      "id": "codes",
+      "label": "Codes & standards",
+      "effort": "high",
+      "model": "research"
+    },
+    {
+      "id": "verification",
+      "label": "Opus evidence check",
+      "effort": "medium",
+      "model": "review"
+    },
+    {
+      "id": "review",
+      "label": "Final report",
+      "effort": "medium",
+      "model": "review"
+    }
+  ],
+  "research": {
+    "searches": 40,
+    "searchesPerRequest": 4,
+    "reads": 100,
+    "rounds": 12,
+    "output": 60000,
+    "reviewOutput": 100000,
+    "input": 90000,
+    "checkpointInput": 60000,
+    "contextResets": 2,
+    "reviewRounds": 4,
+    "pageChars": 24000,
+    "readChars": 8000,
+    "documentBytes": 10485760,
+    "activeMs": 900000,
+    "verificationRounds": 6,
+    "verificationSearches": 8,
+    "verificationReads": 12,
+    "continuations": 2,
+    "batchRetentionMs": 2505600000
+  },
+  "chat": {
+    "messageChars": 30000,
+    "output": 64000,
+    "input": 400000,
+    "requests": 20,
+    "toolCalls": 60,
+    "toolChars": 24000,
+    "historyChars": 200000,
+    "activeMs": 1200000,
+    "wrapUpMs": 180000,
+    "answerMs": 600000,
+    "excerptChars": 160000,
+    "preview": {
+      "report": 160000,
+      "research": 120000,
+      "sources": 60000,
+      "context": 20000,
+      "questions": 40000
+    },
+    "cacheTTL": "1h",
+    "searchesPerRequest": 2,
+    "searches": 10,
+    "webReads": 20,
+    "proposals": 4,
+    "proposalCalls": 8
+  },
+  "modes": {
+    "standard": {
+      "label": "Standard",
+      "modelKey": "research",
+      "effort": "high"
+    },
+    "deep": {
+      "label": "Deep",
+      "modelKey": "research",
+      "effort": "max"
+    },
+    "opus": {
+      "label": "Opus",
+      "modelKey": "review",
+      "effort": "xhigh"
+    }
+  },
+  "priceDate": "2026-09-28",
+  "diagnosticEvents": 5000,
+  "hosts": {
+    "anthropic": "api.anthropic.com",
+    "census": "geocoding.geo.census.gov",
+    "updates": "api.github.com"
+  },
+  "serverHost": "127.0.0.1",
+  "serverPort": 4318,
+  "requestBytes": 262144,
+  "workerMs": 1000,
+  "researchWorkers": 2,
+  "parallelReads": 2,
+  "retries": 2,
+  "retryBaseMs": 30000,
+  "outputRecoveries": 1,
+  "pollMs": 60000,
+  "keyRetryStartMs": 60000,
+  "keyRetryMaxMs": 900000,
+  "uiRefreshMs": 5000,
+  "chatRefreshMs": 1000,
+  "updateUiMs": 3600000,
+  "updateIntervalMs": 86400000,
+  "updateTimeoutMs": 10000,
+  "sourceIdleMs": 25000,
+  "redirects": 5,
+  "cacheMs": 300000,
+  "cacheDocuments": 12,
+  "sourceCharacters": 180000,
+  "exportCharacters": 16000,
+  "sourceViewCharacters": 20000,
+  "renderRequests": 80,
+  "renderBytes": 5242880,
+  "renderStartMs": 20000,
+  "renderNavigationMs": 30000,
+  "renderIdleMs": 600,
+  "renderWaitMs": 7000,
+  "providerRequestMs": 180000,
+  "providerStreamMs": 1800000,
+  "modelsTimeoutMs": 20000,
+  "tokenCountMs": 30000,
+  "batchSubmitMs": 45000,
+  "batchPollMs": 30000,
+  "batchResultsMs": 60000,
+  "batchCancelMs": 30000,
+  "modelsPages": 20,
+  "modelsPageSize": 100,
+  "quoteMin": 12,
+  "quoteMax": 1200,
+  "pageSectionMax": 200,
+  "pdfDefaultPages": 1,
+  "pdfMaxPages": 8,
+  "pdfSearchPages": 80,
+  "pdfMaxPage": 500,
+  "previousAddresses": 5,
+  "manualChargeMax": 100,
+  "searchPrice": 10,
+  "searchUnit": 1000,
+  "million": 1000000,
+  "batchFactor": 0.5,
+  "shortCacheFactor": 1.25,
+  "longCacheFactor": 2,
+  "realtimeCacheTTL": "5m",
+  "batchCacheTTL": "1h"
+};
