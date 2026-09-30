@@ -283,16 +283,23 @@ test('a model that rejects mid-conversation system messages gets the wrap-up not
 test('context and output limits stop a reply without further paid requests',async t=>{
   for(const kind of ['input','output'])await t.test(kind,async t=>{
     const provider=new ChatProvider(()=>chatResponse('Truncated',{stop_reason:'max_tokens'}));
-    if(kind==='input')provider.counted=CHAT_LIMITS.input+1;
+    if(kind==='input')provider.counted=CHAT_LIMITS.contextWindow-CHAT_LIMITS.output+1;
     const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
     const turn=c.view(a.id).turns[0];assert.equal(turn.status,'limited');assert.equal(provider.calls.length,kind==='input'?0:1);
     if(kind==='output')assert.equal(turn.answer,'Truncated');
   });
 });
-test('a context window reported below the chat input ceiling lowers it for that reply',async t=>{
-  const provider=new ChatProvider();provider.preflight=async function(...args){this.preflights.push(args);return [{id:MODELS.research.id,max_input_tokens:200000}];};provider.counted=150000;
-  const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
-  assert.equal(c.view(a.id).turns[0].status,'limited');assert.equal(provider.calls.length,0);
+test('chat input is limited only by the model’s context window, as the model list reports it',async t=>{
+  // A reported window, less the output allowance, is the input limit for that reply.
+  const small=new ChatProvider();small.preflight=async function(...args){this.preflights.push(args);return [{id:MODELS.research.id,max_input_tokens:200000}];};small.counted=200000-CHAT_LIMITS.output+1;
+  const narrow=await setup(t,small);narrow.app.services.chat.start(narrow.a.id,body());await settled(narrow.app.services.chat);
+  assert.equal(narrow.app.services.chat.view(narrow.a.id).turns[0].status,'limited');assert.equal(small.calls.length,0);
+  // Input above the former 400,000-token ceiling is sent when the window has room for it.
+  for(const window of [1000000,0])await t.test(window?'reported 1M window':'no reported window',async t=>{
+    const provider=new ChatProvider();provider.preflight=async function(...args){this.preflights.push(args);return window?[{id:MODELS.research.id,max_input_tokens:window}]:undefined;};provider.counted=800000;
+    const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
+    assert.equal(c.view(a.id).turns[0].status,'complete');assert.equal(provider.calls.length,1);assert.equal(provider.calls[0].payload.max_tokens,128000);
+  });
 });
 test('history remains persisted, paginated and retrievable within a single project',async t=>{
   const {app,a,b,dir}=await setup(t),s=app.store,c=app.services.chat;

@@ -71,8 +71,8 @@ export const FACTS = {
   },
   "chat": {
     "messageChars": 30000,
-    "output": 64000,
-    "input": 400000,
+    "output": 128000,
+    "contextWindow": 1000000,
     "requests": 20,
     "toolCalls": 60,
     "toolChars": 24000,
