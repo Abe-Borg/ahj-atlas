@@ -20,11 +20,15 @@ test('chat sends compatible strict tool schemas to both token counting and gener
   const c=client(async(url,options)=>{
     paths.push(new URL(url).pathname);
     const sent=JSON.parse(options.body);
-    assert.equal(sent.tools.length,3);
-    for(const tool of sent.tools){
+    // Seven strict app tools plus native web search, which has no input schema.
+    assert.equal(sent.tools.length,8);
+    assert.deepEqual(sent.tools.filter(tool=>!tool.input_schema),[{type:'web_search_20250305',name:'web_search',max_uses:2,allowed_callers:['direct']}]);
+    for(const tool of sent.tools.filter(tool=>tool.input_schema)){
       assert.equal(tool.strict,true);
       assert.equal(tool.input_schema.additionalProperties,false);
-      assert.deepEqual(tool.input_schema.required,Object.keys(tool.input_schema.properties));
+      // Project tools require every argument; the research tools shared with chat keep optional paging arguments.
+      assert.ok(tool.input_schema.required.every(key=>Object.hasOwn(tool.input_schema.properties,key)));
+      if(['read_project','find_project_sources','read_saved_source'].includes(tool.name))assert.deepEqual(tool.input_schema.required,Object.keys(tool.input_schema.properties));
       // Anthropic strict schemas reject numeric constraints; enforce them in the app.
       for(const rule of Object.values(tool.input_schema.properties))if(rule.type==='integer'){
         const unsupported=['minimum','maximum','exclusiveMinimum','exclusiveMaximum','multipleOf'].filter(key=>Object.hasOwn(rule,key));

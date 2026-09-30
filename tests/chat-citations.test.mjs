@@ -47,3 +47,28 @@ test('saved lookups return citable original spans with paging metadata kept outs
   const noMatch=(await tools.saved(p.id,{sourceId:'S1',query:'missing phrase'})).text;assert.equal(citedLookup(s,p.id,'read_saved_source',noMatch),noMatch);
   const discovery=(await tools.saved(p.id,{sourceId:'S2'})).text;assert.equal(citedLookup(s,p.id,'read_saved_source',discovery),discovery);
 });
+
+test('a page read in chat becomes citable under its saved source ID with paging metadata kept outside it',t=>{
+  const {s,p}=fixture(t),page=s.source(p.id,{url:'https://county.example.gov/code',title:'County code',text:'Section 1. The county adopts the fire code.',readFull:true});
+  const raw=JSON.stringify({sourceId:page.id,retrieved:page.retrieved,url:page.url,title:'County code',note:'',offset:0,totalCharacters:43,truncated:false,nextOffset:null,text:'Section 1. The county adopts the fire code.',links:[{title:'Amendments',url:'https://county.example.gov/amend'}]});
+  for(const name of ['read_source','render_page']){
+    const {content,metadata}=citedLookup(s,p.id,name,raw);assert.equal(content[0].type,'search_result');assert.match(content[0].title,new RegExp('^'+page.id+': '));assert.ok(!Object.hasOwn(metadata,'text'));assert.equal(metadata.links.length,1);
+    const payload={messages:[{role:'user',content:[{type:'tool_result',tool_use_id:'read',content}]}]};
+    assert.equal(chatAnswer(s,p.id,{content:[{type:'text',text:'Adopted.',citations:[citation(content[0])]}]},payload).answer_parts[0].citations[0].sourceId,page.id);
+  }
+  // Failed or discovery-only reads stay plain text.
+  const discovery=JSON.stringify({sourceId:'S2',text:'Discovery must not be cited as retrieved text.'});assert.equal(citedLookup(s,p.id,'read_source',discovery),discovery);
+  assert.equal(citedLookup(s,p.id,'read_source','not json'),'not json');assert.equal(citedLookup(s,p.id,'inspect_pdf',raw),raw);
+});
+
+test('web search citations become leads only for URLs returned by a search in the same reply',t=>{
+  const {s,p}=fixture(t),found='https://county.example.gov/fire';
+  const lead=(url,extra={})=>({type:'web_search_result_location',url,title:'County fire',encrypted_index:'x',cited_text:'Snippet about the fire code',...extra});
+  const searched={role:'assistant',content:[{type:'server_tool_use',id:'srv',name:'web_search',input:{query:'fire'}},{type:'web_search_tool_result',tool_use_id:'srv',content:[{type:'web_search_result',url:found,title:'County fire',encrypted_content:'x'}]}]};
+  const response={content:[{type:'text',text:'Claim.',citations:[lead(found),lead('https://other.example.com/'),lead(found,{cited_text:' '}),lead('javascript:alert(1)')]}]};
+  const answer=chatAnswer(s,p.id,response,{messages:[{role:'user',content:[]},searched]});
+  assert.deepEqual(answer.answer_parts[0].citations,[{kind:'lead',url:found,title:'County fire',quote:'Snippet about the fire code'}]);
+  // Results in the current response count too; without any search, nothing is kept.
+  assert.equal(chatAnswer(s,p.id,{content:[...searched.content,...response.content]},{messages:[]}).answer_parts[0].citations.length,1);
+  assert.equal(chatAnswer(s,p.id,response,{messages:[]}).answer_parts[0].citations.length,0);
+});

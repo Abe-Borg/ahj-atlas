@@ -63,7 +63,7 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
       if(match&&req.method==='GET'){const project=store.project(match[1]);if(!project)return send(res,404,{error:'Project not found.'});return send(res,200,{project,chat:services.chat.view(project.id),fireProfile:fireProfile(project.input),stages:store.stages(project.id).map(({messages,...s})=>s),sources:store.sources(project.id).map(s=>({...s,text:s.text.slice(0,20000)})),events:store.events(project.id),attempts:store.attempts(project.id).map(({payload,response,...a})=>a)});}
       if(url.pathname.startsWith('/api/'))return send(res,404,{error:'This action is unavailable.'});
       if(req.method!=='GET'&&req.method!=='HEAD')return send(res,405,{error:'Method not allowed.'});
-      const files={'/':'public/index.html','/app.js':'public/app.js','/styles.css':'public/styles.css','/favicon.svg':'public/favicon.svg','/help':'public/help.html','/license':'LICENSE'};
+      const files={'/':'public/index.html','/app.js':'public/app.js','/markdown.js':'public/markdown.js','/styles.css':'public/styles.css','/favicon.svg':'public/favicon.svg','/help':'public/help.html','/license':'LICENSE'};
       const filename=files[url.pathname];if(!filename)return send(res,404,{error:'Page not found.'});
       const file=await readFile(path.join(ROOT,filename));
       res.writeHead(200,{'Content-Type':filename.endsWith('.js')?'text/javascript; charset=utf-8':filename.endsWith('.css')?'text/css; charset=utf-8':filename.endsWith('.svg')?'image/svg+xml':filename.endsWith('.html')?'text/html; charset=utf-8':'text/plain; charset=utf-8'});res.end(req.method==='HEAD'?undefined:file);

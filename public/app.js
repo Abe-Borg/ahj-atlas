@@ -1,3 +1,4 @@
+import { renderMarkdown } from './markdown.js';
 const $=(selector,root=document)=>root.querySelector(selector);
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(value||0);
@@ -171,7 +172,7 @@ function activityView(detail){
   const used=attempts.filter(a=>Number.isFinite(a.usage?.output_tokens));
   const tokens=used.reduce((n,a)=>({input:n.input+Number(a.usage.input_tokens||0)+Number(a.usage.cache_read_input_tokens||0)+Number(a.usage.cache_creation_input_tokens||0),cached:n.cached+Number(a.usage.cache_read_input_tokens||0),output:n.output+Number(a.usage.output_tokens||0)}),{input:0,cached:0,output:0});
   const count=n=>Number(n).toLocaleString();
-  return `<div class="report-grid"><section><h2>Research activity</h2><ol class="activity">${events.map(e=>`<li><time>${esc(date(e.time))}</time><span>${esc(e.message)}</span></li>`).join('')}</ol></section><aside><div class="panel panel-padding"><span class="eyebrow">SPENDING RECORD</span><h2>${money(p.cost)} <span class="optional">estimated API cost</span></h2><p class="cost-detail">${money(attempts.filter(a=>a.stage_id==='chat').reduce((n,a)=>n+a.actual,0)/1e6)} of this is project chat.<br>${money(p.reserved)} estimated for pending or uncertain requests.<br>${p.searches} searches · ${p.reads} source reads.</p><p class="field-help">The provider’s invoice is authoritative. Native search has variable input costs; a running request may exceed its estimate.</p><div class="section-divider"></div><h3>Recorded usage</h3><p class="field-help">${used.length} responses with usage recorded<br>${count(tokens.input)} input tokens<br>${count(tokens.cached)} cached input tokens (${tokens.input?Math.round(tokens.cached/tokens.input*100):0}%)<br>${count(tokens.output)} output tokens, including thinking</p><p class="field-help">Output ceilings: 60,000 per research or evidence-check request; 100,000 for the final report; ${(state.detail.chat?.limits?.output||64000).toLocaleString()} per chat request. Only actual token use is billed.</p></div>${attempts.filter(a=>a.batch_id||a.state==='unknown'||a.state==='errored').map(a=>`<div class="source-card" style="margin-top:15px"><h3>${esc(stageLabels[a.stage_id]||a.stage_id)} · ${esc(a.state)}</h3><p>Request: ${esc(a.id)}</p>${a.request_id?`<p>Provider request: ${esc(a.request_id)}</p>`:''}${a.batch_id?`<p>Batch: ${esc(a.batch_id)}</p>`:''}<p>Estimated charge: ${money(a.actual/1e6)}</p>${a.state==='unknown'?`<button class="button secondary" data-resolve="${esc(a.id)}">Resolve uncertain charge</button>`:''}</div>`).join('')}</aside></div>`;
+  return `<div class="report-grid"><section><h2>Research activity</h2><ol class="activity">${events.map(e=>`<li><time>${esc(date(e.time))}</time><span>${esc(e.message)}</span></li>`).join('')}</ol></section><aside><div class="panel panel-padding"><span class="eyebrow">SPENDING RECORD</span><h2>${money(p.cost)} <span class="optional">estimated API cost</span></h2><p class="cost-detail">${money(attempts.filter(a=>a.stage_id==='chat').reduce((n,a)=>n+a.actual,0)/1e6)} of this is project chat.<br>${money(p.reserved)} estimated for pending or uncertain requests.<br>${p.searches} research searches · ${p.reads} research source reads · ${attempts.filter(a=>a.stage_id==='chat').reduce((n,a)=>n+Number(a.usage?.server_tool_use?.web_search_requests||0),0)} chat searches.</p><p class="field-help">The provider’s invoice is authoritative. Native search has variable input costs; a running request may exceed its estimate.</p><div class="section-divider"></div><h3>Recorded usage</h3><p class="field-help">${used.length} responses with usage recorded<br>${count(tokens.input)} input tokens<br>${count(tokens.cached)} cached input tokens (${tokens.input?Math.round(tokens.cached/tokens.input*100):0}%)<br>${count(tokens.output)} output tokens, including thinking</p><p class="field-help">Output ceilings: 60,000 per research or evidence-check request; 100,000 for the final report; ${(state.detail.chat?.limits?.output||64000).toLocaleString()} per chat request. Only actual token use is billed.</p></div>${attempts.filter(a=>a.batch_id||a.state==='unknown'||a.state==='errored').map(a=>`<div class="source-card" style="margin-top:15px"><h3>${esc(stageLabels[a.stage_id]||a.stage_id)} · ${esc(a.state)}</h3><p>Request: ${esc(a.id)}</p>${a.request_id?`<p>Provider request: ${esc(a.request_id)}</p>`:''}${a.batch_id?`<p>Batch: ${esc(a.batch_id)}</p>`:''}<p>Estimated charge: ${money(a.actual/1e6)}</p>${a.state==='unknown'?`<button class="button secondary" data-resolve="${esc(a.id)}">Resolve uncertain charge</button>`:''}</div>`).join('')}</aside></div>`;
 }
 function renderProject(){
   if(!state.detail)return;const {project:p,stages,sources,attempts}=state.detail,r=p.report;
@@ -203,12 +204,28 @@ function renderProject(){
   const history=$('#chat-history');if(history)history.scrollTop=!chatScroll||chatScroll.bottom?history.scrollHeight:chatScroll.top;
   $('#refresh-nfpa')?.addEventListener('click',()=>openAction('nfpa'));$('#cancel-research')?.addEventListener('click',()=>openAction('cancel'));$('#resume-research')?.addEventListener('click',()=>openAction('resume'));$('#finish-partial')?.addEventListener('click',()=>openAction('partial'));$('#recover-batch')?.addEventListener('click',()=>openAction('reconcile'));$('#project-connect')?.addEventListener('click',openSettings);
 }
-function chatText(text){
-  return esc(text).replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>').replace(/\[(S\d+)\]/g,(match,id)=>state.detail?.sources.some(s=>s.id===id)?`<button class="banner-link" data-source="${id}" aria-label="Open source ${id}">[${id}]</button>`:match);
+// Source references such as [S1] open the saved source when it is in this project.
+const sourceReference=id=>state.detail?.sources.some(s=>s.id===id)?`<button class="banner-link" data-source="${esc(id)}" aria-label="Open source ${esc(id)}">[${esc(id)}]</button>`:null;
+function chatText(text){return renderMarkdown(text,{references:sourceReference});}
+function citationHtml(turn,part,partIndex){
+  return (part.citations||[]).map((c,citationIndex)=>{
+    const id=`chat-citation-${esc(turn.id)}-${partIndex}-${citationIndex}`;
+    // A web search snippet is shown as a lead to a page, never as supporting evidence.
+    if(c.kind==='lead')return href(c.url)?`<details class="chat-citation chat-lead" id="${id}"><summary aria-label="Read search lead from ${esc(new URL(c.url).hostname)}">[Web] Search lead</summary><div class="chat-citation-body"><strong>${link(c.url,c.title||c.url)}</strong><blockquote>${esc(c.quote)}</blockquote><p class="field-help">Search snippet: a lead, not verified evidence. Read the page before relying on it.</p></div></details>`:'';
+    if(!/^S\d+$/.test(c.sourceId)||!state.detail?.sources.some(s=>s.id===c.sourceId))return '';
+    return `<details class="chat-citation" id="${id}"><summary aria-label="Read supporting passage from ${esc(c.sourceId)}">[${esc(c.sourceId)}] Supporting passage</summary><div class="chat-citation-body"><strong>${esc(c.title)}</strong><blockquote>${esc(c.quote)}</blockquote><button class="text-button" data-source="${esc(c.sourceId)}">Open source ${esc(c.sourceId)}</button></div></details>`;
+  }).join('');
 }
+// The answer is rendered as one Markdown document so lists and tables survive citation
+// boundaries. Private-use markers hold each part's citations in place until rendering.
 function chatAnswer(turn){
   if(!turn.answerParts?.length)return chatText(turn.answer);
-  return turn.answerParts.map((part,partIndex)=>chatText(part.text)+(part.citations||[]).filter(c=>/^S\d+$/.test(c.sourceId)&&state.detail?.sources.some(s=>s.id===c.sourceId)).map((c,citationIndex)=>`<details class="chat-citation" id="chat-citation-${esc(turn.id)}-${partIndex}-${citationIndex}"><summary aria-label="Read supporting passage from ${esc(c.sourceId)}">[${esc(c.sourceId)}] Supporting passage</summary><div class="chat-citation-body"><strong>${esc(c.title)}</strong><blockquote>${esc(c.quote)}</blockquote><button class="text-button" data-source="${esc(c.sourceId)}">Open source ${esc(c.sourceId)}</button></div></details>`).join('')).join('');
+  const citations=[];let text='';
+  turn.answerParts.forEach((part,partIndex)=>{
+    const body=String(part.text||'').replace(/[\uE000\uE001]/g,''),trail=body.match(/\s*$/)[0],html=citationHtml(turn,part,partIndex);
+    text+=body.slice(0,body.length-trail.length)+(html?`\uE000${citations.push(html)-1}\uE001`:'')+trail;
+  });
+  return chatText(text).replace(/\uE000(\d+)\uE001/g,(m,n)=>citations[n]||'');
 }
 function revealActiveTab(){
   const tabs=$('.tabs'),active=$('.tab.active');if(!tabs||!active)return;
@@ -223,28 +240,48 @@ function chatTurns(detail){
 }
 const effortLabel=effort=>({high:'High',xhigh:'Extra-high',max:'Maximum'})[effort]||effort;
 const modeHelp=m=>`${m.model} · ${effortLabel(m.effort)} reasoning · This project’s context and conversation only`;
+const chatStatusLabels={complete:'Reply complete',limited:'Limit reached',failed:'Reply failed',stopped:'Stopped',interrupted:'Interrupted',attention:'Needs attention',declined:'Declined by Claude'};
+// A running reply shows its streamed text and current step; the page patches both in place.
+function chatLive(t){return `<div class="chat-prose chat-draft" data-chat-draft>${t.draft?chatText(t.draft):''}</div><p class="chat-note chat-step" data-chat-step>${esc(t.note||'Working…')}</p>`;}
+function chatRetry(t,modes,busy){
+  const m=modes.find(m=>m.id===t.retryMode);if(!m)return '';
+  return `<div class="chat-retry"><button type="button" class="button secondary" data-chat-retry="${esc(t.id)}" ${busy?'disabled':''}>Try again with ${esc(m.label)}</button><span class="field-help">Sends the same message to ${esc(m.model)}${m.id==='opus'?', at about twice Sonnet 5.5’s per-token price':''}.</span></div>`;
+}
+function chatTurn(t,modes,busy){
+  const running=t.status==='running';
+  return `<article class="chat-turn" data-chat-turn="${esc(t.id)}"><div class="chat-message chat-user"><div class="chat-message-label">YOU <time>${esc(date(t.created))}</time></div><div class="chat-prose chat-user-text">${esc(t.user)}</div></div><div class="chat-message chat-assistant"><div class="chat-message-label">ASSISTANT${t.modeLabel?` <span class="chat-mode-label">${esc(t.modeLabel)}</span>`:''} ${running?'<span class="status-pill">Working…</span>':''}</div>${running?chatLive(t):`${t.answer?`<div class="chat-prose">${chatAnswer(t)}</div>`:''}${t.note?`<p class="chat-note ${['failed','attention'].includes(t.status)?'chat-error':t.status==='declined'?'chat-declined':''}">${esc(t.note)}</p>`:''}`}${t.status==='declined'?chatRetry(t,modes,busy):''}${t.status==='attention'?'<button class="text-button" data-chat-activity>Review Activity</button>':''}${!running?`<p class="field-help">${esc(chatStatusLabels[t.status]||t.status)} · ${money(t.cost)} estimated${t.reserved?' · '+money(t.reserved)+' pending':''}</p>`:''}</div></article>`;
+}
 function chatView(detail){
   const p=detail.project,c=detail.chat||{},turns=chatTurns(detail),busy=Boolean(c.active)||chatPending.has(p.id),options=chatOptions.get(p.id)||{};
   const earlier=chatOlder.get(p.id)?.hasEarlier??c.hasEarlier,modes=c.modes||[],limits=c.limits||{},mode=modes.find(m=>m.id===options.mode)||modes[0];
   const chatCost=(detail.attempts||[]).filter(a=>a.stage_id==='chat').reduce((n,a)=>n+a.actual,0)/1e6;
-  return `<section class="chat-panel panel"><div class="chat-heading"><div><span class="eyebrow">PROJECT CONVERSATION</span><h2>Chat about ${esc(p.name)}</h2><p class="field-help" id="chat-mode-help">${mode?esc(modeHelp(mode)):''}</p></div><span class="status-pill green">Project context only</span></div><div class="chat-context"><p>Ask about your report, sources, research notes, or saved answers. The assistant can look through all saved project records and cite the evidence.</p><p class="field-help">Chat uses saved evidence. Start a research round for new public-source lookups.</p></div><div class="chat-history" id="chat-history" role="log" aria-label="Project chat" aria-live="polite">${earlier?'<button class="text-button chat-earlier" id="chat-earlier">Show earlier messages</button>':''}${turns.length?turns.map(t=>`<article class="chat-turn"><div class="chat-message chat-user"><div class="chat-message-label">YOU <time>${esc(date(t.created))}</time></div><div class="chat-prose">${esc(t.user)}</div></div><div class="chat-message chat-assistant"><div class="chat-message-label">ASSISTANT${t.modeLabel?` <span class="chat-mode-label">${esc(t.modeLabel)}</span>`:''} ${t.status==='running'?'<span class="status-pill">Working…</span>':''}</div>${t.answer?`<div class="chat-prose">${chatAnswer(t)}</div>`:''}${t.note?`<p class="chat-note ${['failed','attention'].includes(t.status)?'chat-error':''}">${esc(t.note)}</p>`:''}${t.status==='attention'?'<button class="text-button" data-chat-activity>Review Activity</button>':''}${t.status!=='running'?`<p class="field-help">${esc(({complete:'Reply complete',limited:'Limit reached',failed:'Reply failed',stopped:'Stopped',interrupted:'Interrupted',attention:'Needs attention'})[t.status]||t.status)} · ${money(t.cost)} estimated${t.reserved?' · '+money(t.reserved)+' pending':''}</p>`:''}</div></article>`).join(''):empty('Your project, in conversation','Ask which findings need attention, compare the saved code editions, or get help interpreting a cited passage.')}</div><form id="chat-form" class="chat-composer" data-chat-project="${p.id}"><label for="chat-message">Message about ${esc(p.name)}</label><textarea id="chat-message" name="message" rows="3" maxlength="${limits.messageChars||30000}" required placeholder="What should I resolve before submitting this project?" ${busy?'disabled':''}>${esc(chatDrafts.get(p.id)||'')}</textarea><div class="chat-options"><label for="chat-mode">Reply depth</label><select id="chat-mode" ${busy?'disabled':''}>${modes.map(m=>`<option value="${esc(m.id)}" ${m.id===mode?.id?'selected':''}>${esc(m.label)} — ${esc(m.model)}, ${esc(effortLabel(m.effort).toLowerCase())} reasoning</option>`).join('')}</select></div><details id="chat-limits"><summary>How replies work and what they cost</summary><p class="field-help">Each reply can use up to ${esc(limits.requests)} requests, ${esc(limits.toolCalls)} project lookups and about ${esc(limits.minutes)} minutes of lookups, then writes its final answer from what it found. There is no spending limit; each reply shows its estimated cost.</p><p class="field-help">Standard suits most questions. Deep reasons longer and costs more. Opus 5.5 costs about twice as much per token as Sonnet 5.5; use it for the hardest analysis. Replies use real-time pricing, including for batch projects.</p><p class="field-help">The project’s evidence is cached for an hour, so follow-up questions in the same hour cost less than the first.</p></details><div id="chat-error" class="inline-error" role="alert">${esc(chatErrors.get(p.id)||'')}</div><div class="chat-send-row"><p class="field-help">${money(p.cost)} estimated for this project · ${money(chatCost)} from chat${p.reserved?' · '+money(p.reserved)+' pending':''}</p>${c.active?'<button type="button" class="button secondary" id="chat-stop">Stop reply</button>':`<button type="submit" class="button primary" ${busy?'disabled':''}>${busy?'Sending…':'Send message'}</button>`}</div></form></section>`;
+  return `<section class="chat-panel panel"><div class="chat-heading"><div><span class="eyebrow">PROJECT CONVERSATION</span><h2>Chat about ${esc(p.name)}</h2><p class="field-help" id="chat-mode-help">${mode?esc(modeHelp(mode)):''}</p></div><span class="status-pill green">Project context only</span></div><div class="chat-context"><p>Ask about your report, sources, research notes, or saved answers. The assistant looks through all saved project records, can search the web and read public pages when they don’t answer the question, and cites the evidence.</p><p class="field-help">Pages chat reads join this project’s source register. Search results are shown as leads, not evidence. Continue research to update the report.</p></div><div class="chat-history" id="chat-history" role="log" aria-label="Project chat" aria-live="polite">${earlier?'<button class="text-button chat-earlier" id="chat-earlier">Show earlier messages</button>':''}${turns.length?turns.map(t=>chatTurn(t,modes,busy)).join(''):empty('Your project, in conversation','Ask which findings need attention, compare the saved code editions, or get help interpreting a cited passage.')}</div><form id="chat-form" class="chat-composer" data-chat-project="${p.id}"><label for="chat-message">Message about ${esc(p.name)}</label><textarea id="chat-message" name="message" rows="3" maxlength="${limits.messageChars||30000}" required placeholder="What should I resolve before submitting this project?" ${busy?'disabled':''}>${esc(chatDrafts.get(p.id)||'')}</textarea><div class="chat-options"><label for="chat-mode">Reply depth</label><select id="chat-mode" ${busy?'disabled':''}>${modes.map(m=>`<option value="${esc(m.id)}" ${m.id===mode?.id?'selected':''}>${esc(m.label)} — ${esc(m.model)}, ${esc(effortLabel(m.effort).toLowerCase())} reasoning</option>`).join('')}</select></div><details id="chat-limits"><summary>How replies work and what they cost</summary><p class="field-help">Each reply can use up to ${esc(limits.requests)} requests, ${esc(limits.toolCalls)} lookups, ${esc(limits.searches)} web searches (${esc(limits.searchesPerRequest)} per request), ${esc(limits.webReads)} public page reads and about ${esc(limits.minutes)} minutes of lookups, then writes its final answer from what it found. There is no spending limit; each reply shows its estimated cost. Web searches cost $10 per 1,000 plus the tokens of their results. Chat’s web allowance is separate from research’s.</p><p class="field-help">Standard suits most questions. Deep reasons longer and costs more. Opus 5.5 costs about twice as much per token as Sonnet 5.5; use it for the hardest analysis. Replies use real-time pricing, including for batch projects.</p><p class="field-help">The project’s evidence is cached for an hour, so follow-up questions in the same hour cost less than the first. Pages a reply reads change the evidence, so the next reply rebuilds that cache.</p></details><div id="chat-error" class="inline-error" role="alert">${esc(chatErrors.get(p.id)||'')}</div><div class="chat-send-row"><p class="field-help">${money(p.cost)} estimated for this project · ${money(chatCost)} from chat${p.reserved?' · '+money(p.reserved)+' pending':''}</p>${c.active?'<button type="button" class="button secondary" id="chat-stop">Stop reply</button>':`<button type="submit" class="button primary" ${busy?'disabled':''}>${busy?'Sending…':'Send message'}</button>`}</div></form></section>`;
+}
+async function sendChat(id,request,fromComposer=false){
+  chatPending.add(id);chatErrors.delete(id);renderProject();
+  try{
+    const chat=await api(`/api/projects/${id}/chat`,{method:'POST',body:request});
+    if(fromComposer){chatRequests.delete(id);if(chatDrafts.get(id)===request.message)chatDrafts.delete(id);}
+    if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;await refreshSelected();}
+  }catch(error){chatErrors.set(id,error.message);}
+  finally{chatPending.delete(id);if(state.selected===id&&state.detail?.project.id===id)renderProject();}
 }
 function bindChat(){
   const form=$('#chat-form');if(!form)return;const id=form.dataset.chatProject;
   $('#chat-message').addEventListener('input',e=>chatDrafts.set(id,e.target.value));
   $('#chat-mode')?.addEventListener('change',e=>{chatOptions.set(id,{...chatOptions.get(id),mode:e.target.value});const m=state.detail?.chat?.modes?.find(m=>m.id===e.target.value);if(m)$('#chat-mode-help').textContent=modeHelp(m);});
-  form.addEventListener('submit',async e=>{
+  form.addEventListener('submit',e=>{
     e.preventDefault();if(chatPending.has(id)||state.detail?.chat?.active)return;
     if(!state.bootstrap.keyConfigured){openSettings();return;}
     const message=$('#chat-message',form).value,mode=$('#chat-mode',form)?.value||'standard';
     let request=chatRequests.get(id);if(!request||request.message!==message||request.mode!==mode)request={message,mode,clientId:crypto.randomUUID()};chatRequests.set(id,request);
-    chatPending.add(id);chatErrors.delete(id);renderProject();
-    try{
-      const chat=await api(`/api/projects/${id}/chat`,{method:'POST',body:request});
-      chatRequests.delete(id);if(chatDrafts.get(id)===message)chatDrafts.delete(id);
-      if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;await refreshSelected();}
-    }catch(error){chatErrors.set(id,error.message);}
-    finally{chatPending.delete(id);if(state.selected===id&&state.detail?.project.id===id)renderProject();}
+    sendChat(id,request,true);
+  });
+  // A declined message can be sent again to the other model, which uses different safeguards.
+  for(const button of document.querySelectorAll('[data-chat-retry]'))button.addEventListener('click',()=>{
+    if(chatPending.has(id)||state.detail?.chat?.active)return;
+    const turn=chatTurns(state.detail).find(t=>t.id===button.dataset.chatRetry);if(!turn?.retryMode)return;
+    sendChat(id,{message:turn.user,mode:turn.retryMode,clientId:crypto.randomUUID()});
   });
   $('#chat-stop')?.addEventListener('click',async()=>{const turnId=state.detail.chat.active;try{const chat=await api(`/api/projects/${id}/chat/stop`,{method:'POST',body:{turnId}});if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;renderProject();}}catch(e){chatErrors.set(id,e.message);if(state.selected===id)renderProject();}});
   $('#chat-earlier')?.addEventListener('click',async e=>{e.target.disabled=true;try{const before=chatTurns(state.detail)[0]?.id,chat=await api(`/api/projects/${id}/chat?before=${encodeURIComponent(before)}`),previous=chatOlder.get(id)?.turns||[];chatOlder.set(id,{turns:[...chat.turns,...previous],hasEarlier:chat.hasEarlier});if(state.selected===id&&state.detail?.project.id===id){renderProject();$('#chat-history').scrollTop=0;}}catch(e){chatErrors.set(id,e.message);if(state.selected===id)renderProject();}});
@@ -290,6 +327,27 @@ async function refreshSelected(){
   const changed=stamp(next)!==stamp(state.detail);state.detail=next;if(changed)renderProject();
 }
 setInterval(()=>{if(!document.hidden&&state.bootstrap){refreshSelected().catch(()=>{});refreshConnection().catch(()=>{});}},5000);
+// While a reply runs on the visible chat, follow its saved draft and step about once a
+// second, patching only that reply. When it finishes, the whole project is refreshed.
+let chatFollowing=false;
+setInterval(async()=>{
+  const detail=state.detail,active=detail?.chat?.active;
+  if(document.hidden||chatFollowing||state.tab!=='chat'||!active)return;
+  const id=detail.project.id,load=projectLoad;chatFollowing=true;
+  try{
+    const chat=await api(`/api/projects/${id}/chat`);
+    if(load!==projectLoad||state.detail?.project.id!==id)return;
+    const turn=chat.turns.find(t=>t.id===active);
+    if(chat.active!==active||turn?.status!=='running'){await refreshSelected();return;}
+    const saved=state.detail.chat?.turns?.find(t=>t.id===active);if(saved)Object.assign(saved,{draft:turn.draft,note:turn.note});
+    const element=document.querySelector(`[data-chat-turn="${CSS.escape(active)}"]`),history=$('#chat-history');if(!element||!history)return;
+    const bottom=history.scrollHeight-history.scrollTop-history.clientHeight<40;
+    const draft=$('[data-chat-draft]',element),step=$('[data-chat-step]',element);
+    if(draft&&draft.dataset.text!==turn.draft){draft.dataset.text=turn.draft;draft.innerHTML=turn.draft?chatText(turn.draft):'';}
+    if(step)step.textContent=turn.note||'Working…';
+    if(bottom)history.scrollTop=history.scrollHeight;
+  }catch{}finally{chatFollowing=false;}
+},1000);
 function renderSpending(){const s=state.bootstrap?.spending;$('#spending-summary').innerHTML=s?`<div><small>TODAY</small><strong>${money(s.today)}</strong></div><div><small>ALL PROJECTS</small><strong>${money(s.total)}</strong></div><div><small>PENDING</small><strong>${money(s.pending)}</strong></div>`:'';}
 function openSettings(){const b=state.bootstrap;renderSpending();api('/api/bootstrap').then(next=>{state.bootstrap=next;renderSpending();}).catch(()=>{});$('#remember-label').hidden=!b.windows;$('#remember-key').checked=Boolean(b.persisted);$('#api-key').value='';renderConnectionNote();$('#key-note').textContent=b.persisted?'Your key is protected for this Windows account.':'Kept in memory for this session. Never included in reports.';$('#settings-error').textContent='';$('#settings-dialog').showModal();}
 $('#new-project').addEventListener('click',()=>newForm());$('#open-settings').addEventListener('click',openSettings);$('#settings-top').addEventListener('click',openSettings);

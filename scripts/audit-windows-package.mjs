@@ -11,7 +11,7 @@ assert.ok(['--dir','--dir-smoke','--installer'].includes(mode));
 const archive=path.join(output,'win-unpacked','resources','app.asar');
 assert.ok(existsSync(archive),'Packaged app.asar is missing.');
 const names=listPackage(archive).map(name=>name.replaceAll('\\','/'));
-for(const file of ['/package.json','/LICENSE','/server.mjs','/desktop/main.mjs','/desktop/lifecycle.mjs','/lib/store.mjs','/public/app.js'])
+for(const file of ['/package.json','/LICENSE','/server.mjs','/desktop/main.mjs','/desktop/lifecycle.mjs','/lib/store.mjs','/public/app.js','/public/markdown.js'])
   assert.ok(names.includes(file),`Missing required app file ${file}`);
 for(const dependency of ['@anthropic-ai/sdk','@napi-rs/canvas','exceljs','pdfjs-dist','pdfkit','puppeteer-core'])
   assert.ok(names.includes(`/node_modules/${dependency}`),`Missing production dependency ${dependency}`);
