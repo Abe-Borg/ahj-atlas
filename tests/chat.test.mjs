@@ -7,9 +7,9 @@ import os from 'node:os';
 import { createApp } from '../server.mjs';
 import { Store } from '../lib/store.mjs';
 import { chatPayload,projectSection,ProjectChat,describeLookup } from '../lib/chat.mjs';
-import { ResearchTools } from '../lib/research-tools.mjs';
+import { ResearchTools, searchTool } from '../lib/research-tools.mjs';
 import { remainingSearches } from '../lib/prompts.mjs';
-import { CHAT_LIMITS,MODELS,costMicros } from '../lib/config.mjs';
+import { CHAT_LIMITS,LIMITS,MODELS,costMicros } from '../lib/config.mjs';
 import { ProviderError,validateCapabilities } from '../lib/provider.mjs';
 import { diagnosticReport } from '../lib/diagnostics.mjs';
 import { input,report,chatResponse,ChatProvider } from './fixtures.mjs';
@@ -354,7 +354,10 @@ test('chat searches the web, reads found pages into the source register and cite
   // Chat's usage is its own: research's project totals are untouched.
   assert.deepEqual(s.chatUsage(a.id,turn.id),{searches:1,reads:1});assert.equal(s.project(a.id).searches,0);assert.equal(s.project(a.id).reads,0);assert.ok(turn.cost>.01);
   const tools=provider.calls.map(call=>JSON.stringify(call.payload.tools));assert.equal(new Set(tools).size,1);
-  const search=provider.calls[0].payload.tools.find(t=>t.name==='web_search');assert.deepEqual(search,{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct']});
+  // Search is localized to the project address; web fetch follows it as a fallback reader.
+  const search=provider.calls[0].payload.tools.find(t=>t.name==='web_search');assert.deepEqual(search,searchTool(CHAT_LIMITS.searchesPerRequest,s.project(a.id).input));
+  assert.deepEqual(search,{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct'],user_location:search.user_location});assert.equal(search.user_location.country,'US');
+  assert.deepEqual(provider.calls[0].payload.tools.find(t=>t.name==='web_fetch'),{type:'web_fetch_20250910',name:'web_fetch',max_uses:CHAT_LIMITS.fetchesPerRequest,max_content_tokens:LIMITS.fetchContentTokens});
   assert.deepEqual(provider.calls[0].payload.tools.filter(t=>t.input_schema).map(t=>t.name),['read_project','find_project_sources','read_saved_source','read_source','render_page','inspect_pdf','locate_address','propose_question_update','propose_research_round','propose_address_correction']);
   assert.match(provider.calls[0].payload.system,/Search results are leads, not evidence/);assert.match(provider.calls[0].payload.system,/Use a table when comparing/);assert.ok(!/do not use them/.test(provider.calls[0].payload.system));
 });
@@ -364,23 +367,24 @@ test('chat reads a page the user names, and each reply has its own page-read all
   const provider=new ChatProvider((payload,n)=>n===1?chatResponse('',{stop_reason:'tool_use',content:[{type:'tool_use',id:'first',name:'read_source',input:{url:named+'#fees'}},{type:'tool_use',id:'second',name:'read_source',input:{url:other}}]}):chatResponse('Answer from the permit page.'));
   const {app,a}=await setup(t,provider),s=app.store,c=app.services.chat;fakeWeb(app,{[named]:page('Permits','Permit fees are listed here.'),[other]:page('Amendments','Local amendments.')});
   s.saveLinks(a.id,[{url:other}]);c.start(a.id,body(`Please read ${named}.`));await settled(c);
-  const results=provider.calls[1].payload.messages.at(-1).content;
+  const results=provider.calls[1].payload.messages.filter(m=>m.role==='user').at(-1).content;
   assert.ok(Array.isArray(results[0].content));assert.equal(results[1].is_error,true);assert.match(results[1].content,/used its 1 page reads/);
-  assert.equal(c.view(a.id).turns[0].status,'complete');assert.ok(s.sources(a.id).some(x=>x.url===named&&x.read_full));
+  // A spent page-read allowance ends lookups: the next request writes the answer.
+  assert.equal(provider.calls[1].payload.tool_choice.type,'none');assert.equal(c.view(a.id).turns[0].status,'complete');assert.ok(s.sources(a.id).some(x=>x.url===named&&x.read_full));
 });
 
 test('a spent reply search allowance ends lookups without changing tools, and research keeps its own allowance',async t=>{
-  const provider=new ChatProvider(payload=>payload.tool_choice?.type==='none'?chatResponse('Final answer after searching.'):chatResponse('',{stop_reason:'tool_use',usage:{input_tokens:1000,output_tokens:400,server_tool_use:{web_search_requests:2}},content:[...searchResult('srvtoolu_'+randomUUID(),['https://county.example.gov/'+randomUUID()]),{type:'tool_use',id:'tool_'+randomUUID(),name:'find_project_sources',input:{query:'fire',offset:0}}]}));
+  const provider=new ChatProvider(payload=>payload.tool_choice?.type==='none'?chatResponse('Final answer after searching.'):chatResponse('',{stop_reason:'tool_use',usage:{input_tokens:1000,output_tokens:400,server_tool_use:{web_search_requests:CHAT_LIMITS.searchesPerRequest}},content:[...searchResult('srvtoolu_'+randomUUID(),['https://county.example.gov/'+randomUUID()]),{type:'tool_use',id:'tool_'+randomUUID(),name:'find_project_sources',input:{query:'fire',offset:0}}]}));
   const {app,a}=await setup(t,provider),s=app.store,c=app.services.chat;
-  // Research has spent all 40 of its searches; chat still searches with its own allowance.
-  const research=s.reserve(a.id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:1000});s.updateAttempt(research.id,{state:'settled',applied:1,actual:400000,usage:{input_tokens:1,output_tokens:1,server_tool_use:{web_search_requests:40}}});
-  assert.equal(s.project(a.id).searches,40);
+  // Research has spent all of its searches; chat still searches with its own allowance.
+  const research=s.reserve(a.id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:1000});s.updateAttempt(research.id,{state:'settled',applied:1,actual:400000,usage:{input_tokens:1,output_tokens:1,server_tool_use:{web_search_requests:LIMITS.searches}}});
+  assert.equal(s.project(a.id).searches,LIMITS.searches);
   c.start(a.id,body());await settled(c);
   const turn=c.view(a.id).turns[0],limitCalls=CHAT_LIMITS.searches/CHAT_LIMITS.searchesPerRequest;
   assert.equal(turn.status,'complete');assert.equal(provider.calls.length,limitCalls+1);assert.equal(provider.calls.at(-1).payload.tool_choice.type,'none');
   assert.ok(provider.calls.slice(0,-1).every(call=>!call.payload.tool_choice));assert.equal(new Set(provider.calls.map(call=>JSON.stringify(call.payload.tools))).size,1);
   assert.ok(provider.calls.some(call=>call.payload.messages.some(m=>m.role==='system'&&/web searches/.test(m.content))));
-  assert.equal(s.chatUsage(a.id,turn.id).searches,CHAT_LIMITS.searches);assert.equal(s.project(a.id).searches,40);assert.equal(remainingSearches(s,s.project(a.id),'codes'),0);
+  assert.equal(s.chatUsage(a.id,turn.id).searches,CHAT_LIMITS.searches);assert.equal(s.project(a.id).searches,LIMITS.searches);assert.equal(remainingSearches(s,s.project(a.id),'codes'),0);
   assert.ok(s.sources(a.id).filter(x=>x.url.startsWith('https://county.example.gov/')).every(x=>!x.read_full));
 });
 
@@ -423,4 +427,25 @@ test('a streaming reply saves its draft about once a second and shows the curren
   assert.equal(describeLookup({name:'read_saved_source',input:{sourceId:'S4',query:'NFPA 13'}}),'Reading S4 for “NFPA 13”…');
   assert.equal(describeLookup({name:'read_source',input:{url:'https://www.loudoun.gov/fire',query:'x'.repeat(200)}}),`Reading loudoun.gov for “${'x'.repeat(79)}…”…`);
   assert.equal(describeLookup({name:'inspect_pdf',input:{url:'https://county.example.gov/docs/Fire%20Code.pdf',page:12}}),'Inspecting page 12 of Fire Code.pdf…');
+});
+
+test('chat saves pages fetched through web_fetch to the register, counts them as page reads, and reads them by URL',async t=>{
+  const fetched='https://county.example.gov/blocked-ordinance';
+  const provider=new ChatProvider((payload,n)=>{
+    if(n===1)return chatResponse('',{stop_reason:'tool_use',usage:{input_tokens:1000,output_tokens:400,server_tool_use:{web_fetch_requests:2}},content:[
+      {type:'server_tool_use',id:'srvtoolu_f1',name:'web_fetch',input:{url:fetched}},{type:'web_fetch_tool_result',tool_use_id:'srvtoolu_f1',content:{type:'web_fetch_result',url:fetched,content:{type:'document',source:{type:'text',media_type:'text/plain',data:'Ordinance 2026-14 adopts the 2024 International Fire Code with local amendments.'},title:'Ordinance 2026-14'},retrieved_at:'2026-09-30T10:00:00Z'}},
+      {type:'server_tool_use',id:'srvtoolu_f2',name:'web_fetch',input:{url:'https://county.example.gov/missing'}},{type:'web_fetch_tool_result',tool_use_id:'srvtoolu_f2',content:{type:'web_fetch_tool_result_error',error_code:'url_not_accessible'}},
+      {type:'tool_use',id:'by_url',name:'read_saved_source',input:{sourceId:fetched,query:'',offset:0,length:2000}}]});
+    // The fetched page is read back by its URL as a citable passage under its new source ID.
+    const result=payload.messages.filter(m=>m.role==='user').at(-1).content.find(b=>b.tool_use_id==='by_url');
+    assert.ok(Array.isArray(result.content));assert.match(result.content[0].title,/^S\d+: Ordinance 2026-14$/);assert.match(result.content[0].content.map(b=>b.text).join(''),/2024 International Fire Code/);
+    return chatResponse('The county adopted the 2024 IFC.');
+  });
+  const {app,a}=await setup(t,provider),s=app.store,c=app.services.chat;c.start(a.id,body());await settled(c);
+  const turn=c.view(a.id).turns[0];assert.equal(turn.status,'complete');
+  const source=s.sources(a.id).find(x=>x.url===fetched);assert.equal(source.kind,'web-fetch');assert.equal(source.read_full,true);assert.match(source.text,/2024 International Fire Code/);
+  assert.equal(s.chatUsage(a.id,turn.id).reads,2);assert.equal(s.project(a.id).reads,0);
+  assert.ok(s.events(a.id).some(e=>e.message===`Project chat: fetched a public page through Anthropic's web fetch (${source.id}).`));
+  assert.ok(s.events(a.id).some(e=>/page fetch through Anthropic could not finish \(url_not_accessible\)/.test(e.message)));
+  assert.match(provider.calls[0].payload.system,/web_fetch retrieves it through Anthropic/);assert.match(provider.calls[0].payload.system,/kind upload are documents the user added/);
 });

@@ -69,3 +69,6 @@
 @media(max-width:760px){.chat-proposal{padding:12px}.chat-proposal-mode{max-width:none}.chat-proposal-actions .button{width:100%}}
 .chat-lead summary{color:var(--amber)}
 .chat-lead blockquote{border-left-color:#e4cf9f}
+/* Adding a document to the source register. */
+.source-upload{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:center;padding:20px 22px;background:#f9fbfc;border:1px dashed #cbd7df;border-radius:9px;margin-bottom:16px}.source-upload h3{font-size:.95rem;margin:0}.source-upload .field-help{margin-top:6px}.source-upload-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.source-upload-row input[type=file]{font-size:.8rem;max-width:260px}.source-upload .inline-error{grid-column:1/-1;margin:0}.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
+@media (max-width:760px){.source-upload{grid-template-columns:1fr}.source-upload-row input[type=file]{max-width:100%}}

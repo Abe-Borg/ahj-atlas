@@ -6,7 +6,8 @@ import { readFile } from 'node:fs/promises';
 import { mkdirSync, openSync, closeSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Store } from './lib/store.mjs';
-import { VERSION, MODELS } from './lib/config.mjs';
+import { VERSION, MODELS, LIMITS } from './lib/config.mjs';
+import { addDocument, uploadLimitMb } from './lib/documents.mjs';
 import { createServices } from './lib/services.mjs';
 import { errorDetails } from './lib/diagnostics.mjs';
 
@@ -46,6 +47,14 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
       if(req.method!=='GET'&&req.method!=='HEAD'){
         const supplied=String(req.headers['x-app-token']||'');
         if(supplied.length!==token.length||!timingSafeEqual(Buffer.from(supplied),Buffer.from(token)))return send(res,403,{error:'Reload the app before trying again.'});
+        // A document the user adds arrives as the raw file, named by X-File-Name.
+        const upload=req.method==='POST'&&url.pathname.match(/^\/api\/projects\/([a-f0-9-]+)\/documents$/);
+        if(upload){
+          const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>LIMITS.documentBytes){send(res,413,{error:`Add a document of ${uploadLimitMb} MB or less.`});return;}chunks.push(chunk);}
+          let name='';try{name=decodeURIComponent(String(req.headers['x-file-name']||''));}catch{}
+          const source=await addDocument(store,services.chat.tools,upload[1],{name,type:String(req.headers['content-type']||''),buffer:Buffer.concat(chunks)});
+          return send(res,201,{source:{id:source.id,title:source.title,kind:source.kind,characters:source.text.length}});
+        }
         if(!req.headers['content-type']?.startsWith('application/json'))return send(res,415,{error:'JSON requests are required.'});
         let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>262144){send(res,413,{error:'Request is too large.'});return;}raw+=chunk;}
         try{body=raw?JSON.parse(raw):{};}catch{return send(res,400,{error:'The request is not valid JSON.'});}

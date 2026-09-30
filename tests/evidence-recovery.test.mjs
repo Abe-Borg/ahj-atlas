@@ -77,7 +77,7 @@ test('evidence allocation ignores discovery-only records and redistributes short
 });
 test('bounded links keep a late adoption document ahead of unrelated navigation',()=>{
   const links=[...Array.from({length:80},(_,n)=>({title:'Unrelated document '+n,url:'https://example.com/nav/'+n})),{title:'SPS 361.05 Adoption of international codes',url:'https://example.com/adoption'}];
-  const selected=sourceLinks(links);assert.equal(selected.length,16);assert.equal(selected[0].url,'https://example.com/adoption');
+  const selected=sourceLinks(links);assert.equal(selected.length,LIMITS.pageLinks);assert.equal(selected[0].url,'https://example.com/adoption');
 });
 test('targeted excerpts retain a late municipality row and legal adoption text instead of repeated navigation',()=>{
   const navigation='Home Senate Assembly Committees Documents Help\n'.repeat(250);
@@ -101,7 +101,7 @@ test('progress claims require exact readable evidence, but unresolved questions 
 test('input exhaustion starts a fresh bounded request with saved evidence and no replayed opaque blocks',async t=>{
   const {store:s,project:p,provider,engine:e}=fixture(t);await e.dispatch(p.id,'jurisdiction');
   const first=s.attempts(p.id)[0],signed=JSON.stringify(first.response);let counts=0;
-  provider.count=async payload=>{counts++;return payload.messages.length>1?93450:5000;};provider.response=finished;
+  provider.count=async payload=>{counts++;return payload.messages.length>1?LIMITS.input+1:5000;};provider.response=finished;
   await e.dispatch(p.id,'jurisdiction');
   assert.ok(counts>=2);assert.equal(s.stage(p.id,'jurisdiction').status,'complete');assert.equal(s.stage(p.id,'jurisdiction').context_resets,1);
   const payload=provider.calls.at(-1);assert.equal(payload.messages.length,1);assert.match(payload.messages[0].content,/S1/);assert.match(payload.messages[0].content,/Fixture Building Code/);assert.ok(!JSON.stringify(payload).includes('opaque-test-signature'));
@@ -109,17 +109,17 @@ test('input exhaustion starts a fresh bounded request with saved evidence and no
 });
 test('checkpoint recovery also submits native batches with a fresh signed-history boundary',async t=>{
   const {store:s,project:p,provider,engine:e}=fixture(t);await e.dispatch(p.id,'jurisdiction');
-  s.updateProject(p.id,{mode:'batch'});provider.count=async payload=>payload.messages.length>1?111002:5000;
+  s.updateProject(p.id,{mode:'batch'});provider.count=async payload=>payload.messages.length>1?LIMITS.input+1:5000;
   await e.dispatch(p.id,'jurisdiction');const submitted=[...provider.batches.values()][0].attempts[0];
   assert.equal(submitted.payload.messages.length,1);assert.equal(submitted.payload.cache_control.ttl,'1h');assert.equal(s.stage(p.id,'jurisdiction').context_resets,1);assert.ok(s.project(p.id).reserved>0);
 });
 test('repeated context growth switches to completion-only without relaxing the input ceiling',async t=>{
   const {store:s,project:p,provider,engine:e}=fixture(t);await e.dispatch(p.id,'jurisdiction');
-  s.updateStage(p.id,'jurisdiction',{context_resets:LIMITS.contextResets});provider.count=async payload=>payload.messages.length>1?98518:5000;provider.response=finished;
+  s.updateStage(p.id,'jurisdiction',{context_resets:LIMITS.contextResets});provider.count=async payload=>payload.messages.length>1?LIMITS.input+1:5000;provider.response=finished;
   await e.dispatch(p.id,'jurisdiction');assert.deepEqual(provider.calls.at(-1).tools.map(t=>t.name),['finish_research']);assert.equal(s.stage(p.id,'jurisdiction').status,'complete');
 });
 test('unshrinkable input stops before another paid request and retains checkpoint evidence',async t=>{
-  const {store:s,project:p,provider,engine:e}=fixture(t);await e.dispatch(p.id,'jurisdiction');provider.count=async()=>111002;
+  const {store:s,project:p,provider,engine:e}=fixture(t);await e.dispatch(p.id,'jurisdiction');provider.count=async()=>LIMITS.input+1;
   await e.dispatch(p.id,'jurisdiction');assert.equal(provider.calls.length,1);assert.equal(s.stage(p.id,'jurisdiction').status,'partial');assert.match(s.stage(p.id,'jurisdiction').output,/S1/);
 });
 test('progress checkpoint survives a store reopen and does not mark research complete',async t=>{
@@ -137,11 +137,11 @@ test('search-limit responses renew the conversation within remaining project and
   const base=provider.response.bind(provider);provider.response=payload=>{const msg=base(payload);msg.content.push({type:'web_search_tool_result',tool_use_id:'denied',content:{type:'web_search_tool_result_error',error_code:'max_uses_exceeded'}});return msg;};
   await e.dispatch(p.id,'jurisdiction');provider.response=finished;await e.dispatch(p.id,'jurisdiction');
   const renewed=provider.calls.at(-1);assert.equal(renewed.messages.length,1);assert.equal(renewed.tools.find(t=>t.name==='web_search').max_uses,4);assert.equal(s.stage(p.id,'jurisdiction').context_resets,1);
-  const a=s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:1});s.updateAttempt(a.id,{state:'settled',usage:{server_tool_use:{web_search_requests:38}}});
+  const a=s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:1});s.updateAttempt(a.id,{state:'settled',usage:{server_tool_use:{web_search_requests:LIMITS.searches-2}}});
   const capped=researchPayload(s,s.project(p.id),s.stage(p.id,'contacts'));assert.equal(capped.tools.find(t=>t.name==='web_search').max_uses,1);
 });
 test('global search exhaustion removes search but still permits saved-source research',t=>{
-  const {store:s,project:p}=fixture(t),a=s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:1});s.updateAttempt(a.id,{state:'settled',usage:{server_tool_use:{web_search_requests:40}}});
+  const {store:s,project:p}=fixture(t),a=s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:1});s.updateAttempt(a.id,{state:'settled',usage:{server_tool_use:{web_search_requests:LIMITS.searches}}});
   const payload=researchPayload(s,s.project(p.id),s.stage(p.id,'contacts'));assert.ok(!payload.tools.some(t=>t.name==='web_search'));assert.ok(payload.tools.some(t=>t.name==='read_saved_source'));
 });
 test('uncompleted stages retain a source checkpoint when a hard round limit is reached',async t=>{
@@ -221,4 +221,28 @@ test('NFPA titled edition is accepted without mistaking neighboring standards or
   const make=quote=>{const r=report();r.fireStandards=[{...nfpaReport().fireStandards[0],name:'NFPA 1 Fire Code',edition:'2012',evidence:[{sourceId:'S1',quote,pageOrSection:'adoption'}]}];return validateReport(r,[{id:'S1',read_full:true,url:'https://example.com/adoption',text:evidenceText+' '+quote}],[],[],input).fireStandards[0];};
   assert.equal(make('NFPA 1, Fire Code — 2012 is hereby incorporated by reference.').status,'verified');
   for(const quote of ['NFPA 1, Fire Code, effective under Ordinance — 2012.','NFPA 1, Fire Code; NFPA 13 — 2012.','NFPA 1 as referenced by the 2012 International Building Code.'])assert.equal(make(quote).status,'unverified',quote);
+});
+
+test('research saves pages fetched through web_fetch, counts them as reads, and offers the fetch tool within the read allowance',async t=>{
+  const {store:s,project:p,provider,engine:e}=fixture(t),reader=new ResearchTools(s);e.tools=Object.assign(fakeTools(s),{captureFetches:(...args)=>reader.captureFetches(...args)});
+  const fetched='https://county.example.gov/fire-ordinance';
+  provider.response=()=>({id:'msg_fetch',stop_reason:'tool_use',usage:{...usage,server_tool_use:{web_search_requests:0,web_fetch_requests:1}},content:[
+    {type:'server_tool_use',id:'srvtoolu_f',name:'web_fetch',input:{url:fetched}},{type:'web_fetch_tool_result',tool_use_id:'srvtoolu_f',content:{type:'web_fetch_result',url:fetched,content:{type:'document',source:{type:'text',media_type:'text/plain',data:'The county adopts the 2024 International Fire Code.'},title:'Fire ordinance'}}},
+    ...finished().content]});
+  const tools=researchPayload(s,s.project(p.id),s.stage(p.id,'jurisdiction')).tools;
+  assert.deepEqual(tools.find(t=>t.name==='web_fetch'),{type:'web_fetch_20250910',name:'web_fetch',max_uses:LIMITS.fetchesPerRequest,max_content_tokens:LIMITS.fetchContentTokens});assert.equal(tools.find(t=>t.name==='web_search').user_location.country,'US');
+  await e.dispatch(p.id,'jurisdiction');
+  const source=s.sources(p.id).find(x=>x.url===fetched);assert.equal(source.kind,'web-fetch');assert.equal(source.read_full,true);assert.equal(s.project(p.id).reads,1);assert.equal(s.stage(p.id,'jurisdiction').status,'complete');
+  assert.ok(s.events(p.id).some(x=>x.message===`Jurisdiction: fetched a public page through Anthropic's web fetch (${source.id}).`));
+  // A spent read allowance leaves web_fetch out of new conversations.
+  const a=s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:1});s.updateAttempt(a.id,{state:'settled',usage:{server_tool_use:{web_fetch_requests:LIMITS.reads}}});
+  assert.ok(!researchPayload(s,s.project(p.id),s.stage(p.id,'contacts')).tools.some(t=>t.name==='web_fetch'));
+});
+test('the final review receives long stage briefs and more of a decisive source, and the Opus stages run at high effort',t=>{
+  const {store:s,project:p}=fixture(t);
+  s.updateStage(p.id,'codes',{status:'complete',output:'Codes brief. '+'Standard row. '.repeat(4500)+'END OF CODES BRIEF'});
+  s.source(p.id,{url:'https://example.com/code-adoption',title:'Adoption ordinance',text:'Adoption text. '.repeat(6000)+'Decisive final clause.',readFull:true});
+  const pkg=evidencePackage(s,s.project(p.id)),codes=pkg.stages.find(x=>x.stage==='codes'),source=pkg.sources.find(x=>x.url==='https://example.com/code-adoption');
+  assert.ok(codes.findings.length>24000);assert.match(codes.findings,/END OF CODES BRIEF/);assert.ok(source.text.length>32000);
+  assert.equal(reviewPayload(s,s.project(p.id)).output_config.effort,'high');assert.equal(researchPayload(s,s.project(p.id),s.stage(p.id,'verification')).output_config.effort,'high');
 });

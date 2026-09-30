@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Anthropic, providerError, validateCapabilities } from '../lib/provider.mjs';
-import { costMicros } from '../lib/config.mjs';
+import { costMicros, CHAT_LIMITS, LIMITS } from '../lib/config.mjs';
 import { CHAT_TOOLS } from '../lib/chat.mjs';
 import { Store } from '../lib/store.mjs';
 import { createServices } from '../lib/services.mjs';
@@ -20,9 +20,9 @@ test('chat sends compatible strict tool schemas to both token counting and gener
   const c=client(async(url,options)=>{
     paths.push(new URL(url).pathname);
     const sent=JSON.parse(options.body);
-    // Ten strict app tools (including three proposal tools) plus native web search, which has no input schema.
-    assert.equal(sent.tools.length,11);
-    assert.deepEqual(sent.tools.filter(tool=>!tool.input_schema),[{type:'web_search_20250305',name:'web_search',max_uses:2,allowed_callers:['direct']}]);
+    // Ten strict app tools (including three proposal tools) plus native web search and web fetch, which have no input schema.
+    assert.equal(sent.tools.length,12);
+    assert.deepEqual(sent.tools.filter(tool=>!tool.input_schema),[{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct'],user_location:{type:'approximate',country:'US'}},{type:'web_fetch_20250910',name:'web_fetch',max_uses:CHAT_LIMITS.fetchesPerRequest,max_content_tokens:LIMITS.fetchContentTokens}]);
     for(const tool of sent.tools.filter(tool=>tool.input_schema)){
       assert.equal(tool.strict,true);
       assert.equal(tool.input_schema.additionalProperties,false);

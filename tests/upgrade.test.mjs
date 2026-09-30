@@ -65,7 +65,7 @@ test('rebuilt review preflights its higher output limit even when the model is u
   s.updateStage(p.id,'review',{messages:legacy.messages,rounds:1});
   const available=[{id:'claude-opus-5-5',max_tokens:75000}],limits=[];
   provider.preflight=async(mode,context,requirements)=>{limits.push(requirements.outputLimits.review);validateCapabilities(available,{mode,...requirements});};
-  let counts=0;provider.count=async()=>{counts++;return LIMITS.checkpointInput;};
+  let counts=0;provider.count=async()=>{counts++;return LIMITS.input+1;};
   await e.dispatch(p.id,'review');
   assert.deepEqual(limits,[50000,100000]);assert.equal(counts,1);assert.equal(provider.calls.length,0);
   assert.equal(s.project(p.id).status,'attention');assert.match(s.project(p.id).note,/100,000 setting/);
@@ -195,4 +195,12 @@ test('a sibling stage cannot bypass another stage retry deadline',async t=>{
 test('failed cancellation still imports a completed batch and its charge',async t=>{
   const {store:s,engine:e,provider}=fixture(t),p=s.create({...input,mode:'batch'});await e.dispatch(p.id,'jurisdiction');provider.cancel=async()=>{throw new ProviderError('Batch already ended',{status:409});};s.updateProject(p.id,{cancel_requested:true,status:'canceling'});
   const a=s.attempts(p.id)[0];await e.pollBatch(a.batch_id,p.id);assert.equal(s.attempt(a.id).state,'settled');assert.ok(s.project(p.id).cost>0);assert.equal(s.project(p.id).reserved,0);
+});
+
+test('a final review above the research checkpoint but within the input ceiling is sent with its full evidence package',async t=>{
+  const {store:s,engine:e,provider}=fixture(t),p=s.create(input);completedResearch(s,p.id);s.updateStage(p.id,'verification',{status:'complete'});
+  provider.count=async()=>LIMITS.checkpointInput+1;
+  await e.dispatch(p.id,'review');
+  assert.equal(provider.calls.length,1);assert.ok(!s.diagnostics(p.id).some(d=>d.event==='context.rebuilt'));
+  assert.equal(provider.calls[0].output_config.effort,'high');
 });

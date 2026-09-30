@@ -51,7 +51,7 @@ const inlineFacts=[
   ['redirects','lib/research-tools.mjs',/if\(redirects>(\d+)\)/],
   ['cacheMs','lib/research-tools.mjs',/Date.now\(\)-cached.time<(\d+)/],
   ['cacheDocuments','lib/research-tools.mjs',/while\(this.cache.size>(\d+)\)/],
-  ['sourceCharacters','lib/store.mjs',/text.slice\(0,(\d+)\):''/],
+  ['sourceCharacters','lib/store.mjs',/documentDate='',limit=(\d+)\}/],
   ['exportCharacters','lib/exports.mjs',/excerpt:text.slice\(0,(\d+)\)/],
   ['sourceViewCharacters','server.mjs',/text:s.text.slice\(0,(\d+)\)/],
   ['renderRequests','lib/research-tools.mjs',/\+\+requests>(\d+)/],
