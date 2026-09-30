@@ -19,7 +19,8 @@ let app,browser,page,phase='setup';
 try{
   app=await createApp({dataDir:dir,port:0,provider,worker:false});
   const create=name=>{const p=app.store.create({...input,name});app.store.updateProject(p.id,{status:'complete',report:{...report(),summary:name+' synthetic report.'}});for(const s of app.store.stages(p.id))app.store.updateStage(p.id,s.id,{status:'complete'});app.store.source(p.id,{url:'https://example.com/'+name,title:name+' source',text:name+' evidence from the saved record. <img src=x onerror="window.injected=true">',readFull:true});return p;};
-  const a=create('ALPHA project'),b=create('BRAVO project');
+  const a=create('ALPHA project'),b=create('BRAVO project'),cp=create('CHARLIE project');
+  app.store.updateProject(cp.id,{report:{...report(),summary:'CHARLIE project synthetic report.',gaps:[{question:'Which NFPA 13 edition does the fire marshal enforce?',why:'Design basis',contact:'Fire marshal',nextStep:'Confirm the edition.'}]}});
   browser=await puppeteer.launch({executablePath:browserPath(),headless:true,pipe:true});page=await browser.newPage();await page.setViewport({width:1440,height:1100});const errors=[];page.on('pageerror',e=>errors.push(e.message));
   phase='required name';await page.goto(app.url);await page.waitForSelector('#name');assert.equal(await page.$eval('#name',e=>e.required),true);assert.ok(!/optional/.test(await page.$eval('label[for=name]',e=>e.textContent)));assert.equal(await page.$eval('#name',e=>e.checkValidity()),false);
   const click=selector=>page.locator(selector).click();
@@ -65,8 +66,34 @@ try{
   assert.equal(retried.model,'claude-opus-5-5');assert.match(retried.messages.at(-1).content.at(-1).text,/A question Claude declines\./);custom=null;
   // Once the message has been sent to the other model, the declined reply no longer offers it.
   assert.equal(await page.$('[data-chat-retry]'),null);await page.reload();await click('[data-tab=chat]');await page.waitForSelector('#chat-history');assert.equal(await page.$('[data-chat-retry]'),null);
+  phase='proposal cards';
+  const questionId=app.store.project(cp.id).questions[0].id;
+  custom=payload=>payload.messages.at(-1).content.some(x=>x.type==='tool_result')?chatResponse('Two cards are ready for your approval.'):chatResponse('',{stop_reason:'tool_use',content:[
+    {type:'tool_use',id:'toolu_answer',name:'propose_question_update',input:{questionId,status:'answered',answer:'NFPA 13, 2025 edition <img src=x onerror="window.injected=true">',reason:'You confirmed the edition with the fire marshal.'}},
+    {type:'tool_use',id:'toolu_round',name:'propose_research_round',input:{focus:'clarification',clarification:'Owner confirmed a hyperscale data center.',reason:'The saved report predates this context.'}}]});
+  await click(`[data-project="${cp.id}"]`);await page.waitForFunction(()=>document.querySelector('.chat-heading h2')?.textContent.includes('CHARLIE'));
+  await page.type('#chat-message','I confirmed NFPA 13, 2025 edition with the fire marshal.');await click('#chat-form button[type=submit]');
+  await page.waitForFunction(()=>document.querySelectorAll('.chat-proposal').length===2,{timeout:10000});
+  assert.equal(await page.evaluate(()=>Boolean(window.injected)),false);assert.equal(await page.$('.chat-proposal img'),null);assert.match(await page.$eval('.chat-proposal .chat-proposal-text',e=>e.textContent),/<img src=x/);
+  assert.deepEqual(await page.$$eval('.chat-proposal h3',h=>h.map(x=>x.textContent)),['Answer a question','Start a research round']);
+  assert.deepEqual(await page.$$eval('[data-proposal-apply]',b=>b.map(x=>x.textContent)),['Apply','Apply and start research']);assert.deepEqual(await page.$$eval('[data-proposal-mode] option',o=>o.map(x=>x.value)),['realtime','batch']);
+  assert.equal(app.store.project(cp.id).questions[0].status,'open');assert.equal(app.store.project(cp.id).status,'complete');
+  await click('[data-proposal-apply]');await page.waitForFunction(()=>document.querySelector('.chat-proposal .status-pill.green')?.textContent.startsWith('Applied'),{timeout:10000});
+  let saved=app.store.project(cp.id).questions[0];assert.equal(saved.status,'answered');assert.match(saved.answer,/^NFPA 13, 2025 edition/);
+  // A running reply holds the paid card; research cannot be changed while chat answers.
+  let finishHeld=null;custom=()=>new Promise(resolve=>{finishHeld=()=>resolve(chatResponse('Held reply finished.'));});
+  await page.type('#chat-message','Anything else to confirm?');await click('#chat-form button[type=submit]');await page.waitForSelector('#chat-stop');
+  await page.waitForFunction(()=>document.querySelector('[data-proposal-apply]')?.disabled===true);assert.match(await page.$eval('.chat-proposal-actions .field-help',e=>e.textContent),/current reply finishes/);
+  while(!finishHeld)await new Promise(r=>setTimeout(r,5));finishHeld();await page.waitForFunction(()=>document.querySelector('#chat-history')?.textContent.includes('Held reply finished.'),{timeout:10000});
+  await page.waitForFunction(()=>document.querySelector('[data-proposal-apply]')?.disabled===false,{timeout:10000});
+  app.services.engine.tick=async()=>{};await page.select('[data-proposal-mode]','batch');await click('[data-proposal-apply]');
+  await page.waitForFunction(()=>document.querySelectorAll('.chat-proposal .status-pill.green').length===2,{timeout:10000});
+  saved=app.store.project(cp.id);assert.equal(saved.status,'queued');assert.equal(saved.mode,'batch');assert.match(saved.input.notes,/User clarification: Proposed in project chat and approved by the user: Owner confirmed a hyperscale data center\./);
+  await page.setViewport({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);await page.setViewport({width:1440,height:1100});
+  await page.reload();await click('[data-tab=chat]');await page.waitForSelector('.chat-proposal');assert.equal(await page.$$eval('.chat-proposal .status-pill.green',e=>e.length),2);assert.equal(await page.$('[data-proposal-apply]'),null);custom=null;
+  await click(`[data-project="${b.id}"]`);await page.waitForFunction(()=>document.querySelector('.chat-heading h2')?.textContent.includes('BRAVO'));
   phase='desktop/mobile layout';await click('#chat-limits>summary');await page.type('#chat-message','Which missing details should I confirm with the owner?');await click('#chat-history .chat-citation summary');assert.equal(await page.$eval('#chat-history .chat-citation',e=>e.open),true);
   mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/project-chat-desktop.png',fullPage:true});await page.setViewport({width:390,height:844});await page.screenshot({path:'test-results/project-chat-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
-  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, reply depth, stop, stale-response protection, estimated costs without budgets, Markdown tables and lists, live draft and step, declined reply with retry on the other model, and desktop/mobile layout. No paid API calls.');
+  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, reply depth, stop, stale-response protection, estimated costs without budgets, Markdown tables and lists, live draft and step, declined reply with retry on the other model, proposal cards applied only on Apply, and desktop/mobile layout. No paid API calls.');
 }catch(e){console.error('Failed during: '+phase);if(page){console.error(await page.evaluate(()=>document.body.innerText).catch(()=>''));await page.screenshot({path:'test-results/project-chat-failure.png',fullPage:true}).catch(()=>{});}throw e;}
 finally{for(const release of releases)release();await browser?.close();await app?.close();assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-chat-ui-')));rmSync(dir,{recursive:true,force:true});}

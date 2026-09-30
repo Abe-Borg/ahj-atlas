@@ -340,7 +340,7 @@ test('chat searches the web, reads found pages into the source register and cite
   assert.deepEqual(s.chatUsage(a.id,turn.id),{searches:1,reads:1});assert.equal(s.project(a.id).searches,0);assert.equal(s.project(a.id).reads,0);assert.ok(turn.cost>.01);
   const tools=provider.calls.map(call=>JSON.stringify(call.payload.tools));assert.equal(new Set(tools).size,1);
   const search=provider.calls[0].payload.tools.find(t=>t.name==='web_search');assert.deepEqual(search,{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct']});
-  assert.deepEqual(provider.calls[0].payload.tools.filter(t=>t.input_schema).map(t=>t.name),['read_project','find_project_sources','read_saved_source','read_source','render_page','inspect_pdf','locate_address']);
+  assert.deepEqual(provider.calls[0].payload.tools.filter(t=>t.input_schema).map(t=>t.name),['read_project','find_project_sources','read_saved_source','read_source','render_page','inspect_pdf','locate_address','propose_question_update','propose_research_round','propose_address_correction']);
   assert.match(provider.calls[0].payload.system,/Search results are leads, not evidence/);assert.match(provider.calls[0].payload.system,/Use a table when comparing/);assert.ok(!/do not use them/.test(provider.calls[0].payload.system));
 });
 
