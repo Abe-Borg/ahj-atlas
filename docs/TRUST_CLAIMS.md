@@ -1,0 +1,118 @@
+# AHJ Atlas trust claims ledger
+
+Discovery completed before trust copy was written. Authority: executable implementation, not README promises. Reader: the engineer or architect who must review an AHJ (authority having jurisdiction) finding before putting their name on it. Default workflow: source server or packaged Windows desktop; differences are explicit. Test names below refer to `tests/trust.test.mjs` unless another file is named. Existing provider/fake-tool tests exercise paid workflows without provider charges.
+
+## Inventory and granularity
+
+The runtime inventory has **26 user action groups and 6 automatic behavior groups**. A group combines named controls with the same work, outbound data and failure behavior; it does not omit controls. Each ID below is a runtime card, including purely local actions. No file drop, generic JSON import, global undo, permit-submission command or email-sending action is implemented. The desktop has an initial source-workspace import, not a JSON-export restore command. Form selectors, chat depth/mode selectors, disclosure toggles and navigation are included in U01/U02/U14/U22. Native file-save cancellation is U19; modal Back/Close/Escape is U22. OS keyboard activation invokes the same controls; there is no app-defined global keyboard-command dispatcher.
+
+| ID | Named user triggers | Executable source / symbol | Verification |
+|---|---|---|---|
+| U01 | New research; project fields; Add project context; discipline/building-use custom fields; Research now/later | public/app.js:newForm | manual; runtime inventory coverage |
+| U02 | Select project; Overview / Contacts / Codes & standards / Sources / Activity / Chat with AI; authorities/questions on Overview; source/brief/Supporting passage disclosure | public/app.js:selectProject,renderProject,renderSources | manual; runtime inventory coverage |
+| U03 | API & spending; Save settings; Remember securely | lib/services.mjs:createServices.route; lib/key-vault.mjs:KeyVault | tests/provider.test.mjs; tests/connection-ui.mjs |
+| U04 | Disconnect & forget key | lib/services.mjs:connection DELETE; KeyVault.clear | tests/provider.test.mjs |
+| U05 | Start research (now / later) | Store.create; Engine.tick,dispatch; researchPayload,reviewPayload | tests/core.test.mjs; tests/evidence-recovery.test.mjs |
+| U06 | Continue research / Review or extend report; mode; context; corrected address/site | Engine.resume | tests/address-correction.test.mjs; tests/core.test.mjs |
+| U07 | Research NFPA standards | Engine.resume(focus); fireProfile,validateFireStandards | tests/fire-protection.test.mjs |
+| U08 | Finish with saved evidence | Engine.resume(finishPartial); reviewPayload | tests/core.test.mjs |
+| U09 | Stop research / confirm Stop research | Engine.cancel,applyOnce,pollBatch | tests/core.test.mjs; tests/parallel-reads.test.mjs |
+| U10 | Save answer; Edit answer; Dismiss; Reopen; cancel editing | Store.saveQuestion; public/app.js:questionDrafts | tests/questions.test.mjs |
+| U11 | Research with saved answers | Engine.resume; questionContext | tests/questions.test.mjs |
+| U12 | Reconcile batch (Activity) | Engine.reconcile,importBatch | tests/core.test.mjs |
+| U13 | Resolve uncertain charge; amount; confirmation; note | lib/services.mjs:resolve-charge route | tests/core.test.mjs; tests/chat.test.mjs |
+| U14 | Chat with AI; Reply depth; compose; Send message; Show earlier messages | ProjectChat.start,view,run,chatPayload; public/app.js:chatDrafts | tests/chat.test.mjs |
+| U15 | Retry a declined reply at suggested depth | public/app.js:chatRetries; ProjectChat.start | tests/chat.test.mjs |
+| U16 | Stop reply | ProjectChat.stop,run | tests/chat.test.mjs |
+| U17 | Apply; Apply and start research; processing mode on proposal | applyAction; Engine.resume; Store.saveQuestion | tests/chat-actions.test.mjs |
+| U18 | Export PDF / Excel / JSON | exportData,pdfReport,excelReport; createServices.route | tests/http-exports.test.mjs |
+| U19 | Native export Save / Cancel; choose filename | handleDesktopDownloads | tests/desktop-downloads.test.mjs |
+| U20 | Diagnostics; Show records for; Refresh; Download diagnostics | diagnosticReport; createServices.route; public/app.js:loadDiagnostics | tests/diagnostics.test.mjs |
+| U21 | Check for updates | createUpdateChecker.check(force); public/app.js:checkUpdates | tests/update-check.test.mjs |
+| U22 | User guide; About; full license; help topic; Close / Back / Escape | public/index.html; public/help.html; public/app.js:licenseLoaded; public/trust.js:mountTrust | trust dialogs browser test |
+| U23 | Source / website / professional email / phone / release / author / further-reading link | public/app.js:renderSources,renderContacts; secureWindowNavigation | tests/desktop.test.mjs; manual |
+| U24 | Delete project; confirmation | Store.deleteProject; createServices.route DELETE | tests/delete-project.test.mjs |
+| U25 | Start AHJ Atlas.cmd / launcher; Stop AHJ Atlas.cmd; window Close; Keep open / Close AHJ Atlas | launcher.mjs; stop.mjs; startDesktop; createApp.close | tests/desktop.test.mjs; manual |
+| U26 | Desktop Import existing workspace / select folder / Start fresh / Quit | preflightWorkspace; startDesktop | tests/desktop-migration.test.mjs |
+| A01 | startup/restart recovery, schema migrations and queued research | Store.constructor,recover; Engine.constructor,tick; ProjectChat.constructor | tests/upgrade.test.mjs; tests/chat.test.mjs |
+| A02 | scheduled research stages, tool follow-ups, coverage follow-ups, compact recovery and transient retries | Engine.dispatch,applyOnce,freshContext,importBatch | tests/evidence-recovery.test.mjs; tests/provider.test.mjs |
+| A03 | batch status/results polling and cancellation attempts | Engine.tick,pollBatch | tests/core.test.mjs |
+| A04 | remembered key check; unavailable-key checks while visible | createServices.verifyKey; public/app.js:refreshConnection | tests/provider.test.mjs; tests/connection-ui.mjs |
+| A05 | packaged desktop update lookup at launch, hourly/visibility trigger, cached daily | public/app.js:init,checkUpdates; createUpdateChecker.check; desktop/main.mjs:createBackend | tests/update-check.test.mjs |
+| A06 | local refresh, live reply saves, persistence and local browser error records | public/app.js:refreshSelected,recordClientError; liveReply; Store methods | tests/diagnostics.test.mjs; trust dialogs browser test |
+
+## Network inventory (5 route classes; 3 fixed external API hosts)
+
+| ID | Destination / classification | Trigger and sent data | Authentication / implementation |
+|---|---|---|---|
+| N1 | 127.0.0.1 or localhost; routine local HTTP | page/assets, project input, key entry, local requests, errors and exports; token returned at bootstrap | createApp binds 127.0.0.1; host/origin allowlist; X-App-Token on mutations; no local-user login |
+| N2 | api.anthropic.com; only with a key / existing submitted work | models check; token-count system/messages/tools/thinking/output settings; paid message/batch payload; prompts, inputs, questions, selected report/brief/source passages, conversation, lookup results and PDF image when used; native search queries handled by vendor; batch IDs / cancellation / results | Anthropic.requestOnce,messageOnce; x-api-key; SDK maxRetries:0; HTTPS; application constructor base/fetch overrides are programmatic/test hooks, not a UI switch |
+| N3 | geocoding.geo.census.gov; optional model-requested US address tool | project address in URL query; geographic response returned to model and saved | ResearchTools.locate; unauthenticated public fetch |
+| N4 | public HTTP/HTTPS source hosts, redirects and rendered-page assets; only when tools read | requested URL (including its path/query), User-Agent and Accept; renderer fetches scripts/images/styles/XHR via GET/HEAD interception; model can influence URLs; arbitrary public sites are not a fixed hostname list | validatePublicUrl/fetchPublic; no API key, browser sign-in or cookies supplied by fetchPublic; DNS/IP filtering/pinning, each redirect revalidated; HTTP allowed, so no blanket encryption claim; source requests/DNS reveal destinations |
+| N5 | api.github.com; automatic in packaged desktop / manual forced check | releases/latest GET, app version in User-Agent; no project payload in constructed request | createUpdateChecker.check; no token; source server lacks updater by default |
+| N6 | external links (including github.com, linkedin.com, platform.claude.com, privacy.claude.com, trust.anthropic.com and arbitrary source/website hosts); only after link activation | destination URL; external browser may use its own cookies, history and vendor/page network resources; mailto/tel hand off to user's handler in web UI, desktop navigation rejects non-HTTP(S) schemes | secureWindowNavigation; source UI uses target=_blank and rel=noopener; createApp sets Referrer-Policy:no-referrer; user guide served locally. These are user-directed navigation, not app API calls |
+
+Count convention: five app network routes N1–N5, plus the variable user-directed navigation class N6; three fixed external API hosts. Public-source and link hosts are open sets and cannot honestly be reduced to a finite count. Chromium/platform background networking is not exhaustively blocked by every app flag; do not promise firewall silence.
+
+## Factual claim families used in both levels
+
+Each trust section carries a `data-claim` ID; runtime cards carry the inventory ID above. Related sentences share an ID only when they have the same mechanism and qualification.
+
+| Claim | Exact scope, including limitations | Source (file / symbol) | Verification |
+|---|---|---|---|
+| C01 | Review aid, not compliance certification; human checks applicability | lib/prompts.mjs:validateReport disclaimer,common; lib/chat.mjs:chatSystem; report gaps/UI | tests/core.test.mjs; manual |
+| C02 | User inputs/answers/dismissals are context; source excerpts vs discovery leads; model prose vs built-in screening; general knowledge requested to be labeled, not mechanically enforced | Store.create,saveQuestion,source; questionContext; captureSearchSources; chatSystem; fireProfile | tests/questions.test.mjs; tests/chat-citations.test.mjs; tests/fire-protection.test.mjs |
+| C03 | Quote match/status demotion, known URLs/email checks, conditional jurisdiction and specific NFPA guards; no semantic proof | lib/prompts.mjs:validateReport; lib/fire-protection.mjs:validateFireStandards,hasEdition | tests/core.test.mjs; tests/fire-protection.test.mjs |
+| C04 | Research/review/chat jobs and exact model/effort/output/cache settings, adaptive thinking, no explicitly set temperature | lib/config.mjs:MODELS,STAGE_DEFS,CHAT_MODES,LIMITS,CHAT_LIMITS,cacheTTL; researchPayload,reviewPayload,chatPayload | quoted settings match executable constants; payload settings match copy |
+| C05 | No research-only filesystem/code/email/permit/login tool; permissions enforced by host tool lists; chat silo/current project; proposals require Apply; research URL provenance weaker than chat | Engine.applyOnce/readGroup; ProjectChat.validateTool,allowedUrl,lookup; applyAction; TOOL_DEFS,CHAT_TOOLS | tests/chat.test.mjs; tests/chat-actions.test.mjs; tests/parallel-reads.test.mjs |
+| C06 | Data boundary includes provider, Census, public sources, updater and external-link exceptions | N1–N6 above | quoted network facts match executable sources; manual firewall audit |
+| C07 | Local database, raw payloads/responses/tool results/chat/inputs retained; not encrypted by app; no age-based purge; delete guards/accounting; exports are partial records | Store.constructor,attempts,deleteProject,source; exportData; desktopPaths; electron-builder.config.cjs:deleteAppDataOnUninstall | tests/delete-project.test.mjs; tests/http-exports.test.mjs; manual SQLite inspection |
+| C08 | Windows remembered key uses DPAPI CurrentUser via PowerShell; session-memory elsewhere; forget clears credential file, not submitted provider data or arbitrary copies of typed secrets | lib/key-vault.mjs:crypt,set,clear; createServices.route; public/app.js:openSettings | tests/provider.test.mjs; manual Windows check |
+| C09 | Loopback host/origin/mutation guards, CSP, escaped model prose, local processes still can read; Electron isolation, permission denial; no authorization between local OS users/processes | createApp; renderMarkdown; public/app.js:esc; startDesktop; secureWindowNavigation | tests/http-exports.test.mjs; tests/markdown.test.mjs; tests/desktop.test.mjs |
+| C10 | Public-read DNS/IP checks, standard ports and redirect checks; no site login/form POST; fresh renderer profile and constrained page APIs; public URLs may disclose data; no absolute egress prevention | validatePublicUrl,fetchPublic,ResearchTools.render; ProjectChat.allowedUrl | tests/core.test.mjs; tests/chat.test.mjs; manual browser check |
+| C11 | No outbound telemetry uploader found; diagnostics stored locally, finite event count, summary redaction with residual error details; raw database more sensitive | cleanDetails,redactText,diagnosticReport; Store.diagnostic; public/app.js:recordClientError | tests/diagnostics.test.mjs; trust assets local; manual full source network inventory |
+| C12 | Bounds limit work, not money or strict wall-clock; context shrink/checkpoint; completion/recovery follow-ups; transient research retry allowance; chat no automatic failure resubmit; per-project chat slot, independent research slots | Engine.dispatch,applyOnce,tick; ProjectChat.run,start; Store.reserve | tests/evidence-recovery.test.mjs; tests/chat.test.mjs; quoted literal bounds match executable sources |
+| C13 | Stop waits for in-flight completion, already-started reads saved, batch provider work/cost may persist; uncertain POST/stream reserves retained; no refund promise; received responses saved | Engine.cancel,applyOnce,readGroup,pollBatch,close; ProjectChat.stop,run,close; Anthropic.messageOnce | tests/core.test.mjs; tests/parallel-reads.test.mjs; tests/chat.test.mjs |
+| C14 | Startup resumes queued research/received apply/pending batches, key checks and updates; reconnect requeues needs_key; UI timers; chat restart does not resubmit | Store.recover; Engine.tick; ProjectChat.constructor; createServices.verifyKey/settings route; public/app.js:init,refreshConnection | tests/upgrade.test.mjs; tests/chat.test.mjs; tests/update-check.test.mjs |
+| C15 | Anthropic bills; usage counters exact as received but dollar totals list-price estimates; no app spend cap; batch token discount excludes searches; cache pricing; manually entered charges; reservations conservative | costMicros,reserveMicros,chatReserveMicros; Store.spending; resolve-charge route | tests/core.test.mjs; tests/chat.test.mjs; quoted settings match executable constants |
+| C16 | Deterministic save/navigation/export/validation/redaction/accounting/tool admission; saved records usable offline, not remote research/key/update checks | Store; exports; validateReport; diagnosticReport; research-tools; public/app.js | tests/http-exports.test.mjs; tests/diagnostics.test.mjs; manual disconnect |
+| C17 | Source omission/staleness, visual PDF and geocoder limits, prompts not guarantees, repeatability/re-derivation limited; unsigned release checksums aren't publisher identity | prepareRead,inspectPdf,locate; validateReport; chatSystem; electron-builder.config.cjs:forceCodeSigning; scripts/windows-release-checksums.ps1 | tests/fire-protection.test.mjs; manual |
+| C18 | Audit via Sources, Activity, Diagnostics, exports, SQLite and provider console; diagnostics omit content/raw database keeps it; JSON export omits chat/full attempts; no provider training/privacy guarantee asserted | public/app.js:renderSources,renderActivity,loadDiagnostics; diagnosticReport; exportData; Store.constructor | tests/http-exports.test.mjs; tests/diagnostics.test.mjs; manual |
+| C19 | No hidden local model/vector corpus, sync/team sharing, prompt-upload telemetry or fine-tuning/training API path found; vendor use/retention outside app enforcement | provider endpoints, server routes, Store schema, package dependency and network inventory | manual exhaustive first-party call/schema inspection; not a vendor guarantee |
+| C20 | Trust UI two modal levels, local assets only, inline SVG, focus/Escape/rail and all cards present | public/trust.js; public/trust.css; public/help.html; public/index.html | trust dialogs browser test; runtime inventory coverage; trust assets local |
+
+## Numeric / setting ledger
+
+User-facing numbers are interpolated from `public/trust-facts.js`, never scattered as untracked prose literals. Structural card numbering is generated from the inventory and has no behavioral meaning. Model labels/IDs and hostname spellings come from that same snapshot. `quoted settings match executable constants` asserts the copied exported constants; `quoted literal bounds match executable sources` asserts inline facts against actual source expressions, and payload tests check current runtime construction. A changed source must update the copy and ledger in the same change.
+
+| Facts object fields | Authority / symbol | Units / qualification |
+|---|---|---|
+| models, stages, research, chat, modes, priceDate, diagnosticEvents | lib/config.mjs:MODELS,STAGE_DEFS,LIMITS,CHAT_LIMITS,CHAT_MODES,PRICE_DATE; diagnostics.mjs:DIAGNOSTIC_LIMIT | tokens differ from characters; milliseconds converted only for display; all price fields dollars per million tokens |
+| hosts.anthropic, hosts.census, hosts.updates | provider.mjs:Anthropic constructor base; research-tools.mjs:locate; update-check.mjs:RELEASES_API | fixed API hosts; public sources/links remain variable |
+| serverHost, serverPort, requestBytes | server.mjs:createApp signature/listen and body parsing | source default only; desktop port is assigned dynamically; ATLAS_PORT / ATLAS_DATA_DIR overrides |
+| workerMs, researchWorkers, parallelReads, retries, retryBaseMs, outputRecoveries | engine.mjs:constructor,tick,parallelReads,dispatch,applyOnce,importBatch | retries counted from errored attempts for stage; the count spans the project’s recorded stage attempts, so continuation does not discard earlier errors |
+| pollMs, keyRetryStartMs, keyRetryMaxMs, uiRefreshMs, chatRefreshMs, updateUiMs | Engine constructor; public/app.js:refreshConnection and timers/init | key checks visible-window only; repeated transient polling bounded by retention rather than finite retry count |
+| updateIntervalMs, updateTimeoutMs | desktop/update-check.mjs:CHECK_INTERVAL_MS,check | persisted attempt cooldown; manual force bypasses it |
+| sourceIdleMs, redirects, cacheMs, cacheDocuments, sourceCharacters, exportCharacters, sourceViewCharacters | fetchPublic; ResearchTools.document; Store.source; exports.mjs:exportData; createApp project GET | socket idle timeout, not total download deadline; in-memory download cache; saved source/excerpt caps in characters |
+| renderRequests, renderBytes, renderStartMs, renderNavigationMs, renderIdleMs, renderWaitMs | ResearchTools.render | data URLs do not consume intercepted-request cap; each fetched resource capped separately |
+| providerRequestMs, providerStreamMs, modelsTimeoutMs, tokenCountMs, batchSubmitMs, batchPollMs, batchResultsMs, batchCancelMs, modelsPages, modelsPageSize | Anthropic constructor/requestOnce/check/count/messageOnce/batch/poll/results/cancel | request and whole-stream limits; key check pagination bounded; SDK automatic retries disabled |
+| quoteMin, quoteMax, pageSectionMax, pdfDefaultPages, pdfMaxPages, pdfSearchPages, pdfMaxPage, previousAddresses, manualChargeMax, searchPrice, searchUnit, million, batchFactor, shortCacheFactor, longCacheFactor, realtimeCacheTTL, batchCacheTTL | validateReport; prepareRead/inspectPdf; Engine.resume; createServices resolve-charge route; config.mjs:costMicros | quote match after whitespace/case normalization; PDF page cap is requested page index; manual reconciliation dollars; batch factor applies tokens only |
+
+## Findings and disagreements (do not fix engine behavior in this change)
+
+1. “Verified” checks at least one normalized matching quote, not that every field is proved. Generic code rows have weaker edition binding than NFPA rows. AI reviewers can repeat the same incorrect reading. Copy must not claim certainty or reproducible semantic judgment.
+2. Research tools accept model-chosen public URLs; chat requires a URL already seen in its project or user message. Public DNS/IP filtering does not prevent confidential text in URL paths/queries or native search queries. The renderer can request scripts, images, styles and GET/XHR destinations; it is not a network-silent browser.
+3. Source HTTP is permitted. “All traffic is encrypted” is unsupported.
+4. Automatic key/model checks, queued/retried research, batch polling and packaged GitHub update checks contradict “nothing runs without your click.” Saving a key requeues needs_key projects.
+5. No app spending cap exists. Work/time limits are not strict total-duration or dollar limits; source timeout is idle time, repeated batch/key checks have no small finite retry count, resumed research resets stage rounds while cumulative source/search allowance remains.
+6. Database payloads/responses include sensitive project content; no database encryption or age purge. Deletion removes logical rows, not a proven secure wipe of WAL, backups, exports or provider data; uninstall retains app data. JSON exports omit chat and raw attempt/tool records. Diagnostics redact selected fields, not arbitrary personal data in errors/notes.
+7. User-provided answers and model-proposed answers approved by the user are treated as user context; approval does not make them verified evidence. Chat reads add sources and costs without a separate Apply; “nothing changes” must be scoped to proposed project edits.
+8. Saved research/review conversations reuse their original request prefix/model until fresh-context rebuilding. Current model IDs describe new work; the copy must name that exception. This agrees with the README continuity statement after inspection of researchPayload’s original-payload branch.
+9. Footer “Evidence first. Every finding traceable.” is too broad: summaries and general knowledge need not have citations; chat provenance labeling is an instruction. Soften that same-claim copy.
+10. API settings help says connecting checks access to research models; route checks the Models API list, while per-request capability checks enforce requested model access. Correct this same-claim UI sentence.
+11. Existing Linux test failure: desktop.test.mjs Windows fixture vs native path.join. Browser sandbox helper originally owned by nobody and unusable. Windows installer builder deliberately rejects Linux. These are validation limitations, not trust-engine fixes.
+
+No vendor retention/training statement is inferred from app code. Further-reading policy links explain where you must check vendor terms yourself.
+
+12. README mentions the app’s document.modelContext tools, but no first-party document.modelContext registration exists in the shipped code. Removed that same-claim documentation reference; no capability added.
+13. Help’s data-folder and batch-pricing statements lack desktop location/chat exceptions; update copy to name source vs packaged paths and real-time chat. README prompt-rule “never” is an instruction, not enforcement; reword it.
