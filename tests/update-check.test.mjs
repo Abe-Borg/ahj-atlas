@@ -179,9 +179,10 @@ test('without an installer launcher the checker only links to the release',async
 });
 
 test('install is refused while research is running and otherwise hands the installer to the shell',async t=>{
-  const u=updater(t),checker=u.make();
-  const app=await createApp({dataDir:u.dataDir,port:0,provider:new FakeProvider(),worker:false,updateChecker:checker});
-  t.after(()=>app.close());
+  // Windows cannot remove an open database: close the app before deleting its folder.
+  const u=updater(t),checker=u.make(),dataDir=mkdtempSync(path.join(os.tmpdir(),'ahj-update-install-test-'));
+  const app=await createApp({dataDir,port:0,provider:new FakeProvider(),worker:false,updateChecker:checker});
+  t.after(async()=>{await app.close();rmSync(dataDir,{recursive:true,force:true});});
   const {token}=await(await fetch(app.url+'/api/bootstrap')).json();
   const post=(route,headers={'X-App-Token':token})=>fetch(app.url+route,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:'{}'});
   assert.equal((await post('/api/updates/download',{})).status,403);

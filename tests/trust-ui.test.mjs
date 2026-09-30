@@ -6,6 +6,7 @@ import path from 'node:path';
 import puppeteer from 'puppeteer-core';
 import {browserPath} from '../lib/research-tools.mjs';
 import {createApp} from '../server.mjs';
+import {RUNTIME} from '../public/trust.js';
 
 test('trust dialogs browser test: wiring, one Escape, focus, rail and themes',async t=>{
   const dir=mkdtempSync(path.join(os.tmpdir(),'atlas-trust-ui-'));
@@ -29,7 +30,7 @@ test('trust dialogs browser test: wiring, one Escape, focus, rail and themes',as
   await page.click('#trust-show-dossier');
   assert.equal(await page.$eval('#trust-topic',e=>e.open),true);assert.equal(await page.$eval('#trust-dossier',e=>e.open),true);
   assert.equal(await page.evaluate(()=>document.activeElement.id),'trust-dossier-title');
-  assert.equal(await page.$$eval('.trust-runtime',els=>els.length),32);
+  assert.equal(await page.$$eval('.trust-runtime',els=>els.length),RUNTIME.length);
   assert.ok(await page.$$eval('.trust-runtime',els=>els.every(e=>e.querySelectorAll('dt').length===5)));
   assert.equal(await page.$eval('.trust-contents',e=>getComputedStyle(e).position),'sticky');
   await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),'Close dossier');

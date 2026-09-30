@@ -45,10 +45,11 @@ export function checksumFor(text,name){
   throw new UpdateError('The release checksum file does not list this installer.');
 }
 
+// Resolves once the file is closed again: Windows cannot replace or delete an open file.
 function hashFile(file){
   return new Promise((resolve,reject)=>{
     const hash=createHash('sha256');
-    createReadStream(file).on('error',reject).on('data',chunk=>hash.update(chunk)).on('end',()=>resolve(hash.digest('hex')));
+    createReadStream(file).on('error',reject).on('data',chunk=>hash.update(chunk)).on('close',()=>resolve(hash.digest('hex')));
   });
 }
 
