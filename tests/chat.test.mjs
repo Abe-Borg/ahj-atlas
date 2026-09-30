@@ -118,19 +118,27 @@ test('project chat defaults to Sonnet 5.5 high and includes only that project’
   assert.ok(!JSON.stringify(diagnosticReport(s)).includes('ALPHA_CHAT_SECRET'));
   validateCapabilities([{id:MODELS.research.id,max_tokens:CHAT_LIMITS.output}],{modelKeys:['research'],outputLimits:{research:CHAT_LIMITS.output}});
 });
-test('Deep and Opus replies use their model and effort, check that capability, and price at that model’s rates',async t=>{
+test('Standard and Premium replies reason at high effort on their model, check that capability, and price at that model’s rates',async t=>{
   const {app,provider,a}=await setup(t),s=app.store,c=app.services.chat;
-  c.start(a.id,body('Deep question',{mode:'deep'}));await settled(c);c.start(a.id,body('Opus question',{mode:'opus'}));await settled(c);
-  const [deep,opus]=provider.calls.map(call=>call.payload);
-  assert.equal(deep.model,MODELS.research.id);assert.equal(deep.output_config.effort,'max');assert.match(deep.system,/Claude Sonnet 5\.5 at max effort/);
-  assert.equal(opus.model,MODELS.review.id);assert.equal(opus.output_config.effort,'xhigh');assert.match(opus.system,/Claude Opus 5\.5 at xhigh effort/);
-  assert.deepEqual(provider.preflights.map(p=>p[2]),[{modelKeys:['research'],outputLimits:{research:CHAT_LIMITS.output},efforts:{research:'max'}},{modelKeys:['review'],outputLimits:{review:CHAT_LIMITS.output},efforts:{review:'xhigh'}}]);
-  const deepAttempt=s.attempts(a.id).find(x=>x.model_key==='research'),opusAttempt=s.attempts(a.id).find(x=>x.model_key==='review');assert.equal(deepAttempt.model_key,'research');assert.equal(opusAttempt.model_key,'review');
-  assert.equal(opusAttempt.actual,costMicros(chatResponse().usage,'review','realtime'));assert.ok(opusAttempt.actual>deepAttempt.actual);
-  const view=c.view(a.id);assert.deepEqual(view.turns.map(t=>t.mode),['deep','opus']);assert.equal(view.turns[1].modeLabel,'Opus · Claude Opus 5.5');assert.deepEqual(view.modes.map(m=>m.id),['standard','deep','opus']);
-  const capable={id:MODELS.research.id,max_tokens:CHAT_LIMITS.output,capabilities:{effort:{max:{supported:true}}}};
-  validateCapabilities([capable],{modelKeys:['research'],outputLimits:{research:CHAT_LIMITS.output},efforts:{research:'max'}});
-  assert.throws(()=>validateCapabilities([{...capable,capabilities:{effort:{max:{supported:false}}}}],{modelKeys:['research'],outputLimits:{research:CHAT_LIMITS.output},efforts:{research:'max'}}),/max effort/);
+  c.start(a.id,body('Standard question'));await settled(c);c.start(a.id,body('Premium question',{mode:'opus'}));await settled(c);
+  const [standard,premium]=provider.calls.map(call=>call.payload);
+  assert.equal(standard.model,MODELS.research.id);assert.equal(standard.output_config.effort,'high');assert.match(standard.system,/Claude Sonnet 5\.5 at high effort/);
+  assert.equal(premium.model,MODELS.review.id);assert.equal(premium.output_config.effort,'high');assert.match(premium.system,/Claude Opus 5\.5 at high effort/);
+  assert.deepEqual(provider.preflights.map(p=>p[2]),[{modelKeys:['research'],outputLimits:{research:CHAT_LIMITS.output},efforts:{research:'high'}},{modelKeys:['review'],outputLimits:{review:CHAT_LIMITS.output},efforts:{review:'high'}}]);
+  const standardAttempt=s.attempts(a.id).find(x=>x.model_key==='research'),premiumAttempt=s.attempts(a.id).find(x=>x.model_key==='review');assert.equal(standardAttempt.model_key,'research');assert.equal(premiumAttempt.model_key,'review');
+  assert.equal(premiumAttempt.actual,costMicros(chatResponse().usage,'review','realtime'));assert.ok(premiumAttempt.actual>standardAttempt.actual);
+  const view=c.view(a.id);assert.deepEqual(view.turns.map(t=>t.mode),['standard','opus']);assert.equal(view.turns[1].modeLabel,'Premium · Claude Opus 5.5');
+  assert.deepEqual(view.modes,[{id:'standard',label:'Standard',model:'Claude Sonnet 5.5',effort:'high'},{id:'opus',label:'Premium',model:'Claude Opus 5.5',effort:'high'}]);
+  // The Opus capability check now covers high effort, which Opus research stages do not use.
+  const opusModel=capabilities=>({id:MODELS.review.id,max_tokens:CHAT_LIMITS.output,capabilities});
+  validateCapabilities([opusModel({effort:{high:{supported:true}}})],{modelKeys:['review'],outputLimits:{review:CHAT_LIMITS.output},efforts:{review:'high'}});
+  assert.throws(()=>validateCapabilities([opusModel({effort:{high:{supported:false}}})],{modelKeys:['review'],outputLimits:{review:CHAT_LIMITS.output},efforts:{review:'high'}}),/high effort/);
+});
+test('a reply saved with the retired Deep depth keeps its label, and a new message cannot choose Deep',async t=>{
+  const {app,provider,a}=await setup(t),s=app.store,c=app.services.chat;
+  const earlier=s.createChatTurn(a.id,{clientId:randomUUID(),message:'Earlier deep question',mode:'deep'});s.updateChatTurn(a.id,earlier.id,{status:'complete',answer:'Earlier answer.'});
+  const turn=c.view(a.id).turns.find(x=>x.id===earlier.id);assert.equal(turn.mode,'deep');assert.equal(turn.modeLabel,'Deep · Claude Sonnet 5.5');
+  assert.throws(()=>c.start(a.id,body('Deep question',{mode:'deep'})),/Choose Standard or Premium/);assert.equal(provider.calls.length,0);
 });
 test('lookup tools enforce the server-side project binding and preserve access beyond context previews',async t=>{
   const {app,a,b}=await setup(t),s=app.store,c=app.services.chat;
@@ -220,7 +228,7 @@ test('unknown or unusable charges stay pending without blocking chat, changing r
   });
 });
 test('a declined chat request gets its own status, discards partial output and offers the other model',async t=>{
-  for(const [mode,retry,label] of [['standard','opus',/try Opus \(Claude Opus 5\.5\)/],['opus','standard',/try Standard \(Claude Sonnet 5\.5\)/]])await t.test(mode,async t=>{
+  for(const [mode,retry,label] of [['standard','opus',/try Premium \(Claude Opus 5\.5\)/],['opus','standard',/try Standard \(Claude Sonnet 5\.5\)/]])await t.test(mode,async t=>{
     // The decline arrives mid-stream, after part of an answer was shown.
     const provider=new ChatProvider((payload,n,options)=>{
       options.onEvent({type:'message_start',message:{}});options.onEvent({type:'content_block_start',index:0,content_block:{type:'text',text:''}});options.onEvent({type:'content_block_delta',index:0,delta:{type:'text_delta',text:'Partial ALPHA text'}});
@@ -305,10 +313,10 @@ test('restart interrupts chat without resubmission and preserves uncertain estim
 test('chat HTTP mutations require authorization and validate message and reply depth',async t=>{
   const {app,a,post}=await setup(t);
   assert.equal((await post(a.id,body(),'chat',false)).status,403);
-  for(const value of [null,body(''),body('x'.repeat(CHAT_LIMITS.messageChars+1)),body('Hi',{clientId:'bad'}),body('Hi',{mode:'turbo'}),body('Hi',{mode:3}),body('Hi',{mode:'__proto__'})])assert.equal((await post(a.id,value)).status,400);
+  for(const value of [null,body(''),body('x'.repeat(CHAT_LIMITS.messageChars+1)),body('Hi',{clientId:'bad'}),body('Hi',{mode:'turbo'}),body('Hi',{mode:3}),body('Hi',{mode:'__proto__'}),body('Hi',{mode:'deep'})])assert.equal((await post(a.id,value)).status,400);
   assert.equal(app.store.chatTurns(a.id).length,0);
-  assert.equal((await post(a.id,body('y'.repeat(CHAT_LIMITS.messageChars),{mode:'deep'}))).status,202);await settled(app.services.chat);
-  assert.equal(app.store.chatTurns(a.id)[0].mode,'deep');
+  assert.equal((await post(a.id,body('y'.repeat(CHAT_LIMITS.messageChars),{mode:'opus'}))).status,202);await settled(app.services.chat);
+  assert.equal(app.store.chatTurns(a.id)[0].mode,'opus');
 });
 
 // A fake public web: pages are served without network access.

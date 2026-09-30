@@ -101,15 +101,10 @@ export const FACTS = {
       "modelKey": "research",
       "effort": "high"
     },
-    "deep": {
-      "label": "Deep",
-      "modelKey": "research",
-      "effort": "max"
-    },
     "opus": {
-      "label": "Opus",
+      "label": "Premium",
       "modelKey": "review",
-      "effort": "xhigh"
+      "effort": "high"
     }
   },
   "priceDate": "2026-09-28",
