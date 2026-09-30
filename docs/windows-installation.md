@@ -21,9 +21,13 @@ The installer and app are unsigned. Windows may show **Unknown publisher** or a 
 
 Run the installer under your normal Windows account. It first shows the AHJ Atlas license; read it and choose **I Agree** to continue. It installs for the current user, adds **AHJ Atlas** to the Start menu, and registers an uninstall entry in **Installed Apps**. Launch it from the Start menu. It opens its own desktop window; there is no `.cmd` launcher for installed users.
 
-The installed app checks for a newer published Windows release when it opens and at most once every 24 hours while it remains open. Open **API & spending → App updates → Check for updates** to check again at any time. If an update is available, the app links to its GitHub Release. It does not download or install updates automatically.
+The installed app checks for a newer published Windows release when it opens and at most once every 24 hours while it remains open. Open **API & spending → App updates → Check for updates** to check again at any time. Checking never downloads or installs anything.
 
-To update, download the newer installer and checksum from that release, verify the checksum as described above, close AHJ Atlas, and run the installer under the same Windows account. It upgrades the application in place and retains the workspace. Back up your data before an update.
+When an update is available, a banner offers **Download update** (the same button is under **App updates**). The app downloads the installer from the GitHub Release into `%LOCALAPPDATA%\AHJ Atlas\updates` and compares its SHA-256 with the release's `SHA256SUMS.txt` (and with GitHub's own asset digest when available). A mismatch deletes the file and nothing is installed. When the download is verified, choose **Restart and install**. The app closes, the installer upgrades it in place without showing its pages again (the license was accepted at first install), and AHJ Atlas reopens on the new version. Your workspace and remembered key are kept. The next launch tells you whether the update finished; if it did not, choose **Restart and install** again or install manually.
+
+**Restart and install** waits until no research or chat reply is running. A submitted batch keeps running at Anthropic and is picked up again when the app reopens. Back up your data before an update.
+
+The checksum shows the installer is the one published in that release; it does not prove who built it, because the installer is unsigned. To update manually instead, download the newer installer and checksum from the release page, verify the checksum as described above, close AHJ Atlas, and run the installer under the same Windows account.
 
 ## Data, backup, and removal
 

@@ -29,32 +29,61 @@ async function api(url,options={}){
   const data=await response.json();if(!response.ok)throw new Error(data.error||'The request could not be completed.');return data;
 }
 function toast(text){$('#toast').textContent=text;$('#toast').hidden=false;clearTimeout(timer);timer=setTimeout(()=>$('#toast').hidden=true,5000);}
+const updateReady=u=>Boolean(u?.updateAvailable&&u.download?.state==='ready'&&u.download.version===u.latestVersion);
 function renderUpdateStatus(){
   if(!state.bootstrap?.updatesEnabled)return;
-  const current=state.bootstrap.version,available=Boolean(updateState?.updateAvailable&&updateState.releaseUrl);
+  const u=updateState,current=u?.currentVersion||state.bootstrap.version,available=Boolean(u?.updateAvailable&&u.releaseUrl),inApp=Boolean(u?.canInstall),d=u?.download||{};
+  const percent=d.totalBytes?Math.min(100,Math.floor(d.receivedBytes/d.totalBytes*100)):null;
+  const unfinished=u?.notice?.type==='failed'?`The update to ${u.notice.version} did not finish. `:'';
+  let text='',action='';
+  if(u?.installing)text=`Installing AHJ Atlas ${d.version||u.latestVersion}. The app will close and reopen when the update finishes.`;
+  else if(inApp&&d.state==='downloading'){text=`Downloading AHJ Atlas ${d.version||u.latestVersion}…${percent==null?'':` ${percent}%`}`;action='Downloading…';}
+  else if(updateReady(u)){text=`${unfinished}AHJ Atlas ${u.latestVersion} is downloaded and verified. Restart to install it; the app reopens and your projects are kept.`;action='Restart and install';}
+  else if(available&&inApp&&d.state==='failed'){text=`The update download did not finish. ${d.error}`;action='Try again';}
+  else if(available&&inApp){text=`${unfinished}AHJ Atlas ${u.latestVersion} is available. You have ${current}.`;action='Download update';}
+  else if(available)text=`AHJ Atlas ${u.latestVersion} is available. You have ${current}.`;
   $('#update-settings').hidden=false;
-  $('#update-banner').hidden=!available;
-  $('#update-release-link').hidden=!available;
+  $('#update-banner').hidden=!text;
+  $('#update-banner-text').textContent=text;
+  for(const id of ['#update-banner-action','#update-action']){const button=$(id);button.hidden=!action;button.textContent=action;button.disabled=d.state==='downloading'||Boolean(u?.installing);}
+  $('#update-banner-link').hidden=!available;$('#update-release-link').hidden=!available;
   if(available){
-    $('#update-banner-text').textContent=`AHJ Atlas ${updateState.latestVersion} is available. You have ${current}.`;
-    $('#update-banner-link').href=updateState.releaseUrl;
-    $('#update-release-link').href=updateState.releaseUrl;
+    $('#update-banner-link').textContent=inApp?'What’s new ↗':'View release and install ↗';
+    $('#update-banner-link').href=u.releaseUrl;
+    $('#update-release-link').href=u.releaseUrl;
   }
-  const checked=updateState?.checkedAt?` Last checked ${date(updateState.checkedAt)}.`:'';
-  $('#update-status').textContent=updateState?.error?`${updateState.error}${checked}`
-    :available?`Version ${updateState.latestVersion} is available. Download the installer and checksum from the release page.${checked}`
-    :updateState?.latestVersion?`Version ${current} is up to date.${checked}`
-    :updateState?.checkedAt?`No published Windows release is available yet.${checked}`:`Installed version ${current}. No update check has completed yet.`;
+  const checked=u?.checkedAt?` Last checked ${date(u.checkedAt)}.`:'';
+  $('#update-status').textContent=u?.error&&!available?`${u.error}${checked}`
+    :text?`${text}${available&&!inApp?' Download the installer and checksum from the release page.':''}${checked}`
+    :u?.latestVersion?`Version ${current} is up to date.${checked}`
+    :u?.checkedAt?`No published Windows release is available yet.${checked}`:`Installed version ${current}. No update check has completed yet.`;
+}
+let updatePoll=null;
+function followUpdate(){
+  clearTimeout(updatePoll);
+  if(updateState?.download?.state!=='downloading')return;
+  updatePoll=setTimeout(async()=>{try{updateState=await api('/api/updates');renderUpdateStatus();}catch{}followUpdate();},1000);
 }
 async function checkUpdates(force=false){
   if(!state.bootstrap?.updatesEnabled)return;
   const button=$('#check-updates');
   if(force){button.disabled=true;button.textContent='Checking…';}
-  try{updateState=await api('/api/updates',force?{method:'POST',body:{}}:{});renderUpdateStatus();}
+  try{
+    updateState=await api('/api/updates',force?{method:'POST',body:{}}:{});renderUpdateStatus();followUpdate();
+    if(updateState.notice?.type==='updated'&&!state.updateNoticeShown){state.updateNoticeShown=true;toast(`AHJ Atlas was updated to ${updateState.notice.version}.`);}
+  }
   catch(error){$('#update-status').textContent=`Could not check for updates: ${error.message}`;}
   finally{if(force){button.disabled=false;button.textContent='Check for updates';}}
 }
+// Download verifies the installer's published checksum; install closes the app, runs the installer and reopens.
+async function runUpdateAction(){
+  try{
+    updateState=await api(updateReady(updateState)?'/api/updates/install':'/api/updates/download',{method:'POST',body:{}});
+    renderUpdateStatus();followUpdate();
+  }catch(error){toast(error.message);}
+}
 $('#check-updates').addEventListener('click',()=>checkUpdates(true));
+for(const id of ['#update-banner-action','#update-action'])$(id).addEventListener('click',runUpdateAction);
 async function loadDiagnostics(){
   const load=++diagnosticsLoad;diagnosticsSnapshot=null;$('#download-diagnostics').disabled=true;$('#diagnostic-content').innerHTML='<p class="muted" style="margin-top:20px">Loading saved records…</p>';
   try{

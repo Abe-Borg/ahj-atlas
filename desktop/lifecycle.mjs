@@ -10,8 +10,9 @@ function activeWork(backend){
     ||backend?.store?.hasPendingRequests?.());
 }
 
+// beforeExit runs after the backend has closed and just before the process exits.
 export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths,dataDir,provider,
-  dialog,screen,shell,preflight=preflightWorkspace,onError=console.error,diagnostics=false,migrationChoice=null,downloadDir=null}){
+  dialog,screen,shell,preflight=preflightWorkspace,onError=console.error,diagnostics=false,migrationChoice=null,downloadDir=null,beforeExit=null}){
   if(!app.requestSingleInstanceLock()){
     app.quit();
     return {primary:false};
@@ -31,6 +32,7 @@ export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths
   const exitAfterCleanup=()=>{
     allowQuit=true;
     allowWindowClose=true;
+    try{beforeExit?.();}catch(error){onError(error);}
     if(typeof app.exit==='function')app.exit(0);
     else app.quit();
   };

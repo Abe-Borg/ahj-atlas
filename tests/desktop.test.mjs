@@ -82,6 +82,19 @@ test('normal close releases the backend before exiting the packaged process',asy
   assert.deepEqual(exits,[0]);
 });
 
+test('an update installer starts only after the backend has closed, and its failure still exits',async()=>{
+  for(const fail of [false,true]){
+    const app=new FakeApp(),order=[],errors=[];app.exit=code=>order.push('exit:'+code);let finishClose;
+    const desktop=await startDesktop({app,BrowserWindow:FakeWindow,dataDir:'synthetic',onError:error=>errors.push(error.message),
+      beforeExit:()=>{order.push('installer');if(fail)throw new Error('spawn failed');},
+      createBackend:async()=>backend(()=>new Promise(resolve=>{finishClose=()=>{order.push('backend closed');resolve();};}))});
+    assert.equal(app.quit(),false);
+    await Promise.resolve();assert.deepEqual(order,[]);
+    finishClose();await desktop.closed();
+    assert.deepEqual(order,['backend closed','installer','exit:0']);assert.deepEqual(errors,fail?['spawn failed']:[]);
+  }
+});
+
 test('backend startup failure shows an error and leaves no window',async()=>{
   const app=new FakeApp(),errors=[];
   await assert.rejects(startDesktop({app,BrowserWindow:FakeWindow,dataDir:'synthetic',onError:()=>{},

@@ -20,7 +20,7 @@ This plan is intentionally divided into one-PR sessions. Each session must leave
 8. The Electron renderer must have Node integration disabled, context isolation enabled, and sandboxing enabled. External web content must never replace the application page in the privileged desktop window.
 9. The installer and executable will be unsigned. Documentation must plainly explain the Windows "Unknown publisher" / SmartScreen experience and must never advise users to disable security software.
 10. Production releases will be attached to GitHub Releases. The workflow must also emit SHA-256 checksums.
-11. No automatic updater is required. Updating means running a newer installer over the existing per-user installation. The user's data must remain intact.
+11. No automatic updater is required. Updating means running a newer installer over the existing per-user installation. The user's data must remain intact. (Since 1.7.0, the installed app can download and checksum-verify that installer and run it after the user chooses **Restart and install**; nothing downloads or installs without that choice. See the README's In-app updates section.)
 12. Existing source-development commands should continue to work. The `.cmd` launchers may remain for developers or source users, but they are no longer the supported installed-user entry point.
 
 ## Current architecture the implementer must understand first
