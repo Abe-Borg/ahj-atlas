@@ -6,8 +6,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { createApp } from '../server.mjs';
 import { Store } from '../lib/store.mjs';
-import { chatPayload,projectSection,ProjectChat,describeLookup } from '../lib/chat.mjs';
-import { ResearchTools, searchTool } from '../lib/research-tools.mjs';
+import { chatPayload,projectSection,ProjectChat,describeLookup,CHAT_TOOLS } from '../lib/chat.mjs';
+import { initialChatEvidence } from '../lib/chat-citations.mjs';
+import { ResearchTools, searchTool, TOOL_DEFS } from '../lib/research-tools.mjs';
 import { remainingSearches } from '../lib/prompts.mjs';
 import { CHAT_LIMITS,LIMITS,MODELS,costMicros } from '../lib/config.mjs';
 import { ProviderError,validateCapabilities } from '../lib/provider.mjs';
@@ -153,7 +154,8 @@ test('lookup tools enforce the server-side project binding and preserve access b
 });
 test('chat enforces numeric lookup bounds locally even without schema constraints',async t=>{
   const {app,a}=await setup(t),s=app.store,c=app.services.chat;
-  const text='0123456789'.repeat(3000);s.source(a.id,{url:'https://example.com/bounds',title:'Long record',text,readFull:true});
+  // Longer than one lookup, so every lookup size can be read with more to follow.
+  const text='0123456789'.repeat(CHAT_LIMITS.toolChars/10+1000);s.source(a.id,{url:'https://example.com/bounds',title:'Long record',text,readFull:true});
   s.updateProject(a.id,{report:{...s.project(a.id).report,summary:text}});
   const lookups=[
     ['read_project',{section:'report',offset:0,length:500},JSON.stringify(projectSection(s,a.id,'report'))],
@@ -329,7 +331,7 @@ test('chat HTTP mutations require authorization and validate message and reply d
 // A fake public web: pages are served without network access.
 const page=(title,text)=>({url:'',buffer:Buffer.from(`<html><head><title>${title}</title></head><body><p>${text}</p><a href="https://county.example.gov/amendments">Fire code amendments</a></body></html>`),type:'text/html',modified:''});
 function fakeWeb(app,pages){
-  const fetched=[];app.services.chat.tools=new ResearchTools(app.store,{fetchImpl:async value=>{const url=value.split('#')[0];fetched.push(url);if(!pages[url])throw new Error('Source returned HTTP 404.');return {...pages[url],url};}});
+  const fetched=[];app.services.chat.tools=new ResearchTools(app.store,{pageChars:CHAT_LIMITS.toolChars,fetchImpl:async value=>{const url=value.split('#')[0];fetched.push(url);if(!pages[url])throw new Error('Source returned HTTP 404.');return {...pages[url],url};}});
   return fetched;
 }
 const searchResult=(id,urls)=>[{type:'server_tool_use',id,name:'web_search',input:{query:'county fire code adoption'}},{type:'web_search_tool_result',tool_use_id:id,content:urls.map(url=>({type:'web_search_result',url,title:'County fire code adoption',encrypted_content:'opaque',page_age:'2026'}))}];
@@ -358,7 +360,7 @@ test('chat searches the web, reads found pages into the source register and cite
   const search=provider.calls[0].payload.tools.find(t=>t.name==='web_search');assert.deepEqual(search,searchTool(CHAT_LIMITS.searchesPerRequest,s.project(a.id).input));
   assert.deepEqual(search,{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct'],user_location:search.user_location});assert.equal(search.user_location.country,'US');
   assert.deepEqual(provider.calls[0].payload.tools.find(t=>t.name==='web_fetch'),{type:'web_fetch_20250910',name:'web_fetch',max_uses:CHAT_LIMITS.fetchesPerRequest,max_content_tokens:LIMITS.fetchContentTokens});
-  assert.deepEqual(provider.calls[0].payload.tools.filter(t=>t.input_schema).map(t=>t.name),['read_project','find_project_sources','read_saved_source','read_source','render_page','inspect_pdf','locate_address','propose_question_update','propose_research_round','propose_address_correction']);
+  assert.deepEqual(provider.calls[0].payload.tools.filter(t=>t.input_schema).map(t=>t.name),['read_project','find_project_sources','read_saved_source','read_source','render_page','inspect_pdf','locate_address','propose_question_update','propose_research_round','propose_report_note','propose_address_correction']);
   assert.match(provider.calls[0].payload.system,/Search results are leads, not evidence/);assert.match(provider.calls[0].payload.system,/Use a table when comparing/);assert.ok(!/do not use them/.test(provider.calls[0].payload.system));
 });
 
@@ -456,4 +458,20 @@ test('a reply ends lookups before one more request of web fetches could exceed i
   const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
   const turn=c.view(a.id).turns[0];assert.equal(turn.status,'complete');assert.equal(provider.calls.length,2);assert.equal(provider.calls[1].payload.tool_choice.type,'none');
   assert.ok(app.store.chatUsage(a.id,turn.id).reads<=CHAT_LIMITS.webReads);
+});
+
+test('chat preloads a larger share of a long source and reads up to 60,000 characters in one lookup, while research keeps 24,000',async t=>{
+  const {app,a}=await setup(t),s=app.store,c=app.services.chat;
+  const long=Array.from({length:3000},(_,n)=>`Section ${n}: the county adopted the 2024 fire code with local amendment ${n}.`).join('\n');
+  const saved=s.source(a.id,{url:'https://county.example.gov/long-ordinance',title:'Long ordinance',text:long,readFull:true});
+  // More than the old 32,000-character share reaches chat's first message from one source.
+  const block=initialChatEvidence(s,a.id).find(b=>b.title===`${saved.id}: Long ordinance`);assert.ok(block.content.map(x=>x.text).join('').length>32000);
+  assert.equal(CHAT_LIMITS.excerptChars,400000);assert.equal(CHAT_LIMITS.webReads,30);
+  // One lookup returns up to toolChars; research's own reader stays at its page size.
+  const lookup=JSON.parse(await c.lookup(a.id,'read_saved_source',{sourceId:saved.id,query:'',offset:0,length:CHAT_LIMITS.toolChars}));assert.equal(lookup.text.length,CHAT_LIMITS.toolChars);
+  await assert.rejects(c.lookup(a.id,'read_saved_source',{sourceId:saved.id,query:'',offset:0,length:CHAT_LIMITS.toolChars+1}),/Invalid lookup arguments/);
+  assert.equal(c.tools.pageChars,CHAT_LIMITS.toolChars);assert.equal(new ResearchTools(s).pageChars,LIMITS.pageChars);
+  assert.match(CHAT_TOOLS.find(x=>x.name==='read_source').description,/length permits up to 60,000/);assert.match(TOOL_DEFS.find(x=>x.name==='read_source').description,/length permits up to 24,000/);
+  const fetched=fakeWeb(app,{'https://county.example.gov/long-page':{...page('Long page',long),url:''}});s.saveLinks(a.id,[{url:'https://county.example.gov/long-page'}]);
+  const read=JSON.parse(await c.lookup(a.id,'read_source',{url:'https://county.example.gov/long-page',length:CHAT_LIMITS.toolChars}));assert.equal(read.text.length,CHAT_LIMITS.toolChars);assert.deepEqual(fetched,['https://county.example.gov/long-page']);
 });

@@ -246,3 +246,12 @@ test('the final review receives long stage briefs and more of a decisive source,
   assert.ok(codes.findings.length>24000);assert.match(codes.findings,/END OF CODES BRIEF/);assert.ok(source.text.length>32000);
   assert.equal(reviewPayload(s,s.project(p.id)).output_config.effort,'high');assert.equal(researchPayload(s,s.project(p.id),s.stage(p.id,'verification')).output_config.effort,'high');
 });
+test('fill carries more of a long source after its relevant passages, within the allowance, while plain selection is unchanged',()=>{
+  const text=Array.from({length:3000},(_,n)=>`Line ${n}: the county adopted the 2024 fire code with amendment ${n}.`).join('\n');
+  const plain=selectPassages(text,{limit:60000}),filled=selectPassages(text,{limit:60000,fill:true});
+  // Plain selection stops at the windows around its capped matches; fill uses the allowance.
+  assert.ok(plain.text.length<30000);assert.ok(filled.text.length>55000&&filled.text.length<=60000);
+  for(const span of filled.spans)assert.ok(filled.text.includes(text.slice(span.start,span.end)));
+  assert.ok(filled.spans.every((s,i,all)=>i===0||s.start>all[i-1].end));
+  assert.deepEqual(selectPassages(text,{limit:60000,query:'amendment 2999',fill:true}),selectPassages(text,{limit:60000,query:'amendment 2999'}));
+});
