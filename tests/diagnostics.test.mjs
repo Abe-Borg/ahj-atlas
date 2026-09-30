@@ -21,9 +21,13 @@ test('compact report preserves every report field and evidence while shrinking t
   assert.deepEqual(decodeReport(encodeReport(original)),original);
   assert.ok(JSON.stringify(REPORT_WIRE_SCHEMA).length<JSON.stringify(REPORT_SCHEMA).length/3);
 });
-test('compact report rejects missing, duplicate, shifted and invalid rows',()=>{
-  const cases=[w=>w.items.find(r=>r.section==='codes').fields.pop(),w=>w.items.push(w.items.find(r=>r.section==='jurisdiction')),w=>w.items.splice(w.items.findIndex(r=>r.section==='coverage'),1),w=>w.items.find(r=>r.section==='codes').fields[9]='wrong-status',w=>w.items[0].evidence=[{sourceId:'S1'}],w=>w.items[0].section='__proto__'];
-  for(const mutate of cases){const wire=encodeReport(report());mutate(wire);assert.throws(()=>decodeReport(wire));}
+test('compact report rejects empty, duplicate, shifted and invalid rows',()=>{
+  const cases=[[w=>w.items.find(r=>r.section==='codes').fields.pop(),/codes row had missing or incorrectly ordered fields \(9 of 10\)/],[w=>w.items.push(w.items.find(r=>r.section==='jurisdiction')),/repeated its jurisdiction row/],[w=>w.items.push(w.items.find(r=>r.section==='coverage')),/repeated its coverage row/],[w=>w.items.find(r=>r.section==='codes').fields[9]='wrong-status',/codes row had an invalid evidence status/],[w=>w.items[0].evidence=[{sourceId:'S1'}],/jurisdiction row had invalid evidence/],[w=>w.items[0].section='__proto__',/unknown section/],[w=>w.items=[],/no rows/]];
+  for(const [mutate,message] of cases){const wire=encodeReport(report());mutate(wire);assert.throws(()=>decodeReport(wire),message);}
+});
+test('compact report leaves an omitted single-row section for validation to rebuild, and lists those rows first',()=>{
+  const wire=encodeReport(report());assert.deepEqual(wire.items.slice(0,2).map(r=>r.section),['jurisdiction','coverage']);
+  for(const section of ['jurisdiction','coverage']){const partial=structuredClone(wire);partial.items=partial.items.filter(r=>r.section!==section);const decoded=decodeReport(partial);assert.ok(!Object.hasOwn(decoded,section));assert.equal(decoded.codes[0].edition,'2021');}
 });
 
 test('report enum capitalization is normalized without changing identifiers, prose or the response',()=>{
