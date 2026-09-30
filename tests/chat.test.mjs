@@ -449,3 +449,11 @@ test('chat saves pages fetched through web_fetch to the register, counts them as
   assert.ok(s.events(a.id).some(e=>/page fetch through Anthropic could not finish \(url_not_accessible\)/.test(e.message)));
   assert.match(provider.calls[0].payload.system,/web_fetch retrieves it through Anthropic/);assert.match(provider.calls[0].payload.system,/kind upload are documents the user added/);
 });
+
+test('a reply ends lookups before one more request of web fetches could exceed its page reads',async t=>{
+  // web_fetch cannot be refused call by call, so the request after this one answers without tools.
+  const provider=new ChatProvider((payload,n)=>payload.tool_choice?.type==='none'?chatResponse('Final answer from the pages read.'):chatResponse('',{stop_reason:'tool_use',usage:{input_tokens:1000,output_tokens:400,server_tool_use:{web_fetch_requests:CHAT_LIMITS.webReads-CHAT_LIMITS.fetchesPerRequest+1}},content:[{type:'tool_use',id:'lookup_'+n,name:'find_project_sources',input:{query:'fire',offset:0}}]}));
+  const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
+  const turn=c.view(a.id).turns[0];assert.equal(turn.status,'complete');assert.equal(provider.calls.length,2);assert.equal(provider.calls[1].payload.tool_choice.type,'none');
+  assert.ok(app.store.chatUsage(a.id,turn.id).reads<=CHAT_LIMITS.webReads);
+});

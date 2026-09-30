@@ -39,7 +39,7 @@ This change gives the research and review models more room and more ways to reac
 
 **Capture.** `ResearchTools.captureFetches` saves each `web_fetch_tool_result`:
 - A text document becomes retrieved text of kind `web-fetch`.
-- A base64 PDF is converted with pdf.js, with page labels.
+- A base64 PDF is converted with pdf.js, with page labels. Pages without text get no label, so a scanned PDF is saved only as a discovery record.
 - A fetch error becomes a warning event and a `fetch.failed` diagnostic.
 
 The engine runs this capture after each research response, and chat runs it after each reply request.
@@ -50,7 +50,7 @@ The engine runs this capture after each research response, and chat runs it afte
 
 A server tool cannot be refused one call at a time, and tools cannot change within a conversation. The allowances are therefore enforced in two ways:
 - **Research.** The fetch tool's `max_uses` is bounded by the reads remaining when a conversation starts. A smaller remaining allowance starts a fresh conversation, as a smaller search allowance already did.
-- **Chat.** Once a reply's page reads are spent, its next request is the final answer.
+- **Chat.** Once one more request's fetches could exceed a reply's page reads, its next request is the final answer. The reply's limit therefore always holds.
 
 ## Search localization
 

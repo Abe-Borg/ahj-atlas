@@ -18,7 +18,7 @@ async function setup(t){
   const upload=(body,{name='letter.txt',type='text/plain',auth=true,id=p.id}={})=>fetch(`${app.url}/api/projects/${id}/documents`,{method:'POST',headers:{'Content-Type':type,'X-File-Name':encodeURIComponent(name),...(auth?{'X-App-Token':token}:{})},body});
   return {app,p,upload,tools:app.services.chat.tools};
 }
-const pdf=text=>new Promise(resolve=>{const doc=new PDFDocument(),chunks=[];doc.on('data',c=>chunks.push(c));doc.on('end',()=>resolve(Buffer.concat(chunks)));doc.text(text);doc.end();});
+const pdf=text=>new Promise(resolve=>{const doc=new PDFDocument(),chunks=[];doc.on('data',c=>chunks.push(c));doc.on('end',()=>resolve(Buffer.concat(chunks)));if(text)doc.text(text);else doc.rect(72,72,200,120).fill('#333');doc.end();});
 
 test('a document you add becomes a retrieved, user-provided source that chat and the report evidence include',async t=>{
   const {app,p,upload}=await setup(t),s=app.store;
@@ -39,6 +39,8 @@ test('PDF and HTML documents are read as text, and unreadable or unsupported fil
   const {app,p,upload,tools}=await setup(t),s=app.store;
   const created=await upload(await pdf('Delegated plan review: the county reviews commercial sprinkler plans.'),{name:'Delegation.pdf',type:'application/pdf'});assert.equal(created.status,201);
   const pdfSource=s.sources(p.id).find(x=>x.title==='Delegation.pdf');assert.match(pdfSource.text,/\[PDF page 1\]/);assert.match(pdfSource.text,/reviews commercial sprinkler plans/);
+  // A scanned PDF has no text layer: it is refused rather than saved as page labels.
+  const scanned=await upload(await pdf(''),{name:'Scanned letter.pdf',type:'application/pdf'});assert.equal(scanned.status,400);assert.match((await scanned.json()).error,/text recognition \(OCR\)/);assert.ok(!s.sources(p.id).some(x=>x.title==='Scanned letter.pdf'));
   await upload('<html><body><table><tr><td>Permit</td><td>$250</td></tr></table></body></html>',{name:'fees.html',type:'text/html'});
   assert.match(s.sources(p.id).find(x=>x.title==='fees.html').text,/Permit \| \$250/);
   for(const [body,options,pattern] of [[Buffer.from('PK\u0003\u0004'),{name:'letter.docx',type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'},/Save other formats, such as Word, as PDF/],['',{},/Choose a document/],['   ',{},/No text could be read/]]){
