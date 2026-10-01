@@ -41,9 +41,12 @@ test('attachment filenames retain Unicode and spaces, and reject Windows special
 test('only expected attachment endpoints on the exact loopback origin are accepted',()=>{
   assert.equal(exportDownload(exportUrl,origin),'pdf');
   assert.equal(exportDownload(`${origin}/api/diagnostics/download?project=a`,origin),'json');
+  assert.equal(exportDownload(`${origin}/api/projects/123e4567-e89b-12d3-a456-426614174000/export?format=xlsx-essentials`,origin),'xlsx');
+  assert.equal(exportDownload(`${origin}/api/projects/123e4567-e89b-12d3-a456-426614174000/export?format=xlsx`,origin),'xlsx');
   for(const value of ['file:///C:/report.pdf','https://example.com/report.pdf',
     'http://127.0.0.1:54322/api/diagnostics/download',`${origin}/api/projects/x/export?format=pdf`,
     `${origin}/api/projects/123e4567-e89b-12d3-a456-426614174000/export?format=exe`,
+    `${origin}/api/projects/123e4567-e89b-12d3-a456-426614174000/export?format=xlsx-essentials&next=1`,
     `${origin}/api/diagnostics/download?next=file:///C:/secret`])
     assert.equal(exportDownload(value,origin),null,value);
 });
@@ -65,6 +68,24 @@ function item({url=exportUrl,filename='Café 東京 site - AHJ research.pdf',ini
 }
 
 async function until(check){for(let n=0;n<100;n++){if(check())return;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail('Timed out waiting for export result.');}
+
+test('essentials Excel saves as an xlsx beside the full workbook',async t=>{
+  const {downloadsDir,session,contents,selections,saveOptions,dispose}=fixture(t);
+  const url=`${origin}/api/projects/123e4567-e89b-12d3-a456-426614174000/export?format=xlsx-essentials`;
+  const filename='Café 東京 site - AHJ research essentials.xlsx';
+  const download=item({url,filename,chain:[url]});
+  const destination=path.join(downloadsDir,'Saved essentials.xlsx');
+  selections.push({canceled:false,filePath:destination});
+  session.emit('will-download',{},download,contents);
+  assert.equal(download.canceled,false);
+  writeFileSync(download.savePath,'synthetic essentials workbook');
+  download.emit('done',{},'completed');
+  await until(()=>existsSync(destination));
+  assert.deepEqual(saveOptions[0].filters,[{name:'Excel essentials',extensions:['xlsx']}]);
+  assert.equal(saveOptions[0].defaultPath,path.join(downloadsDir,filename));
+  assert.equal(readFileSync(destination,'utf8'),'synthetic essentials workbook');
+  dispose();
+});
 
 test('native Save dialog keeps server filename and an exclusive final copy',async t=>{
   const {root,downloadsDir,session,contents,window,notices,selections,saveOptions,dispose}=fixture(t),download=item();
