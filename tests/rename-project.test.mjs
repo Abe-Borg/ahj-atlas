@@ -180,7 +180,7 @@ test('the project page can rename while research is running and after it is fini
   await page.waitForSelector('.chat-heading h2');
   assert.match(await page.$eval('.chat-heading h2',e=>e.textContent),/Running synthetic project draft/);
   await click('[data-tab=activity]');
-  await page.waitForSelector('.activity');
+  await page.waitForFunction(()=>document.querySelector('.activity')?.textContent.includes('Project renamed from “Running synthetic project” to “Running synthetic project draft”'));
   assert.match(await page.$eval('.activity',e=>e.textContent),/Project renamed from “Running synthetic project” to “Running synthetic project draft”/);
   await click(`[data-project="${finished.id}"]`);
   await page.waitForFunction(()=>document.querySelector('#project-name')?.value==='Finished synthetic project');

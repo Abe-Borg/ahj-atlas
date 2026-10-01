@@ -19,6 +19,9 @@ const chatRetries=new Map();
 // Proposal cards by project, turn and proposal: an Apply in progress, its error, and the chosen mode.
 const proposalBusy=new Set(),proposalErrors=new Map(),proposalModes=new Map();
 let projectLoad=0;
+// Research polls the project list every few seconds. Only the newest response may paint the sidebar,
+// so a list that left before a rename cannot put the previous name back.
+let projectsGeneration=0,detailGeneration=0;
 function recordClientError(message,location='',line=0){
   if(!state.bootstrap)return;if(Date.now()-clientErrorWindow>60000){clientErrorCount=0;clientErrorWindow=Date.now();}if(++clientErrorCount>10)return;
   fetch('/api/diagnostics/client',{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':state.bootstrap.token},body:JSON.stringify({message:String(message||'Browser error').slice(0,2000),location:String(location).slice(0,300),line,projectId:state.selected})}).catch(()=>{});
@@ -151,7 +154,16 @@ function renderConnectionNote(){
   $('#api-key').placeholder=({connected:'Connected · enter a key to replace it',checking:'Checking saved key · enter a key to replace it',unavailable:'Saved key not yet verified · enter a key to replace it',invalid:'Key not accepted · enter a new key'})[view.status]||'sk-ant-…';
 }
 async function startProject(e){e.preventDefault();if(['missing','invalid'].includes(connectionView().status)){openSettings();return;}const button=$('#start-research');button.disabled=true;button.textContent='Creating project…';try{const body=Object.fromEntries(new FormData(e.target));if(body.discipline==='Other'){body.discipline=body.customDiscipline.trim();}delete body.customDiscipline;const p=await api('/api/projects',{method:'POST',body});await refreshProjects();await selectProject(p.id);}catch(error){$('#project-error').textContent=error.message;}finally{button.disabled=false;button.innerHTML='Start research <span aria-hidden="true">↗</span>';}}
-async function refreshProjects(){state.projects=await api('/api/projects');renderSidebar();}
+async function refreshProjects(){const generation=++projectsGeneration,projects=await api('/api/projects');if(generation!==projectsGeneration)return;state.projects=projects;renderSidebar();}
+function applySavedProject(project){
+  projectsGeneration++;detailGeneration++;
+  const index=state.projects.findIndex(item=>item.id===project.id);
+  if(index>=0)state.projects[index]=project;
+  if(state.detail?.project.id===project.id)state.detail.project=project;
+  renderSidebar();
+  const option=$('#diagnostic-project')?.querySelector(`option[value="${CSS.escape(project.id)}"]`);
+  if(option)option.textContent=project.name;
+}
 async function selectProject(id){const load=++projectLoad;state.selected=id;state.detail=null;state.tab=state.tab==='chat'?'chat':'overview';history.replaceState(null,'',`/#project=${encodeURIComponent(id)}`);renderSidebar();$('#main').innerHTML='<div class="loading">Opening project…</div>';try{const detail=await api(`/api/projects/${id}`);if(load!==projectLoad||state.selected!==id)return;state.detail=detail;renderProject();}catch(e){if(load===projectLoad)$('#main').innerHTML=`<div class="error-panel">${esc(e.message)}</div>`;}}
 function statusClass(status){return ['complete','verified'].includes(status)?'green':['partial','budget','attention','conflicting','inferred','unverified','needs_key'].includes(status)?'amber':['failed','canceled'].includes(status)?'red':'';}
 function badge(status){return `<span class="status-pill ${statusClass(status)}">${esc(({verified:'Source-supported',inferred:'Conditional',conflicting:'Conflicting',unverified:'Unconfirmed'})[status]||statuses[status]||status)}</span>`;}
@@ -226,12 +238,10 @@ async function saveProjectName(e){
   if(!id||name==null)return;
   nameBusy.add(id);nameErrors.delete(id);renderProject();
   try{
-    await api(`/api/projects/${id}/rename`,{method:'POST',body:{name}});
-    nameDrafts.delete(id);toast('Project name saved.');
+    const saved=await api(`/api/projects/${id}/rename`,{method:'POST',body:{name}});
+    nameDrafts.delete(id);applySavedProject(saved);toast('Project name saved.');
     await refreshProjects();
     if(state.selected===id)await refreshSelected();
-    const option=$('#diagnostic-project')?.querySelector(`option[value="${CSS.escape(id)}"]`),saved=state.projects.find(p=>p.id===id);
-    if(option&&saved)option.textContent=saved.name;
   }catch(error){nameErrors.set(id,error.message);}
   finally{nameBusy.delete(id);if(state.selected===id)renderProject();}
 }
@@ -464,8 +474,8 @@ async function addDocument(e){
   finally{if(button.isConnected){button.disabled=false;button.textContent='Add document';}}
 }
 async function refreshSelected(){
-  const load=projectLoad;await refreshProjects();if(!state.selected||load!==projectLoad)return;
-  const id=state.selected,next=await api(`/api/projects/${id}`);if(state.selected!==id||load!==projectLoad)return;
+  const load=projectLoad,generation=++detailGeneration;await refreshProjects();if(!state.selected||load!==projectLoad||generation!==detailGeneration)return;
+  const id=state.selected,next=await api(`/api/projects/${id}`);if(state.selected!==id||load!==projectLoad||generation!==detailGeneration)return;
   const stamp=d=>JSON.stringify([d?.project.updated,d?.project.cost,d?.project.reserved,d?.events[0],d?.stages.map(s=>[s.status,s.rounds]),d?.chat]);
   const changed=stamp(next)!==stamp(state.detail);state.detail=next;if(changed)renderProject();
 }
