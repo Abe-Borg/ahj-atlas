@@ -59,7 +59,7 @@ export const FACTS = {
     "reviewOutput": 100000,
     "input": 300000,
     "checkpointInput": 200000,
-    "contextResets": 2,
+    "contextResets": 4,
     "reviewRounds": 4,
     "pageChars": 60000,
     "readChars": 8000,

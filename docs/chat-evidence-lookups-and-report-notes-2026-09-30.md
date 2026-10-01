@@ -1,6 +1,6 @@
 # Chat evidence, lookups, page reads, report notes and research reads
 
-Four changes to project chat, and one to research. Chat sends more saved evidence with each message, reads larger passages per lookup, gets more page reads per reply, and can save findings to the report as notes the user approves. Research's page reads get the same larger maximum.
+Four changes to project chat, and two to research. Chat sends more saved evidence with each message, reads larger passages per lookup, gets more page reads per reply, and can save findings to the report as notes the user approves. Research's page reads get the same larger maximum, and each research stage may restart from its checkpoint more often.
 
 ## Limits
 
@@ -11,6 +11,7 @@ Four changes to project chat, and one to research. Chat sends more saved evidenc
 | Characters per lookup (`toolChars`) | 24,000 | 60,000 |
 | Page reads per reply | 20 | 30 (web fetches included) |
 | Characters per research read (`LIMITS.pageChars`) | 24,000 | 60,000 |
+| Checkpoint restarts per research stage (`LIMITS.contextResets`) | 2 | 4 |
 
 **Preloaded evidence.** At these sizes a large project's first message is roughly 300,000 tokens. That is well inside the model's context window, since chat has no app token ceiling. With the one-hour cache, the first message in an hour pays the cache write (about $1.20 on Sonnet 5.5 at that size), and follow-ups reread it at $0.20 per million tokens.
 
@@ -25,7 +26,7 @@ A research read returns 8,000 characters by default (`readChars`, unchanged) and
 **Effects:**
 - **Cost.** It rises only when the model asks for long reads. Earlier tool results are reread from the cache.
 - **Checkpoints.** They come sooner: about 10 maximum-size reads fill a conversation to the 200,000-token checkpoint, instead of about 30. A restart carries the saved findings and targeted evidence forward.
-- **Reset limit unchanged.** Each stage still gets `contextResets` (2) restarts before it must finish.
+- **Reset limit raised.** Each stage may now restart from its checkpoint 4 times (`contextResets`, was 2) before its next request may only finish. A stage now gets up to five conversations instead of three, which makes up for each one filling sooner with larger reads. Restarts do not add requests: a stage still has 12 (the evidence check 6), however many times it restarts. A restart sends a smaller request rebuilt from the checkpoint, not the whole history.
 - **Conversations already in progress** keep their saved tool descriptions, which name 24,000. The reader allows 60,000 either way.
 
 ## Filling the evidence allowance
@@ -59,6 +60,7 @@ New tests cover:
 - notes: proposal checks, apply-once, persistence across a report rebuild, the detail API, chat context and JSON export, removal with authorization and project scoping, proposals while research runs, and project deletion;
 - chat's 60,000-character lookups and research's 60,000-character reads, including the 8,000-character default and paging past a full read;
 - the Excel **Notes** sheet's **Origin** column and the JSON `origin`;
+- a stage keeping its research tools through its fourth checkpoint restart (the existing test covers finish-only after it);
 - larger per-source chat excerpts;
 - `fill` versus plain selection.
 
