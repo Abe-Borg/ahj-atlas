@@ -44,9 +44,9 @@ Some of the best evidence never appears on a public website: a Fire Marshal's le
 
 `node --test tests/documents.test.mjs` covers text, PDF and HTML documents, refusal of Word and empty files, the upload route and its authorization, duplicate files, and inclusion in the report's evidence and chat's first message. `node tests/documents-ui.mjs` checks the form, a refused file, escaping and the mobile layout in a browser; it requires installed Edge or Chrome.
 
-## Project AI chat
+## Chat with Atlas
 
-Open a project and choose **Chat with AI**. Each project has its own saved conversation, unsent draft, pending reply and source citations. Switching projects does not rebind a running request or bring another project's chat into the visible conversation. Late navigation responses are ignored. Saved chat persists across app restarts; unsent drafts persist while switching projects in the same browser session. Chat runs in real time, even for a batch project.
+Open a project and choose **Chat with Atlas**. Each project has its own saved conversation, unsent draft, pending reply and source citations. Switching projects does not rebind a running request or bring another project's chat into the visible conversation. Late navigation responses are ignored. Saved chat persists across app restarts; unsent drafts persist while switching projects in the same browser session. Chat runs in real time, even for a batch project.
 
 Choose a **Reply depth** for each message:
 
@@ -167,7 +167,7 @@ The trust surfaces are a contract. Any change to a behavior they describe update
 
 ### Interactive questions
 
-Each **Questions to resolve** card supports **Save answer** and **Dismiss**. Responses persist in SQLite separately from the research report, update the open-question count immediately, and remain available under **Answered & dismissed** for editing or reopening. Existing reports receive controls automatically; stable question IDs preserve responses across report ordering and whitespace changes. Differently worded questions stay distinct. Responses remain available even when a later report omits the original question.
+Each **Questions to resolve** card supports **Save answer**, **Dismiss**, and **Ask Atlas**. **Ask Atlas** sends that question through Chat with Atlas, using the reply depth selected there and the same tools and token budgets as a typed message. The reply shows up in the conversation. A proposed answer is saved only when you choose **Apply**. Responses persist in SQLite separately from the research report, update the open-question count immediately, and remain available under **Answered & dismissed** for editing or reopening. Existing reports receive controls automatically; stable question IDs preserve responses across report ordering and whitespace changes. Differently worded questions stay distinct. Responses remain available even when a later report omits the original question.
 
 Saving a response does not start a worker request, change a source-supported finding, or alter in-flight research context. **Research with saved answers** uses the existing explicit continuation flow and snapshots the latest responses into the next research context. New responses reopen completed research stages during normal continuation. Answers are user-provided context; dismissals express priorities and do not establish compliance or non-applicability. Answered system details can add NFPA screening targets in that research round. PDF, Excel and JSON exports include question status and saved answers.
 

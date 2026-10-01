@@ -17,6 +17,9 @@ const chatDrafts=new Map(),chatOptions=new Map(),chatPending=new Set(),chatError
 // Retry requests by project and declined turn. Each keeps its idempotency key, so a
 // click after a lost response cannot create and charge for a second reply.
 const chatRetries=new Map();
+// Ask Atlas retries by project and question. The key matches a lost response to the
+// same chat reply instead of starting and charging for a second one.
+const atlasRequests=new Map();
 // Proposal cards by project, turn and proposal: an Apply in progress, its error, and the chosen mode.
 const proposalBusy=new Set(),proposalErrors=new Map(),proposalModes=new Map();
 let projectLoad=0,detailGeneration=0;
@@ -176,16 +179,20 @@ function questionForm(g){
   const key=state.selected+':'+g.id,busy=questionBusy.has(key),answer=questionDrafts.get(key)??g.answer??'';
   return `<form data-question-form="${esc(g.id)}"><label for="answer-${g.id}">Your answer</label><textarea id="answer-${g.id}" name="answer" rows="3" maxlength="4000" required placeholder="Share what you know about this project…" ${busy?'disabled':''}>${esc(answer)}</textarea><div class="question-actions"><button class="button primary" type="submit" ${busy?'disabled':''}>${busy?'Saving…':'Save answer'}</button>${g.status==='open'?`<button class="button secondary" type="button" data-question-action="dismissed" ${busy?'disabled':''}>Dismiss</button>`:''}</div></form>`;
 }
+function askAtlasButton(){
+  const chatBusy=chatPending.has(state.selected)||Boolean(state.detail?.chat?.active);
+  return `<div class="question-actions"><button class="button secondary" type="button" data-ask-atlas ${chatBusy?'disabled':''}>Ask Atlas</button></div>`;
+}
 function questionReason(g){return g.reason?`<p class="field-help">Reason: ${esc(g.reason)}</p>`:'';}
 function gapCards(gaps){return gaps.map(g=>{
   const busy=questionBusy.has(state.selected+':'+g.id),label={answered:'Answered',dismissed:'Dismissed',closed:'Closed'}[g.status]||'';
   const body=g.status==='open'?`<p>${esc(g.nextStep)}</p>${g.contact?`<p class="field-help">Contact: ${esc(g.contact)}</p>`:''}${questionForm(g)}`:g.status==='answered'?`<p class="question-answer">${esc(g.answer)}</p><p class="field-help">User-provided answer</p>${questionReason(g)}<details id="edit-${g.id}" class="question-edit"><summary>Edit answer</summary>${questionForm(g)}</details>`:g.status==='closed'?`${questionReason(g)||'<p class="field-help">A later research report no longer includes this question.</p>'}`:`<p class="field-help">Set aside by you. You can reopen it at any time.</p>${questionReason(g)}`;
-  return `<article class="finding-card question-card" data-question="${esc(g.id)}"><div class="finding-top"><h3>${esc(g.question)}</h3>${label?`<span class="status-pill ${g.status==='answered'?'green':''}">${label}</span>`:''}</div><p class="muted">${esc(g.why)}</p>${body}${g.status==='open'?'':`<button class="text-button" type="button" data-question-action="open" ${busy?'disabled':''}>Reopen question</button>`}<div class="inline-error" role="alert" data-question-error></div></article>`;
+  return `<article class="finding-card question-card" data-question="${esc(g.id)}"><div class="finding-top"><h3>${esc(g.question)}</h3>${label?`<span class="status-pill ${g.status==='answered'?'green':''}">${label}</span>`:''}</div><p class="muted">${esc(g.why)}</p>${body}${g.status==='open'?'':`<button class="text-button" type="button" data-question-action="open" ${busy?'disabled':''}>Reopen question</button>`}${askAtlasButton()}<div class="inline-error" role="alert" data-question-error></div></article>`;
 }).join('');}
 function questionsView(p){
   const questions=p.questions||[],open=questions.filter(g=>g.status==='open'),saved=questions.filter(g=>g.status!=='open');
   const canResearch=!['queued','researching','waiting_batch','waiting','canceling','needs_key'].includes(p.status)&&!state.detail.attempts.some(a=>['dispatching','pending','received','unknown'].includes(a.state));
-  return `<section class="report-section" id="project-questions"><div class="finding-top"><h2>Questions to resolve</h2><span class="status-pill amber" aria-label="${open.length} open questions">${open.length}</span></div><p class="field-help question-help">Save what you know, or dismiss a question that is not a priority. Answers are saved to this project without starting research.</p>${p.questionResponses?.length?`<div class="question-research"><p class="field-help">${p.questionUpdatesPending?'Your updates are saved. Start a new research round to check their implications.':'Your saved answers and dismissals are included in the latest research context.'}</p>${canResearch?'<button class="button secondary" id="research-answers">Research with saved answers</button>':'<p class="field-help">You can start another round when the current research and outstanding requests have settled.</p>'}</div>`:''}${open.length?gapCards(open):empty(questions.length?'No open questions':'No additional questions identified',questions.length?'Your answered, dismissed, and closed questions are saved below.':'Review the source evidence with your project team before using it for design.')}${saved.length?`<details id="saved-questions" class="saved-questions"><summary>Answered, dismissed & closed <span class="tab-count">${saved.length}</span></summary>${gapCards(saved)}</details>`:''}</section>`;
+  return `<section class="report-section" id="project-questions"><div class="finding-top"><h2>Questions to resolve</h2><span class="status-pill amber" aria-label="${open.length} open questions">${open.length}</span></div><p class="field-help question-help">Save what you know, dismiss a question that is not a priority, or choose Ask Atlas to resolve it in Chat with Atlas. Answers you save stay on this project and do not start research.</p>${p.questionResponses?.length?`<div class="question-research"><p class="field-help">${p.questionUpdatesPending?'Your updates are saved. Start a new research round to check their implications.':'Your saved answers and dismissals are included in the latest research context.'}</p>${canResearch?'<button class="button secondary" id="research-answers">Research with saved answers</button>':'<p class="field-help">You can start another round when the current research and outstanding requests have settled.</p>'}</div>`:''}${open.length?gapCards(open):empty(questions.length?'No open questions':'No additional questions identified',questions.length?'Your answered, dismissed, and closed questions are saved below.':'Review the source evidence with your project team before using it for design.')}${saved.length?`<details id="saved-questions" class="saved-questions"><summary>Answered, dismissed & closed <span class="tab-count">${saved.length}</span></summary>${gapCards(saved)}</details>`:''}</section>`;
 }
 async function saveQuestion(card,status){
   const id=state.selected,questionId=card.dataset.question,key=id+':'+questionId;
@@ -263,7 +270,7 @@ function renderProject(){
   <div class="summary-strip"><div class="summary-stat"><small>AUTHORITIES</small><strong>${r?r.authorities.length:'—'}</strong><em>${r?'identified':'researching'}</em></div><div class="summary-stat"><small>CODE & STANDARD FINDINGS</small><strong>${r?codeCount(r):'—'}</strong><em>${r?'entries':'researching'}</em></div><div class="summary-stat"><small>EVIDENCE SOURCES</small><strong>${sources.length}</strong><em>${sources.filter(s=>s.read_full).length} read</em></div><div class="summary-stat"><small>ESTIMATED COST</small><strong style="font-size:1.15rem">${money(p.cost)}</strong><em>to date</em><small style="margin:7px 0 0">${money(p.reserved)} pending</small></div></div>
   <div class="stages">${stages.map((s,i)=>`<div class="stage ${s.status==='complete'?'done':['running','preparing','waiting_batch'].includes(s.status)?'current':''}"><small>${s.status==='complete'?'✓':'0'+(i+1)} &nbsp; STAGE ${i+1}</small><strong>${esc(stageLabels[s.id]||s.id)}</strong><p>${esc(({queued:'Waiting',running:'Researching…',preparing:'Preparing request…',waiting_batch:'Awaiting batch result',complete:'Brief complete',partial:'Partial findings',blocked:'Needs attention'})[s.status]||s.status)}</p></div>`).join('')}</div>
   ${p.note?`<div class="notice ${['queued','researching','waiting_batch'].includes(p.status)?'info':''}"><p>${esc(p.note)}</p>${['budget','attention'].includes(p.status)&&!attempts.some(a=>['dispatching','pending','received','unknown'].includes(a.state))&&stages.some(s=>s.id!=='review'&&!['complete','partial'].includes(s.status))?'<button class="button secondary" id="finish-partial">Finish with saved evidence</button>':''}${uncertain&&attempts.some(a=>a.mode==='batch'&&a.state==='unknown')?'<button class="button secondary" id="recover-batch">Reconcile original batch</button>':''}${uncertain?'<p class="field-help">Open Activity to inspect request identifiers and manually reconcile a confirmed charge.</p>':''}</div>`:''}
-  <div class="tabs" role="tablist" aria-label="Project report">${[['overview','Overview',p.questions?.filter(q=>q.status==='open').length],['contacts','Contacts',r?.contacts.length],['codes','Codes & standards',codeCount(r)],['sources','Sources',sources.length],['chat','Chat with AI',null],['activity','Activity',null]].map(([id,label,count])=>`<button class="tab ${state.tab===id?'active':''}" role="tab" aria-selected="${state.tab===id}" aria-controls="report-content" data-tab="${id}">${label}${count?`<span class="tab-count">${count}</span>`:''}</button>`).join('')}</div><div id="report-content" role="tabpanel">${state.tab==='chat'?chatView(state.detail):state.tab==='contacts'?contactsView(r):state.tab==='codes'?codesView(r):state.tab==='sources'?sourcesView(sources):state.tab==='activity'?activityView(state.detail):overview(state.detail)}</div>`;
+  <div class="tabs" role="tablist" aria-label="Project report">${[['overview','Overview',p.questions?.filter(q=>q.status==='open').length],['contacts','Contacts',r?.contacts.length],['codes','Codes & standards',codeCount(r)],['sources','Sources',sources.length],['chat','Chat with Atlas',null],['activity','Activity',null]].map(([id,label,count])=>`<button class="tab ${state.tab===id?'active':''}" role="tab" aria-selected="${state.tab===id}" aria-controls="report-content" data-tab="${id}">${label}${count?`<span class="tab-count">${count}</span>`:''}</button>`).join('')}</div><div id="report-content" role="tabpanel">${state.tab==='chat'?chatView(state.detail):state.tab==='contacts'?contactsView(r):state.tab==='codes'?codesView(r):state.tab==='sources'?sourcesView(sources):state.tab==='activity'?activityView(state.detail):overview(state.detail)}</div>`;
   for(const b of document.querySelectorAll('[data-tab]'))b.addEventListener('click',()=>{state.tab=b.dataset.tab;renderProject();});
   for(const b of document.querySelectorAll('[data-source]'))b.addEventListener('click',()=>{const id=b.dataset.source;state.tab='sources';renderProject();document.getElementById('source-'+id)?.scrollIntoView({behavior:'smooth',block:'center'});});
   $('#document-upload')?.addEventListener('submit',addDocument);
@@ -283,6 +290,7 @@ function renderProject(){
     $('textarea',form).addEventListener('input',e=>questionDrafts.set(state.selected+':'+form.dataset.questionForm,e.target.value));
   }
   for(const button of document.querySelectorAll('[data-question-action]'))button.addEventListener('click',()=>saveQuestion(button.closest('[data-question]'),button.dataset.questionAction));
+  for(const button of document.querySelectorAll('[data-ask-atlas]'))button.addEventListener('click',()=>askAtlas(button.closest('[data-question]')));
   $('#research-answers')?.addEventListener('click',()=>openAction('resume'));
   bindChat();
   revealActiveTab();
@@ -385,8 +393,27 @@ async function sendChat(id,request,fromComposer=false){
     const chat=await api(`/api/projects/${id}/chat`,{method:'POST',body:request});
     if(fromComposer){chatRequests.delete(id);if(chatDrafts.get(id)===request.message)chatDrafts.delete(id);}
     if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;await refreshSelected();}
-  }catch(error){chatErrors.set(id,error.message);}
+    return true;
+  }catch(error){chatErrors.set(id,error.message);return false;}
   finally{chatPending.delete(id);if(state.selected===id&&state.detail?.project.id===id)renderProject();}
+}
+// Ask Atlas starts the same chat reply as Send message, for this question. The selected
+// reply depth is the model's setting; Apply on the reply is still what writes the project.
+async function askAtlas(card){
+  const id=state.selected;if(!id||!state.detail)return;
+  if(!state.bootstrap?.keyConfigured){openSettings();return;}
+  const questionId=card?.dataset.question;if(!questionId)return;
+  if(chatPending.has(id)||state.detail.chat?.active){
+    state.tab='chat';chatErrors.set(id,'Wait for this project’s current reply to finish.');renderProject();return;
+  }
+  const modes=state.detail.chat?.modes||[],chosen=chatOptions.get(id)?.mode;
+  const mode=modes.some(m=>m.id===chosen)?chosen:(modes[0]?.id||'standard');
+  const key=id+':'+questionId;
+  let request=atlasRequests.get(key);
+  if(!request||request.mode!==mode)request={questionId,mode,clientId:crypto.randomUUID()};
+  atlasRequests.set(key,request);
+  state.tab='chat';
+  if(await sendChat(id,request))atlasRequests.delete(key);
 }
 // Apply is the user's approval. The server applies the saved proposal, identified by turn and id.
 async function applyProposal(id,card){
@@ -452,7 +479,7 @@ $('#action-form').addEventListener('submit',async e=>{
       await api(`/api/projects/${a.id}`,{method:'DELETE'});
       $('#action-dialog').close();
       for(const cache of [chatDrafts,chatOptions,chatPending,chatErrors,chatRequests,chatOlder])cache.delete(a.id);
-      for(const map of [questionDrafts,chatRetries,proposalBusy,proposalErrors,proposalModes])for(const key of map.keys())if(key.startsWith(a.id+':'))map.delete(key);
+      for(const map of [questionDrafts,chatRetries,proposalBusy,proposalErrors,proposalModes,atlasRequests])for(const key of map.keys())if(key.startsWith(a.id+':'))map.delete(key);
       state.projects=state.projects.filter(p=>p.id!==a.id);
       if(state.selected===a.id)newForm();else renderSidebar();
       await refreshProjects();toast('Project deleted.');return;
