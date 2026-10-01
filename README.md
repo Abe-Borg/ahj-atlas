@@ -18,6 +18,8 @@ The sidebar connection button shows **Claude connected** only after Anthropic ac
 
 Enter the required project name, address and discipline, optional scope, building use, permit date and parcel number (APN) or site description, and processing mode. Choose **Other — enter your discipline** for a specialty not listed. **Building use** (under **Add project context**) is a dropdown that defaults to **Hyperscale data center**. Choose another listed use, **Not yet specified** to leave it blank, or **Other — enter building use** to type your own (2–100 characters). The report includes authorities, professional contacts, adopted editions, local amendments, permit requirements, source passages, and unresolved questions. PDF, native XLSX, and JSON exports are supported even for partial research.
 
+The project name can be changed after research has started. Open the project, edit **Project name**, and choose **Save name**. The new name is stored on the project and shown in the sidebar, header, chat, Activity, and PDF, Excel, and JSON exports. Renaming does not stop research that is running, restart a stage, or rewrite a finished report. `node --test tests/rename-project.test.mjs` covers this with synthetic data and no paid requests.
+
 To remove a project, open it and choose **Delete project**, then confirm. This permanently removes its saved report, sources, answers, and chat history; export anything you want to keep first. Stop active research or chat and let outstanding requests finish before deleting. Uncertain charges must be resolved in **Activity**. Recorded charges stay in the workspace's estimated spending totals.
 
 ## Correcting the project address
