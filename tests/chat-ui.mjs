@@ -120,7 +120,7 @@ try{
   await click(`[data-question="${questionId}"] [data-ask-atlas]`);
   await page.waitForFunction(()=>document.querySelector('#chat-history')?.textContent.includes('Resolve this specific question'),{timeout:10000});
   await page.waitForFunction(()=>document.querySelector('[data-proposal-apply]')?.textContent==='Apply',{timeout:10000});
-  assert.equal(await page.$$eval('.chat-user-text',els=>els.some(e=>e.textContent.includes('Which NFPA 13 edition does the fire marshal enforce?')&&e.textContent.includes('do the legwork yourself'))),true);
+  assert.equal(await page.$$eval('.chat-user-text',(els,id)=>els.some(e=>e.textContent.includes('do the legwork yourself')&&e.textContent.includes(id)&&!e.textContent.includes('Which NFPA 13 edition does the fire marshal enforce?')),questionId),true);
   assert.equal(app.store.project(cp.id).questions.find(q=>q.id===questionId).answer,beforeAsk);
   assert.equal(asked.model,'claude-opus-5-5');assert.equal(asked.max_tokens,128000);assert.equal(asked.output_config.effort,'high');
   assert.ok(asked.tools.some(t=>t.name==='web_search'&&t.max_uses===4));assert.ok(asked.tools.some(t=>t.name==='propose_question_update'));
