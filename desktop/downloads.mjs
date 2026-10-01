@@ -5,21 +5,26 @@ import { copyFile, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { safeDownloadName } from '../lib/download-filename.mjs';
 
-export function exportDownload(url,appUrl){
+function exportRequest(url,appUrl){
   try{
     const target=new URL(url),home=new URL(appUrl);
     if(target.origin!==home.origin||target.protocol!=='http:'||target.username||target.password)return null;
     if(/^\/api\/projects\/[a-f0-9-]+\/export$/.test(target.pathname)){
       if([...target.searchParams.keys()].some(key=>key!=='format'))return null;
       const format=target.searchParams.get('format')||'pdf';
-      return ['pdf','xlsx','json'].includes(format)?format:null;
+      return {pdf:{extension:'pdf',label:'PDF report'},xlsx:{extension:'xlsx',label:'Excel workbook'},'xlsx-essentials':{extension:'xlsx',label:'Excel essentials'},json:{extension:'json',label:'JSON data'}}[format]||null;
     }
     if(target.pathname==='/api/diagnostics/download'){
       if([...target.searchParams.keys()].some(key=>key!=='project'))return null;
-      return 'json';
+      return {extension:'json',label:'JSON data'};
     }
   }catch{}
   return null;
+}
+
+export function exportDownload(url,appUrl){
+  const request=exportRequest(url,appUrl);
+  return request?request.extension:null;
 }
 
 export function downloadFilename(value,extension){
@@ -39,7 +44,8 @@ export function handleDesktopDownloads({window,appUrl,dialog,downloadsDir,tempDi
     if(!window.isDestroyed())window.focus();
   };
   const handler=(_event,item,source)=>{
-    const format=exportDownload(item.getURL(),appUrl);
+    const request=exportRequest(item.getURL(),appUrl);
+    const format=request?request.extension:null;
     const chain=item.getURLChain();
     const filename=format?downloadFilename(item.getFilename(),format):null;
     if(source!==contents||item.getInitiatorOrigin()!==origin||!filename
@@ -63,7 +69,7 @@ export function handleDesktopDownloads({window,appUrl,dialog,downloadsDir,tempDi
           if(state!=='completed')return await notice('The export could not be downloaded. Try again.','error');
           if(window.isDestroyed())return;
           const selection=await dialog.showSaveDialog(window,{title:'Save AHJ Atlas export',
-            defaultPath:path.join(downloadsDir,filename),filters:[{name:format==='xlsx'?'Excel workbook':format==='pdf'?'PDF report':'JSON data',extensions:[format]}],
+            defaultPath:path.join(downloadsDir,filename),filters:[{name:request.label,extensions:[format]}],
             properties:['showOverwriteConfirmation']});
           if(selection.canceled||!selection.filePath)return await notice('Export canceled.');
           if(path.extname(selection.filePath).toLowerCase()!==`.${format}`)

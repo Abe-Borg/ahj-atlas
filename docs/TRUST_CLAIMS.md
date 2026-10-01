@@ -25,7 +25,7 @@ The runtime inventory has **30 user action groups and 6 automatic behavior group
 | U15 | Retry a declined reply at suggested depth | public/app.js:chatRetries; ProjectChat.start | tests/chat.test.mjs |
 | U16 | Stop reply | ProjectChat.stop,run | tests/chat.test.mjs |
 | U17 | Apply; Apply and start research; processing mode on proposal | applyAction; Engine.resume; Store.saveQuestion; Store.addNote | tests/chat-actions.test.mjs |
-| U18 | Export PDF / Excel / JSON | exportData,pdfReport,excelReport; createServices.route | tests/http-exports.test.mjs |
+| U18 | Export PDF / Excel / Excel essentials / JSON | exportData,pdfReport,excelReport; createServices.route | tests/http-exports.test.mjs; tests/essentials-export.test.mjs |
 | U19 | Native export Save / Cancel; choose filename | handleDesktopDownloads | tests/desktop-downloads.test.mjs |
 | U20 | Diagnostics; Show records for; Refresh; Download diagnostics | diagnosticReport; createServices.route; public/app.js:loadDiagnostics | tests/diagnostics.test.mjs |
 | U21 | Check for updates | createUpdateChecker.check(force); public/app.js:checkUpdates | tests/update-check.test.mjs |
