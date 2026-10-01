@@ -9,7 +9,7 @@ The runtime inventory has **30 user action groups and 6 automatic behavior group
 | ID | Named user triggers | Executable source / symbol | Verification |
 |---|---|---|---|
 | U01 | New research; project fields; Add project context; discipline/building-use custom fields; Research now/later | public/app.js:newForm | manual; runtime inventory coverage |
-| U02 | Select project; Overview / Contacts / Codes & standards / Sources / Activity / Chat with AI; authorities/questions on Overview; source/brief/Supporting passage disclosure | public/app.js:selectProject,renderProject,renderSources | manual; runtime inventory coverage |
+| U02 | Select project; Overview / Contacts / Codes & standards / Sources / Activity / Chat with Atlas; authorities/questions on Overview; source/brief/Supporting passage disclosure | public/app.js:selectProject,renderProject,renderSources | manual; runtime inventory coverage |
 | U03 | API & spending; Save settings; Remember securely | lib/services.mjs:createServices.route; lib/key-vault.mjs:KeyVault | tests/provider.test.mjs; tests/connection-ui.mjs |
 | U04 | Disconnect & forget key | lib/services.mjs:connection DELETE; KeyVault.clear | tests/provider.test.mjs |
 | U05 | Start research (now / later) | Store.create; Engine.tick,dispatch; researchPayload,reviewPayload | tests/core.test.mjs; tests/evidence-recovery.test.mjs |
@@ -21,7 +21,7 @@ The runtime inventory has **30 user action groups and 6 automatic behavior group
 | U11 | Research with saved answers | Engine.resume; questionContext | tests/questions.test.mjs |
 | U12 | Reconcile batch (Activity) | Engine.reconcile,importBatch | tests/core.test.mjs |
 | U13 | Resolve uncertain charge; amount; confirmation; note | lib/services.mjs:resolve-charge route | tests/core.test.mjs; tests/chat.test.mjs |
-| U14 | Chat with AI; Reply depth; compose; Send message; Show earlier messages | ProjectChat.start,view,run,chatPayload; public/app.js:chatDrafts | tests/chat.test.mjs |
+| U14 | Chat with Atlas; Reply depth; compose; Send message; Ask Atlas; Show earlier messages | ProjectChat.start,view,run,chatPayload; public/app.js:askAtlas | tests/chat.test.mjs; tests/ask-atlas.test.mjs |
 | U15 | Retry a declined reply at suggested depth | public/app.js:chatRetries; ProjectChat.start | tests/chat.test.mjs |
 | U16 | Stop reply | ProjectChat.stop,run | tests/chat.test.mjs |
 | U17 | Apply; Apply and start research; processing mode on proposal | applyAction; Engine.resume; Store.saveQuestion; Store.addNote | tests/chat-actions.test.mjs |

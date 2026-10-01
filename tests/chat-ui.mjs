@@ -104,9 +104,34 @@ try{
   assert.equal(await page.$eval('#report-notes strong',e=>e.textContent),'NFPA 13, 2025 edition');assert.ok(await page.$('#report-notes [data-source="S1"]'));assert.equal(await page.evaluate(()=>Boolean(window.injected)),false);
   page.once('dialog',dialog=>dialog.accept());await click('[data-delete-note]');await page.waitForFunction(()=>!document.querySelector('#report-notes'),{timeout:10000});
   assert.deepEqual(app.store.notes(cp.id),[]);custom=null;await click('[data-tab=chat]');await page.waitForSelector('.chat-heading');
+  phase='ask atlas';
+  await page.select('#chat-mode','opus');
+  let asked=null;
+  custom=payload=>{
+    asked??=payload;
+    if(payload.messages.at(-1).content.some(x=>x.type==='tool_result'))return chatResponse('The saved source supports NFPA 13, 2022. Apply the card to save it.');
+    return chatResponse('',{stop_reason:'tool_use',content:[{type:'tool_use',id:'toolu_ask_atlas',name:'propose_question_update',input:{questionId,status:'answered',answer:'NFPA 13, 2022 edition, cited from the saved source [S1].',reason:'Ask Atlas found the edition in the saved source.'}}]});
+  };
+  await click('[data-tab=overview]');await page.waitForSelector('#saved-questions');await page.click('#saved-questions>summary');
+  assert.equal(await page.$eval(`[data-question="${questionId}"] [data-ask-atlas]`,e=>e.textContent),'Ask Atlas');
+  assert.match(await page.$eval('.tabs',e=>e.textContent),/Chat with Atlas/);
+  assert.equal(/Chat with AI/.test(await page.$eval('#main',e=>e.textContent)),false);
+  const beforeAsk=app.store.project(cp.id).questions.find(q=>q.id===questionId).answer;
+  await click(`[data-question="${questionId}"] [data-ask-atlas]`);
+  await page.waitForFunction(()=>document.querySelector('#chat-history')?.textContent.includes('Resolve this specific question'),{timeout:10000});
+  await page.waitForFunction(()=>document.querySelector('[data-proposal-apply]')?.textContent==='Apply',{timeout:10000});
+  assert.equal(await page.$$eval('.chat-user-text',(els,id)=>els.some(e=>e.textContent.includes('do the legwork yourself')&&e.textContent.includes(id)&&!e.textContent.includes('Which NFPA 13 edition does the fire marshal enforce?')),questionId),true);
+  assert.equal(app.store.project(cp.id).questions.find(q=>q.id===questionId).answer,beforeAsk);
+  assert.equal(asked.model,'claude-opus-5-5');assert.equal(asked.max_tokens,128000);assert.equal(asked.output_config.effort,'high');
+  assert.ok(asked.tools.some(t=>t.name==='web_search'&&t.max_uses===4));assert.ok(asked.tools.some(t=>t.name==='propose_question_update'));
+  assert.match(asked.system,/You are the project AI assistant/);
+  await click('[data-proposal-apply]');
+  await page.waitForFunction(()=>document.querySelectorAll('.chat-proposal .status-pill.green').length===4,{timeout:10000});
+  assert.match(app.store.project(cp.id).questions.find(q=>q.id===questionId).answer,/NFPA 13, 2022 edition/);
+  custom=null;
   await click(`[data-project="${b.id}"]`);await page.waitForFunction(()=>document.querySelector('.chat-heading h2')?.textContent.includes('BRAVO'));
   phase='desktop/mobile layout';await click('#chat-limits>summary');await page.type('#chat-message','Which missing details should I confirm with the owner?');await click('#chat-history .chat-citation summary');assert.equal(await page.$eval('#chat-history .chat-citation',e=>e.open),true);
   mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/project-chat-desktop.png',fullPage:true});await page.setViewport({width:390,height:844});await page.screenshot({path:'test-results/project-chat-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
-  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, reply depth, stop, stale-response protection, estimated costs without budgets, Markdown tables and lists, live draft and step, declined reply with retry on the other model, proposal cards applied only on Apply, a report note saved, shown on Overview and removed, and desktop/mobile layout. No paid API calls.');
+  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, reply depth, stop, stale-response protection, estimated costs without budgets, Markdown tables and lists, live draft and step, declined reply with retry on the other model, proposal cards applied only on Apply, a report note saved, shown on Overview and removed, Ask Atlas on a question card using the selected reply depth and Apply, Chat with Atlas label, and desktop/mobile layout. No paid API calls.');
 }catch(e){console.error('Failed during: '+phase);if(page){console.error(await page.evaluate(()=>document.body.innerText).catch(()=>''));await page.screenshot({path:'test-results/project-chat-failure.png',fullPage:true}).catch(()=>{});}throw e;}
 finally{for(const release of releases)release();await browser?.close();await app?.close();assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-chat-ui-')));rmSync(dir,{recursive:true,force:true});}
