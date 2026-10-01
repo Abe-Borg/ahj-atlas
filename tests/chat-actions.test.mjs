@@ -10,6 +10,7 @@ import { chatPayload,projectSection,ProjectChat } from '../lib/chat.mjs';
 import { CLARIFICATION_PREFIX } from '../lib/chat-actions.mjs';
 import { CHAT_LIMITS } from '../lib/config.mjs';
 import { diagnosticReport } from '../lib/diagnostics.mjs';
+import ExcelJS from 'exceljs';
 import { input,report,chatResponse,ChatProvider } from './fixtures.mjs';
 
 const body=(message='What should I resolve?')=>({clientId:randomUUID(),message});
@@ -189,4 +190,49 @@ test('a declined reply clears its proposals, and proposals survive a restart',as
     const recovered=new ProjectChat(reopened,provider,()=>true,{running:new Set()}),view=recovered.view(b.id).turns.at(-1);
     assert.notEqual(view.status,'running');assert.deepEqual(view.proposals,turn.proposals);await recovered.close();
   }finally{reopened.close();}
+});
+
+const note=(title,text,reason='The user asked to keep this finding.')=>call('propose_report_note',{title,note:text,reason});
+test('a report note is saved only when the user applies it, is kept apart from the report, and can be removed',async t=>{
+  const text='The county enforces NFPA 13, 2025 edition, through its adopting ordinance [S1].';
+  const provider=proposing([note('Sprinkler standard edition',text),note('Unread source',"A claim from an unread page [S9]."),note('Empty','')]);
+  const {app,a,b,post}=await setup(t,provider),s=app.store,c=app.services.chat;
+  const {token}=await(await fetch(app.url+'/api/bootstrap')).json(),remove=(id,noteId,auth=true)=>fetch(`${app.url}/api/projects/${id}/notes/${noteId}`,{method:'DELETE',headers:{'Content-Type':'application/json',...(auth?{'X-App-Token':token}:{})}});
+  const turn=await reply(c,a.id),outcomes=results(provider);
+  assert.deepEqual(turn.proposals.map(p=>[p.action,p.title,p.note,p.status]),[['report_note','Sprinkler standard edition',text,'proposed']]);
+  assert.match(outcomes[1].content,/S9 is not a source this project has read/);assert.match(outcomes[2].content,/title and its text/);
+  // Proposing saves nothing; applying saves the note once, free, with no research.
+  assert.deepEqual(s.notes(a.id),[]);const before=s.project(a.id);
+  assert.equal((await post(a.id,{turnId:turn.id,proposalId:turn.proposals[0].id})).status,200);
+  const [saved]=s.notes(a.id);assert.equal(saved.title,'Sprinkler standard edition');assert.equal(saved.text,text);assert.equal(saved.turn_id,turn.id);
+  const after=s.project(a.id);assert.equal(after.status,before.status);assert.deepEqual(after.report,before.report);assert.equal(s.attempts(a.id).filter(x=>x.stage_id!=='chat').length,0);
+  assert.equal((await post(a.id,{turnId:turn.id,proposalId:turn.proposals[0].id})).status,400);assert.equal(s.notes(a.id).length,1);
+  assert.ok(s.events(a.id).some(e=>e.message==='You applied a proposal from project chat (save a note to the report).'));
+  // The project detail, chat's context and the exports carry it; the other project does not.
+  const detail=await(await fetch(`${app.url}/api/projects/${a.id}`)).json();assert.deepEqual(detail.notes.map(n=>n.text),[text]);
+  assert.deepEqual((await(await fetch(`${app.url}/api/projects/${b.id}`)).json()).notes,[]);
+  assert.deepEqual(projectSection(s,a.id,'notes').map(n=>n.title),['Sprinkler standard edition']);
+  const probe=s.createChatTurn(a.id,{clientId:randomUUID(),message:'Next'});assert.match(chatPayload(s,probe).messages.at(-1).content[0].text,/Sprinkler standard edition/);s.updateChatTurn(a.id,probe.id,{status:'complete'});
+  const exported=await(await fetch(`${app.url}/api/projects/${a.id}/export?format=json`)).json();assert.deepEqual(exported.notes.map(n=>[n.title,n.note]),[['Sprinkler standard edition',text]]);
+  // Each export says where a note came from, so a standalone workbook is not read as reviewed findings.
+  assert.match(exported.notes[0].origin,/project chat.*not re-verified by research/);
+  const book=new ExcelJS.Workbook();await book.xlsx.load(Buffer.from(await(await fetch(`${app.url}/api/projects/${a.id}/export?format=xlsx`)).arrayBuffer()));const notes=book.getWorksheet('Notes');
+  assert.deepEqual(notes.getRow(1).values.slice(1),['Title','Note','Origin','Saved']);assert.deepEqual(notes.getRow(2).values.slice(1,4),['Sprinkler standard edition',text,exported.notes[0].origin]);
+  // A research round that rebuilds the report keeps the notes; a second identical note is refused.
+  s.updateProject(a.id,{report:{...report(),summary:'Rebuilt report'}});assert.equal(s.notes(a.id).length,1);
+  provider.fn=(payload,n)=>n===3?chatResponse('',{stop_reason:'tool_use',content:[note('Again',text)]}):chatResponse('Done.');
+  const again=await reply(c,a.id);assert.deepEqual(again.proposals,[]);
+  // Removing requires the app token and the right project, and records only the action.
+  assert.equal((await remove(a.id,saved.id,false)).status,403);assert.equal((await remove(b.id,saved.id)).status,400);
+  const removed=await remove(a.id,saved.id);assert.equal(removed.status,200);assert.deepEqual((await removed.json()).notes,[]);assert.deepEqual(s.notes(a.id),[]);
+  assert.ok(s.events(a.id).some(e=>e.message==='You removed a note from the report.'));assert.equal((await remove(a.id,saved.id)).status,400);
+});
+test('report notes can be proposed and applied while research runs, and deleting the project deletes them',async t=>{
+  const provider=proposing([note('Fire marshal contact','The fire marshal reviews sprinkler submittals [S1].')]);
+  const {app,a,post}=await setup(t,provider),s=app.store,c=app.services.chat;
+  s.updateProject(a.id,{status:'researching'});
+  const turn=await reply(c,a.id);assert.equal(turn.proposals[0].action,'report_note');
+  assert.equal((await post(a.id,{turnId:turn.id,proposalId:turn.proposals[0].id})).status,200);assert.equal(s.notes(a.id).length,1);
+  s.updateProject(a.id,{status:'complete'});s.deleteProject(a.id);
+  assert.equal(s.db.prepare('SELECT COUNT(*) n FROM report_notes WHERE project_id=?').get(a.id).n,0);
 });

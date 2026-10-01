@@ -24,7 +24,7 @@ The runtime inventory has **27 user action groups and 6 automatic behavior group
 | U14 | Chat with AI; Reply depth; compose; Send message; Show earlier messages | ProjectChat.start,view,run,chatPayload; public/app.js:chatDrafts | tests/chat.test.mjs |
 | U15 | Retry a declined reply at suggested depth | public/app.js:chatRetries; ProjectChat.start | tests/chat.test.mjs |
 | U16 | Stop reply | ProjectChat.stop,run | tests/chat.test.mjs |
-| U17 | Apply; Apply and start research; processing mode on proposal | applyAction; Engine.resume; Store.saveQuestion | tests/chat-actions.test.mjs |
+| U17 | Apply; Apply and start research; processing mode on proposal | applyAction; Engine.resume; Store.saveQuestion; Store.addNote | tests/chat-actions.test.mjs |
 | U18 | Export PDF / Excel / JSON | exportData,pdfReport,excelReport; createServices.route | tests/http-exports.test.mjs |
 | U19 | Native export Save / Cancel; choose filename | handleDesktopDownloads | tests/desktop-downloads.test.mjs |
 | U20 | Diagnostics; Show records for; Refresh; Download diagnostics | diagnosticReport; createServices.route; public/app.js:loadDiagnostics | tests/diagnostics.test.mjs |
@@ -36,6 +36,7 @@ The runtime inventory has **27 user action groups and 6 automatic behavior group
 | U26 | Desktop Import existing workspace / select folder / Start fresh / Quit | preflightWorkspace; startDesktop | tests/desktop-migration.test.mjs |
 | U27 | Download update / Try again; Restart and install (banner or App updates) | createUpdateChecker.download,install; createApp /api/updates/download,/api/updates/install; desktop/main.mjs:launchInstaller; startDesktop(beforeExit) | tests/update-check.test.mjs; tests/desktop.test.mjs; tests/update-ui.mjs |
 | U28 | Sources → Add a document you have; Add document | addDocument; createApp POST /api/projects/:id/documents; ResearchTools.documentText; Store.source(upload) | tests/documents.test.mjs |
+| U29 | Overview → Notes → Remove; confirmation | createServices.route DELETE /api/projects/:id/notes/:noteId; Store.deleteNote | tests/chat-actions.test.mjs |
 | A01 | startup/restart recovery, schema migrations and queued research | Store.constructor,recover; Engine.constructor,tick; ProjectChat.constructor | tests/upgrade.test.mjs; tests/chat.test.mjs |
 | A02 | scheduled research stages, tool follow-ups, coverage follow-ups, compact recovery and transient retries | Engine.dispatch,applyOnce,freshContext,importBatch | tests/evidence-recovery.test.mjs; tests/provider.test.mjs |
 | A03 | batch status/results polling and cancellation attempts | Engine.tick,pollBatch | tests/core.test.mjs |

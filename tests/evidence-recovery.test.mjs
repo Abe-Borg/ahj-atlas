@@ -118,6 +118,12 @@ test('repeated context growth switches to completion-only without relaxing the i
   s.updateStage(p.id,'jurisdiction',{context_resets:LIMITS.contextResets});provider.count=async payload=>payload.messages.length>1?LIMITS.input+1:5000;provider.response=finished;
   await e.dispatch(p.id,'jurisdiction');assert.deepEqual(provider.calls.at(-1).tools.map(t=>t.name),['finish_research']);assert.equal(s.stage(p.id,'jurisdiction').status,'complete');
 });
+test('a stage keeps its research tools through its last allowed checkpoint restart',async t=>{
+  const {store:s,project:p,provider,engine:e}=fixture(t);await e.dispatch(p.id,'jurisdiction');assert.equal(LIMITS.contextResets,4);
+  s.updateStage(p.id,'jurisdiction',{context_resets:LIMITS.contextResets-1});provider.count=async payload=>payload.messages.length>1?LIMITS.checkpointInput:5000;provider.response=finished;
+  await e.dispatch(p.id,'jurisdiction');const tools=provider.calls.at(-1).tools.map(t=>t.name);
+  assert.equal(provider.calls.at(-1).messages.length,1);assert.ok(tools.includes('read_source')&&tools.includes('web_search'),tools.join());assert.equal(s.stage(p.id,'jurisdiction').context_resets,LIMITS.contextResets);
+});
 test('unshrinkable input stops before another paid request and retains checkpoint evidence',async t=>{
   const {store:s,project:p,provider,engine:e}=fixture(t);await e.dispatch(p.id,'jurisdiction');provider.count=async()=>LIMITS.input+1;
   await e.dispatch(p.id,'jurisdiction');assert.equal(provider.calls.length,1);assert.equal(s.stage(p.id,'jurisdiction').status,'partial');assert.match(s.stage(p.id,'jurisdiction').output,/S1/);
@@ -245,4 +251,13 @@ test('the final review receives long stage briefs and more of a decisive source,
   const pkg=evidencePackage(s,s.project(p.id)),codes=pkg.stages.find(x=>x.stage==='codes'),source=pkg.sources.find(x=>x.url==='https://example.com/code-adoption');
   assert.ok(codes.findings.length>24000);assert.match(codes.findings,/END OF CODES BRIEF/);assert.ok(source.text.length>32000);
   assert.equal(reviewPayload(s,s.project(p.id)).output_config.effort,'high');assert.equal(researchPayload(s,s.project(p.id),s.stage(p.id,'verification')).output_config.effort,'high');
+});
+test('fill carries more of a long source after its relevant passages, within the allowance, while plain selection is unchanged',()=>{
+  const text=Array.from({length:3000},(_,n)=>`Line ${n}: the county adopted the 2024 fire code with amendment ${n}.`).join('\n');
+  const plain=selectPassages(text,{limit:60000}),filled=selectPassages(text,{limit:60000,fill:true});
+  // Plain selection stops at the windows around its capped matches; fill uses the allowance.
+  assert.ok(plain.text.length<30000);assert.ok(filled.text.length>55000&&filled.text.length<=60000);
+  for(const span of filled.spans)assert.ok(filled.text.includes(text.slice(span.start,span.end)));
+  assert.ok(filled.spans.every((s,i,all)=>i===0||s.start>all[i-1].end));
+  assert.deepEqual(selectPassages(text,{limit:60000,query:'amendment 2999',fill:true}),selectPassages(text,{limit:60000,query:'amendment 2999'}));
 });

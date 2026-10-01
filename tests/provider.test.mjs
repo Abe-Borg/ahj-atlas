@@ -20,15 +20,15 @@ test('chat sends compatible strict tool schemas to both token counting and gener
   const c=client(async(url,options)=>{
     paths.push(new URL(url).pathname);
     const sent=JSON.parse(options.body);
-    // Ten strict app tools (including three proposal tools) plus native web search and web fetch, which have no input schema.
-    assert.equal(sent.tools.length,12);
+    // Eleven strict app tools (including four proposal tools) plus native web search and web fetch, which have no input schema.
+    assert.equal(sent.tools.length,13);
     assert.deepEqual(sent.tools.filter(tool=>!tool.input_schema),[{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct'],user_location:{type:'approximate',country:'US'}},{type:'web_fetch_20250910',name:'web_fetch',max_uses:CHAT_LIMITS.fetchesPerRequest,max_content_tokens:LIMITS.fetchContentTokens}]);
     for(const tool of sent.tools.filter(tool=>tool.input_schema)){
       assert.equal(tool.strict,true);
       assert.equal(tool.input_schema.additionalProperties,false);
       // Project and proposal tools require every argument; the research tools shared with chat keep optional paging arguments.
       assert.ok(tool.input_schema.required.every(key=>Object.hasOwn(tool.input_schema.properties,key)));
-      if(['read_project','find_project_sources','read_saved_source','propose_question_update','propose_research_round','propose_address_correction'].includes(tool.name))assert.deepEqual(tool.input_schema.required,Object.keys(tool.input_schema.properties));
+      if(['read_project','find_project_sources','read_saved_source','propose_question_update','propose_research_round','propose_report_note','propose_address_correction'].includes(tool.name))assert.deepEqual(tool.input_schema.required,Object.keys(tool.input_schema.properties));
       // Strict schemas reject string length constraints too; proposal lengths are enforced in the app.
       for(const rule of Object.values(tool.input_schema.properties))assert.ok(!['minLength','maxLength','pattern'].some(key=>Object.hasOwn(rule,key)));
       // Anthropic strict schemas reject numeric constraints; enforce them in the app.
