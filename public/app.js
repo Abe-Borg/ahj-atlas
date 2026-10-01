@@ -1,4 +1,5 @@
 import { renderMarkdown } from './markdown.js';
+import { createLatest } from './latest-refresh.js';
 const $=(selector,root=document)=>root.querySelector(selector);
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(value||0);
@@ -11,13 +12,17 @@ let state={bootstrap:null,projects:[],selected:null,detail:null,tab:'overview',a
 let diagnosticsSnapshot=null,diagnosticsLoad=0,clientErrorCount=0,clientErrorWindow=Date.now();
 let updateState=null;
 const questionDrafts=new Map(),questionBusy=new Set();
+const nameDrafts=new Map(),nameBusy=new Set(),nameErrors=new Map();
 const chatDrafts=new Map(),chatOptions=new Map(),chatPending=new Set(),chatErrors=new Map(),chatRequests=new Map(),chatOlder=new Map();
 // Retry requests by project and declined turn. Each keeps its idempotency key, so a
 // click after a lost response cannot create and charge for a second reply.
 const chatRetries=new Map();
 // Proposal cards by project, turn and proposal: an Apply in progress, its error, and the chosen mode.
 const proposalBusy=new Set(),proposalErrors=new Map(),proposalModes=new Map();
-let projectLoad=0;
+let projectLoad=0,detailGeneration=0;
+// The project list is polled while research runs. The newest read is the one that paints,
+// and an older caller waits for it instead of returning the list from before either request.
+const projectLists=createLatest();
 function recordClientError(message,location='',line=0){
   if(!state.bootstrap)return;if(Date.now()-clientErrorWindow>60000){clientErrorCount=0;clientErrorWindow=Date.now();}if(++clientErrorCount>10)return;
   fetch('/api/diagnostics/client',{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':state.bootstrap.token},body:JSON.stringify({message:String(message||'Browser error').slice(0,2000),location:String(location).slice(0,300),line,projectId:state.selected})}).catch(()=>{});
@@ -150,7 +155,16 @@ function renderConnectionNote(){
   $('#api-key').placeholder=({connected:'Connected · enter a key to replace it',checking:'Checking saved key · enter a key to replace it',unavailable:'Saved key not yet verified · enter a key to replace it',invalid:'Key not accepted · enter a new key'})[view.status]||'sk-ant-…';
 }
 async function startProject(e){e.preventDefault();if(['missing','invalid'].includes(connectionView().status)){openSettings();return;}const button=$('#start-research');button.disabled=true;button.textContent='Creating project…';try{const body=Object.fromEntries(new FormData(e.target));if(body.discipline==='Other'){body.discipline=body.customDiscipline.trim();}delete body.customDiscipline;const p=await api('/api/projects',{method:'POST',body});await refreshProjects();await selectProject(p.id);}catch(error){$('#project-error').textContent=error.message;}finally{button.disabled=false;button.innerHTML='Start research <span aria-hidden="true">↗</span>';}}
-async function refreshProjects(){state.projects=await api('/api/projects');renderSidebar();}
+async function refreshProjects(){await projectLists.run(async isCurrent=>{const projects=await api('/api/projects');if(!isCurrent())return;state.projects=projects;renderSidebar();});}
+function applySavedProject(project){
+  projectLists.invalidate();detailGeneration++;
+  const index=state.projects.findIndex(item=>item.id===project.id);
+  if(index>=0)state.projects[index]=project;
+  if(state.detail?.project.id===project.id)state.detail.project=project;
+  renderSidebar();
+  const option=$('#diagnostic-project')?.querySelector(`option[value="${CSS.escape(project.id)}"]`);
+  if(option)option.textContent=project.name;
+}
 async function selectProject(id){const load=++projectLoad;state.selected=id;state.detail=null;state.tab=state.tab==='chat'?'chat':'overview';history.replaceState(null,'',`/#project=${encodeURIComponent(id)}`);renderSidebar();$('#main').innerHTML='<div class="loading">Opening project…</div>';try{const detail=await api(`/api/projects/${id}`);if(load!==projectLoad||state.selected!==id)return;state.detail=detail;renderProject();}catch(e){if(load===projectLoad)$('#main').innerHTML=`<div class="error-panel">${esc(e.message)}</div>`;}}
 function statusClass(status){return ['complete','verified'].includes(status)?'green':['partial','budget','attention','conflicting','inferred','unverified','needs_key'].includes(status)?'amber':['failed','canceled'].includes(status)?'red':'';}
 function badge(status){return `<span class="status-pill ${statusClass(status)}">${esc(({verified:'Source-supported',inferred:'Conditional',conflicting:'Conflicting',unverified:'Unconfirmed'})[status]||statuses[status]||status)}</span>`;}
@@ -215,15 +229,32 @@ function activityView(detail){
   const count=n=>Number(n).toLocaleString();
   return `<div class="report-grid"><section><h2>Research activity</h2><ol class="activity">${events.map(e=>`<li><time>${esc(date(e.time))}</time><span>${esc(e.message)}</span></li>`).join('')}</ol></section><aside><div class="panel panel-padding"><span class="eyebrow">SPENDING RECORD</span><h2>${money(p.cost)} <span class="optional">estimated API cost</span></h2><p class="cost-detail">${money(attempts.filter(a=>a.stage_id==='chat').reduce((n,a)=>n+a.actual,0)/1e6)} of this is project chat.<br>${money(p.reserved)} estimated for pending or uncertain requests.<br>${p.searches} research searches · ${p.reads} research source reads · ${attempts.filter(a=>a.stage_id==='chat').reduce((n,a)=>n+Number(a.usage?.server_tool_use?.web_search_requests||0),0)} chat searches.</p><p class="field-help">The provider’s invoice is authoritative. Native search has variable input costs; a running request may exceed its estimate.</p><div class="section-divider"></div><h3>Recorded usage</h3><p class="field-help">${used.length} responses with usage recorded<br>${count(tokens.input)} input tokens<br>${count(tokens.cached)} cached input tokens (${tokens.input?Math.round(tokens.cached/tokens.input*100):0}%)<br>${count(tokens.output)} output tokens, including thinking</p><p class="field-help">Output ceilings: 60,000 per research or evidence-check request; 100,000 for the final report; ${(state.detail.chat?.limits?.output||128000).toLocaleString()} per chat request (the model’s maximum). Only actual token use is billed.</p></div>${attempts.filter(a=>a.batch_id||a.state==='unknown'||a.state==='errored').map(a=>`<div class="source-card" style="margin-top:15px"><h3>${esc(stageLabels[a.stage_id]||a.stage_id)} · ${esc(a.state)}</h3><p>Request: ${esc(a.id)}</p>${a.request_id?`<p>Provider request: ${esc(a.request_id)}</p>`:''}${a.batch_id?`<p>Batch: ${esc(a.batch_id)}</p>`:''}<p>Estimated charge: ${money(a.actual/1e6)}</p>${a.state==='unknown'?`<button class="button secondary" data-resolve="${esc(a.id)}">Resolve uncertain charge</button>`:''}</div>`).join('')}</aside></div>`;
 }
+function projectNameEditor(p){
+  const draft=nameDrafts.has(p.id)?nameDrafts.get(p.id):p.name,busy=nameBusy.has(p.id),unchanged=draft.trim()===p.name;
+  return `<form id="rename-form" class="project-name-form"><h1><label for="project-name">Project name</label></h1><div class="project-name-row"><input id="project-name" name="name" required maxlength="100" autocomplete="off" value="${esc(draft)}" ${busy?'disabled':''}><button class="button secondary" type="submit" id="save-project-name" ${busy||unchanged?'disabled':''}>${busy?'Saving…':'Save name'}</button></div><p class="field-help" id="rename-help">Saving the name does not stop research or change saved findings.</p><div class="inline-error" role="alert" id="rename-error">${esc(nameErrors.get(p.id)||'')}</div></form>`;
+}
+async function saveProjectName(e){
+  e.preventDefault();
+  const id=state.selected,name=$('#project-name')?.value;
+  if(!id||name==null)return;
+  nameBusy.add(id);nameErrors.delete(id);renderProject();
+  try{
+    const saved=await api(`/api/projects/${id}/rename`,{method:'POST',body:{name}});
+    nameDrafts.delete(id);applySavedProject(saved);toast('Project name saved.');
+    await refreshProjects();
+    if(state.selected===id)await refreshSelected();
+  }catch(error){nameErrors.set(id,error.message);}
+  finally{nameBusy.delete(id);if(state.selected===id)renderProject();}
+}
 function renderProject(){
   if(!state.detail)return;const {project:p,stages,sources,attempts}=state.detail,r=p.report;
-  const focused=document.activeElement,editing=focused?.matches('[data-question-form] textarea, #chat-form textarea, #chat-form input, .chat-proposal select, .chat-proposal button')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
+  const focused=document.activeElement,editing=focused?.matches('[data-question-form] textarea, #chat-form textarea, #chat-form input, .chat-proposal select, .chat-proposal button, #project-name')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
   const chatHistory=$('#chat-history'),chatScroll=chatHistory?{top:chatHistory.scrollTop,bottom:chatHistory.scrollHeight-chatHistory.scrollTop-chatHistory.clientHeight<40}:null;
   const openDetails=[...document.querySelectorAll('#main details[open]')].map(d=>d.closest('[id]')?.id).filter(Boolean);
   const active=['queued','researching','waiting_batch','waiting'].includes(p.status),uncertain=attempts.some(a=>a.state==='unknown');
   const canStop=!p.cancel_requested&&(active||attempts.some(a=>a.stage_id!=='chat'&&['dispatching','pending','received'].includes(a.state)));
   $('#breadcrumb').innerHTML='WORKSPACE <span>/</span> PROJECT RESEARCH';
-  $('#main').innerHTML=`<div class="intro"><div><span class="eyebrow">PROJECT RESEARCH</span><h1>${esc(p.name)}</h1><p>${esc(p.address)}</p>${p.input?.siteDescription?`<p class="field-help">Parcel / site: ${esc(p.input.siteDescription)}</p>`:''}<div class="report-meta"><span>${esc(p.discipline)}</span><span>·</span><span>${p.mode==='batch'?'Batch processing':'Real-time research'}</span>${badge(p.status)}</div></div><div class="project-actions"><button class="button secondary danger" id="delete-project">Delete project</button>${canStop?'<button class="button secondary danger" id="cancel-research">Stop research</button>':''}${!active&&!state.detail.chat?.active&&!['canceling','needs_key'].includes(p.status)&&!uncertain?'<button class="button secondary" id="resume-research">'+(researchComplete()?'Review or extend report':'Continue research')+'</button>':''}${p.status==='needs_key'?'<button class="button primary" id="project-connect">Connect Claude</button>':''}<details class="export-menu"><summary class="button secondary">Export <span aria-hidden="true">⌄</span></summary><div class="export-options">${[['pdf','PDF report'],['xlsx','Excel workbook'],['json','Research data (JSON)']].map(([f,label])=>`<a href="/api/projects/${p.id}/export?format=${f}" download>${label}</a>`).join('')}</div></details></div></div>
+  $('#main').innerHTML=`<div class="intro"><div><span class="eyebrow">PROJECT RESEARCH</span>${projectNameEditor(p)}<p>${esc(p.address)}</p>${p.input?.siteDescription?`<p class="field-help">Parcel / site: ${esc(p.input.siteDescription)}</p>`:''}<div class="report-meta"><span>${esc(p.discipline)}</span><span>·</span><span>${p.mode==='batch'?'Batch processing':'Real-time research'}</span>${badge(p.status)}</div></div><div class="project-actions"><button class="button secondary danger" id="delete-project">Delete project</button>${canStop?'<button class="button secondary danger" id="cancel-research">Stop research</button>':''}${!active&&!state.detail.chat?.active&&!['canceling','needs_key'].includes(p.status)&&!uncertain?'<button class="button secondary" id="resume-research">'+(researchComplete()?'Review or extend report':'Continue research')+'</button>':''}${p.status==='needs_key'?'<button class="button primary" id="project-connect">Connect Claude</button>':''}<details class="export-menu"><summary class="button secondary">Export <span aria-hidden="true">⌄</span></summary><div class="export-options">${[['pdf','PDF report'],['xlsx','Excel workbook'],['json','Research data (JSON)']].map(([f,label])=>`<a href="/api/projects/${p.id}/export?format=${f}" download>${label}</a>`).join('')}</div></details></div></div>
   <div class="summary-strip"><div class="summary-stat"><small>AUTHORITIES</small><strong>${r?r.authorities.length:'—'}</strong><em>${r?'identified':'researching'}</em></div><div class="summary-stat"><small>CODE & STANDARD FINDINGS</small><strong>${r?codeCount(r):'—'}</strong><em>${r?'entries':'researching'}</em></div><div class="summary-stat"><small>EVIDENCE SOURCES</small><strong>${sources.length}</strong><em>${sources.filter(s=>s.read_full).length} read</em></div><div class="summary-stat"><small>ESTIMATED COST</small><strong style="font-size:1.15rem">${money(p.cost)}</strong><em>to date</em><small style="margin:7px 0 0">${money(p.reserved)} pending</small></div></div>
   <div class="stages">${stages.map((s,i)=>`<div class="stage ${s.status==='complete'?'done':['running','preparing','waiting_batch'].includes(s.status)?'current':''}"><small>${s.status==='complete'?'✓':'0'+(i+1)} &nbsp; STAGE ${i+1}</small><strong>${esc(stageLabels[s.id]||s.id)}</strong><p>${esc(({queued:'Waiting',running:'Researching…',preparing:'Preparing request…',waiting_batch:'Awaiting batch result',complete:'Brief complete',partial:'Partial findings',blocked:'Needs attention'})[s.status]||s.status)}</p></div>`).join('')}</div>
   ${p.note?`<div class="notice ${['queued','researching','waiting_batch'].includes(p.status)?'info':''}"><p>${esc(p.note)}</p>${['budget','attention'].includes(p.status)&&!attempts.some(a=>['dispatching','pending','received','unknown'].includes(a.state))&&stages.some(s=>s.id!=='review'&&!['complete','partial'].includes(s.status))?'<button class="button secondary" id="finish-partial">Finish with saved evidence</button>':''}${uncertain&&attempts.some(a=>a.mode==='batch'&&a.state==='unknown')?'<button class="button secondary" id="recover-batch">Reconcile original batch</button>':''}${uncertain?'<p class="field-help">Open Activity to inspect request identifiers and manually reconcile a confirmed charge.</p>':''}</div>`:''}
@@ -233,6 +264,13 @@ function renderProject(){
   $('#document-upload')?.addEventListener('submit',addDocument);
   for(const b of document.querySelectorAll('[data-delete-note]'))b.addEventListener('click',()=>removeNote(b));
   $('#delete-project').addEventListener('click',()=>openAction('delete'));
+  $('#rename-form')?.addEventListener('submit',saveProjectName);
+  $('#project-name')?.addEventListener('input',e=>{
+    const id=state.selected;if(!id||!state.detail)return;
+    if(e.target.value===state.detail.project.name)nameDrafts.delete(id);else nameDrafts.set(id,e.target.value);
+    nameErrors.delete(id);const err=$('#rename-error');if(err)err.textContent='';
+    const button=$('#save-project-name');if(button&&!nameBusy.has(id))button.disabled=e.target.value.trim()===state.detail.project.name;
+  });
   for(const b of document.querySelectorAll('[data-resolve]'))b.addEventListener('click',()=>openAction('resolve',b.dataset.resolve));
   for(const id of openDetails){const parent=document.getElementById(id);const d=parent?.matches('details')?parent:parent?.querySelector('details');if(d)d.open=true;}
   for(const form of document.querySelectorAll('[data-question-form]')){
@@ -437,8 +475,8 @@ async function addDocument(e){
   finally{if(button.isConnected){button.disabled=false;button.textContent='Add document';}}
 }
 async function refreshSelected(){
-  const load=projectLoad;await refreshProjects();if(!state.selected||load!==projectLoad)return;
-  const id=state.selected,next=await api(`/api/projects/${id}`);if(state.selected!==id||load!==projectLoad)return;
+  const load=projectLoad,generation=++detailGeneration;await refreshProjects();if(!state.selected||load!==projectLoad||generation!==detailGeneration)return;
+  const id=state.selected,next=await api(`/api/projects/${id}`);if(state.selected!==id||load!==projectLoad||generation!==detailGeneration)return;
   const stamp=d=>JSON.stringify([d?.project.updated,d?.project.cost,d?.project.reserved,d?.events[0],d?.stages.map(s=>[s.status,s.rounds]),d?.chat]);
   const changed=stamp(next)!==stamp(state.detail);state.detail=next;if(changed)renderProject();
 }

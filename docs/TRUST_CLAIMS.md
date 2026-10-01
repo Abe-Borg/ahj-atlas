@@ -4,7 +4,7 @@ Discovery completed before trust copy was written. Authority: executable impleme
 
 ## Inventory and granularity
 
-The runtime inventory has **27 user action groups and 6 automatic behavior groups**. A group combines named controls with the same work, outbound data and failure behavior; it does not omit controls. Each ID below is a runtime card, including purely local actions. No file drop, generic JSON import, global undo, permit-submission command or email-sending action is implemented. The desktop has an initial source-workspace import, not a JSON-export restore command. Form selectors, chat depth/mode selectors, disclosure toggles and navigation are included in U01/U02/U14/U22. Native file-save cancellation is U19; modal Back/Close/Escape is U22. OS keyboard activation invokes the same controls; there is no app-defined global keyboard-command dispatcher.
+The runtime inventory has **30 user action groups and 6 automatic behavior groups**. A group combines named controls with the same work, outbound data and failure behavior; it does not omit controls. Each ID below is a runtime card, including purely local actions. No file drop, generic JSON import, global undo, permit-submission command or email-sending action is implemented. The desktop has an initial source-workspace import, not a JSON-export restore command. Form selectors, chat depth/mode selectors, disclosure toggles and navigation are included in U01/U02/U14/U22. Native file-save cancellation is U19; modal Back/Close/Escape is U22. OS keyboard activation invokes the same controls; there is no app-defined global keyboard-command dispatcher.
 
 | ID | Named user triggers | Executable source / symbol | Verification |
 |---|---|---|---|
@@ -37,6 +37,7 @@ The runtime inventory has **27 user action groups and 6 automatic behavior group
 | U27 | Download update / Try again; Restart and install (banner or App updates) | createUpdateChecker.download,install; createApp /api/updates/download,/api/updates/install; desktop/main.mjs:launchInstaller; startDesktop(beforeExit) | tests/update-check.test.mjs; tests/desktop.test.mjs; tests/update-ui.mjs |
 | U28 | Sources → Add a document you have; Add document | addDocument; createApp POST /api/projects/:id/documents; ResearchTools.documentText; Store.source(upload) | tests/documents.test.mjs |
 | U29 | Overview → Notes → Remove; confirmation | createServices.route DELETE /api/projects/:id/notes/:noteId; Store.deleteNote | tests/chat-actions.test.mjs |
+| U30 | Project name; Save name | Store.renameProject; createServices.route POST /api/projects/:id/rename; public/app.js:saveProjectName | tests/rename-project.test.mjs |
 | A01 | startup/restart recovery, schema migrations and queued research | Store.constructor,recover; Engine.constructor,tick; ProjectChat.constructor | tests/upgrade.test.mjs; tests/chat.test.mjs |
 | A02 | scheduled research stages, tool follow-ups, coverage follow-ups, compact recovery and transient retries | Engine.dispatch,applyOnce,freshContext,importBatch | tests/evidence-recovery.test.mjs; tests/provider.test.mjs |
 | A03 | batch status/results polling and cancellation attempts | Engine.tick,pollBatch | tests/core.test.mjs |
