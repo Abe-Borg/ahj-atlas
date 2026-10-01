@@ -62,11 +62,14 @@ test('chat proposals change nothing until the user applies them, and apply exact
   const unknown=await post(a.id,{turnId:turn.id,proposalId:randomUUID()});assert.equal(unknown.status,400);
   const applied=await post(a.id,{turnId:turn.id,proposalId:turn.proposals[0].id});assert.equal(applied.status,200);
   const view=await applied.json();assert.equal(view.turns.at(-1).proposals[0].status,'applied');assert.ok(view.turns.at(-1).proposals[0].applied);
-  const q=s.project(a.id).questions.find(x=>x.id===q0.id);assert.equal(q.status,'answered');assert.equal(q.answer,'ANSWER_PRIVATE: NFPA 13, 2025 edition, per [S1].');
+  const q=s.project(a.id).questions.find(x=>x.id===q0.id);assert.equal(q.status,'answered');assert.equal(q.answer,'ANSWER_PRIVATE: NFPA 13, 2025 edition, per [S1].');assert.equal(q.reason,'The user confirmed it.');
   assert.ok(s.project(a.id).questionUpdatesPending);assert.equal(s.project(a.id).status,'complete');
   const again=await post(a.id,{turnId:turn.id,proposalId:turn.proposals[0].id});assert.equal(again.status,400);assert.match((await again.json()).error,/already been applied/);
-  assert.equal((await post(a.id,{turnId:turn.id,proposalId:turn.proposals[1].id})).status,200);assert.equal(s.project(a.id).questions.find(x=>x.id===q1.id).status,'dismissed');
+  assert.equal((await post(a.id,{turnId:turn.id,proposalId:turn.proposals[1].id})).status,200);
+  const dismissed=s.project(a.id).questions.find(x=>x.id===q1.id);assert.equal(dismissed.status,'dismissed');assert.equal(dismissed.reason,'Not a priority for this phase.');
   assert.ok(s.events(a.id).some(e=>e.message==='You applied a proposal from project chat (answer a question).'));
+  assert.ok(s.events(a.id).some(e=>e.message.startsWith('Question answered:')&&e.message.includes(q0.question)&&e.message.includes('The user confirmed it.')));
+  assert.ok(s.events(a.id).some(e=>e.message.startsWith('Question dismissed:')&&e.message.includes(q1.question)&&e.message.includes('Not a priority for this phase.')));
   assert.equal(s.project(b.id).questions.every(x=>x.status==='open'),true);
   // Later turns see what was proposed; its current status follows in the latest message.
   const next=s.createChatTurn(a.id,{clientId:randomUUID(),message:'Next question'}),payload=chatPayload(s,next);
