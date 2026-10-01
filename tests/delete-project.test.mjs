@@ -24,7 +24,7 @@ test('deletion removes all project records, preserves other projects and keeps c
   s.saveTool(a.id,'tool-1','read_project',{text:'Saved tool output'});
   s.source(p.id,{url:'https://example.com',title:'Saved source',text:'Evidence',readFull:true});
   s.saveLinks(p.id,[{url:'https://example.com'}]);
-  s.db.prepare('INSERT INTO question_responses VALUES(?,?,?,?,?,?)').run(p.id,'q1','{}','answered','Answer',new Date().toISOString());
+  s.db.prepare('INSERT INTO question_responses(project_id,id,gap,status,answer,updated) VALUES(?,?,?,?,?,?)').run(p.id,'q1','{}','answered','Answer',new Date().toISOString());
   s.diagnostic('test',{projectId:p.id});
   assert.equal((await app.remove(p.id)).status,200);
   assert.equal(s.project(p.id),null);

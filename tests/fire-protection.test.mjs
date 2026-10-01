@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import ExcelJS from 'exceljs';
 import { fireProfile,isFireProtection,nfpaIds,completionBrief } from '../lib/fire-protection.mjs';
+import { CLOSURE_REASON, questionId } from '../lib/questions.mjs';
 import { researchPayload,reviewPayload,validateReport,completionError } from '../lib/prompts.mjs';
 import { encodeReport,decodeReport,REPORT_WIRE_SCHEMA } from '../lib/report-format.mjs';
 import { Store } from '../lib/store.mjs';
@@ -72,6 +73,21 @@ test('capitalized completion values and applicability retain conservative eviden
   const exclusion=checked([row({edition:'',status:'VERIFIED',applicabilityStatus:'NOT_APPLICABLE'})]).fireStandards[0];
   assert.equal(exclusion.applicabilityStatus,'not_applicable');assert.equal(exclusion.status,'verified');
   const wrongId=checked([row({status:'VERIFIED',adoptionSourceId:'s1'})]).fireStandards[0];assert.equal(wrongId.status,'unverified');
+});
+test('saved answers and closures suppress the same NFPA confirm question without matching a different designation',()=>{
+  const confirm=id=>`Confirm ${id}: applicability and adopted edition.`;
+  const answered=[{id:questionId('Which sprinkler standard applies?'),question:'Which sprinkler standard applies?',status:'answered',answer:'Use NFPA 13, 2019 edition.'}];
+  const honored=validateReport(report(),[source],[],[],input,answered);
+  assert.ok(!honored.gaps.some(g=>g.question===confirm('NFPA 13')));
+  assert.ok(honored.gaps.some(g=>g.question===confirm('NFPA 72')));
+  const residential=[{id:questionId('Which residential standard applies?'),question:'Which residential standard applies?',status:'answered',answer:'NFPA 13R applies to this building.'}];
+  assert.ok(validateReport(report(),[source],[],[],input,residential).gaps.some(g=>g.question===confirm('NFPA 13')));
+  const closed=[{id:questionId(confirm('NFPA 72')),question:confirm('NFPA 72'),status:'closed',answer:'',reason:CLOSURE_REASON}];
+  const kept=validateReport(report(),[source],[],[],input,closed);
+  assert.ok(!kept.gaps.some(g=>g.question===confirm('NFPA 72')));
+  assert.ok(kept.gaps.some(g=>g.question===confirm('NFPA 13')));
+  const reworded=[{id:questionId('What alarm standard should we list?'),question:'What alarm standard should we list?',status:'closed',answer:'',reason:CLOSURE_REASON}];
+  assert.ok(validateReport(report(),[source],[],[],input,reworded).gaps.some(g=>g.question===confirm('NFPA 72')));
 });
 test('additional standards discovered by researchers cannot disappear from the final report',()=>{
   const out=validateReport(report(),[source],[{id:'codes',status:'complete',output:'NFPA 750 | conditional | Investigate water mist alternative and its adoption basis.'}],[],input);
