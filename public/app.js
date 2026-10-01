@@ -1,4 +1,5 @@
 import { renderMarkdown } from './markdown.js';
+import { createLatest } from './latest-refresh.js';
 const $=(selector,root=document)=>root.querySelector(selector);
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(value||0);
@@ -18,10 +19,10 @@ const chatDrafts=new Map(),chatOptions=new Map(),chatPending=new Set(),chatError
 const chatRetries=new Map();
 // Proposal cards by project, turn and proposal: an Apply in progress, its error, and the chosen mode.
 const proposalBusy=new Set(),proposalErrors=new Map(),proposalModes=new Map();
-let projectLoad=0;
-// Research polls the project list every few seconds. Only the newest response may paint the sidebar,
-// so a list that left before a rename cannot put the previous name back.
-let projectsGeneration=0,detailGeneration=0;
+let projectLoad=0,detailGeneration=0;
+// The project list is polled while research runs. The newest read is the one that paints,
+// and an older caller waits for it instead of returning the list from before either request.
+const projectLists=createLatest();
 function recordClientError(message,location='',line=0){
   if(!state.bootstrap)return;if(Date.now()-clientErrorWindow>60000){clientErrorCount=0;clientErrorWindow=Date.now();}if(++clientErrorCount>10)return;
   fetch('/api/diagnostics/client',{method:'POST',headers:{'Content-Type':'application/json','X-App-Token':state.bootstrap.token},body:JSON.stringify({message:String(message||'Browser error').slice(0,2000),location:String(location).slice(0,300),line,projectId:state.selected})}).catch(()=>{});
@@ -154,9 +155,9 @@ function renderConnectionNote(){
   $('#api-key').placeholder=({connected:'Connected · enter a key to replace it',checking:'Checking saved key · enter a key to replace it',unavailable:'Saved key not yet verified · enter a key to replace it',invalid:'Key not accepted · enter a new key'})[view.status]||'sk-ant-…';
 }
 async function startProject(e){e.preventDefault();if(['missing','invalid'].includes(connectionView().status)){openSettings();return;}const button=$('#start-research');button.disabled=true;button.textContent='Creating project…';try{const body=Object.fromEntries(new FormData(e.target));if(body.discipline==='Other'){body.discipline=body.customDiscipline.trim();}delete body.customDiscipline;const p=await api('/api/projects',{method:'POST',body});await refreshProjects();await selectProject(p.id);}catch(error){$('#project-error').textContent=error.message;}finally{button.disabled=false;button.innerHTML='Start research <span aria-hidden="true">↗</span>';}}
-async function refreshProjects(){const generation=++projectsGeneration,projects=await api('/api/projects');if(generation!==projectsGeneration)return;state.projects=projects;renderSidebar();}
+async function refreshProjects(){await projectLists.run(async isCurrent=>{const projects=await api('/api/projects');if(!isCurrent())return;state.projects=projects;renderSidebar();});}
 function applySavedProject(project){
-  projectsGeneration++;detailGeneration++;
+  projectLists.invalidate();detailGeneration++;
   const index=state.projects.findIndex(item=>item.id===project.id);
   if(index>=0)state.projects[index]=project;
   if(state.detail?.project.id===project.id)state.detail.project=project;
