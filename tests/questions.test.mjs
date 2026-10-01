@@ -121,6 +121,45 @@ test('a replacement report closes omitted open questions and keeps answered ones
   let text='';for(let i=1;i<=doc.numPages;i++)text+=(await(await doc.getPage(i)).getTextContent()).items.map(x=>x.str).join(' ');await doc.loadingTask.destroy();
   assert.match(text,/Status: closed/);assert.match(text,new RegExp(CLOSURE_REASON.replace(/[.]/g,'\\.')));
 });
+test('a report save keeps question updates made while the review was still applying',async t=>{
+  const {app,id}=await setup(t),s=app.store,engine=app.services.engine;
+  const extra={question:'Who is the fire marshal?',why:'Contact',contact:'AHJ',nextStep:'Ask.'};
+  s.updateProject(id,{report:{...report(),gaps:[...gaps,extra]}});
+  const [one,two,three]=s.project(id).questions;
+  s.saveQuestion(id,{questionId:two.id,status:'answered',answer:'October 2026.'});
+  const stale=s.project(id);
+  s.saveQuestion(id,{questionId:one.id,status:'answered',answer:'Sprinklers only.',reason:'Confirmed during review.'});
+  s.saveQuestion(id,{questionId:three.id,status:'dismissed',reason:'Not this phase.'});
+  s.saveQuestion(id,{questionId:two.id,status:'open'});
+  const attempt=s.reserve(id,'review',{mode:'realtime',modelKey:'review',payload:{},reserve:1});
+  engine.saveReport(stale,s.attempt(attempt.id),{...report(),researchHealth:{},gaps:[]},'{}');
+  const questions=s.project(id).questions,answered=questions.find(q=>q.id===one.id),dismissed=questions.find(q=>q.id===three.id),reopened=questions.find(q=>q.id===two.id);
+  assert.equal(answered.status,'answered');assert.equal(answered.answer,'Sprinklers only.');assert.equal(answered.reason,'Confirmed during review.');
+  assert.equal(dismissed.status,'dismissed');assert.equal(dismissed.reason,'Not this phase.');
+  assert.equal(reopened.status,'closed');assert.equal(reopened.reason,CLOSURE_REASON);
+  assert.equal(s.events(id).filter(e=>e.message.startsWith('Question closed:')&&e.message.includes(one.question)).length,0);
+  assert.equal(s.events(id).filter(e=>e.message.startsWith('Question closed:')&&e.message.includes(three.question)).length,0);
+  assert.equal(s.events(id).filter(e=>e.message.startsWith('Question closed:')&&e.message.includes(two.question)).length,1);
+  s.closeQuestions(id,[{id:one.id,question:one.question,reason:CLOSURE_REASON,answer:'replaced'}]);
+  assert.equal(s.project(id).questions.find(q=>q.id===one.id).status,'answered');assert.equal(s.project(id).questions.find(q=>q.id===one.id).answer,'Sprinklers only.');
+  assert.equal(s.events(id).filter(e=>e.message.startsWith('Question closed:')&&e.message.includes(one.question)).length,0);
+});
+test('closing a question the last round still lists as open does not offer another research round',async t=>{
+  const {app,id}=await setup(t),s=app.store,engine=app.services.engine,[one,two]=s.project(id).questions;
+  s.saveQuestion(id,{questionId:one.id,status:'answered',answer:'Sprinklers.'});
+  s.saveQuestion(id,{questionId:one.id,status:'open'});
+  const snapshot=questionContext(s.project(id).questionResponses);
+  s.updateProject(id,{input:{...s.project(id).input,questionResponses:snapshot}});
+  assert.equal(s.project(id).questionUpdatesPending,false);
+  const attempt=s.reserve(id,'review',{mode:'realtime',modelKey:'review',payload:{},reserve:1});
+  engine.saveReport(s.project(id),s.attempt(attempt.id),{...report(),researchHealth:{},gaps:[gaps[1]]},'{}');
+  const closed=s.project(id);
+  assert.equal(closed.questions.find(q=>q.id===one.id).status,'closed');
+  assert.equal(closed.input.questionResponses.some(q=>q.id===one.id&&q.status==='open'),true);
+  assert.equal(closed.questionUpdatesPending,false);
+  s.saveQuestion(id,{questionId:two.id,status:'answered',answer:'October 2026.'});
+  assert.equal(s.project(id).questionUpdatesPending,true);
+});
 test('a saved answer keeps the same confirm question from returning, and the report save closes it',async t=>{
   const {app,id}=await setup(t),s=app.store,engine=app.services.engine;
   const confirm='Confirm NFPA 13: applicability and adopted edition.',other='Confirm NFPA 72: applicability and adopted edition.';
