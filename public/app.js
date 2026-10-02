@@ -14,6 +14,40 @@ let updateState=null;
 const questionDrafts=new Map(),questionBusy=new Set();
 const nameDrafts=new Map(),nameBusy=new Set(),nameErrors=new Map();
 const chatDrafts=new Map(),chatOptions=new Map(),chatPending=new Set(),chatErrors=new Map(),chatRequests=new Map(),chatOlder=new Map();
+// One new-project draft for this page, kept in memory like unsent chat and question
+// drafts. Opening a saved project leaves it in place. New research restores it.
+// Choosing New research again while that form is open asks before clearing it.
+const projectDrafts=new Map();
+function projectDraftFromForm(){
+  const form=$('#project-form');if(!form)return null;
+  return {
+    address:$('#address').value,name:$('#name').value,
+    discipline:$('#discipline').value,customDiscipline:$('#custom-discipline').value,
+    scope:$('#scope').value,occupancy:$('#occupancy').value,customOccupancy:$('#custom-occupancy').value,
+    permitDate:$('#permit-date').value,country:$('#country').value,
+    siteDescription:$('#site-description').value,notes:$('#notes').value,
+    mode:form.querySelector('[name=mode]:checked')?.value||'realtime',
+    detailsOpen:Boolean($('details.extra',form)?.open),
+  };
+}
+function projectDraftHasContent(draft){
+  if(!draft)return false;
+  const country=draft.country.trim();
+  return Boolean(draft.address.trim()||draft.name.trim()||draft.discipline||draft.occupancy
+    ||(draft.scope&&draft.scope!=='Not yet specified')||draft.permitDate||draft.siteDescription.trim()||draft.notes.trim()
+    ||draft.mode==='batch'||(country&&country!=='United States'));
+}
+function captureNewProjectDraft(){
+  const draft=projectDraftFromForm();if(!draft)return;
+  if(projectDraftHasContent(draft))projectDrafts.set('new',draft);else projectDrafts.delete('new');
+}
+function syncBuildingUse(){
+  const select=$('#occupancy');if(!select)return;
+  const custom=select.value==='Other',input=$('#custom-occupancy'),field=$('#custom-occupancy-field'),label=$('#selected-building-use-value');
+  if(field)field.hidden=!custom;
+  if(input){input.disabled=!custom;input.required=custom;}
+  if(label)label.textContent=custom?(input.value.trim()||'Other — enter building use'):(select.value||'Not yet specified');
+}
 // Retry requests by project and declined turn. Each keeps its idempotency key, so a
 // click after a lost response cannot create and charge for a second reply.
 const chatRetries=new Map();
@@ -107,21 +141,30 @@ $('#diagnostic-project').addEventListener('change',loadDiagnostics);
 $('#refresh-diagnostics').addEventListener('click',loadDiagnostics);
 $('#download-diagnostics').addEventListener('click',()=>{if(!diagnosticsSnapshot)return;const a=document.createElement('a');a.href='/api/diagnostics/download'+($('#diagnostic-project').value?'?project='+encodeURIComponent($('#diagnostic-project').value):'');a.download='AHJ-Atlas-diagnostics.json';document.body.appendChild(a);a.click();a.remove();});
 const icons={pin:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>',people:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6m1 3a5 5 0 0 1 3 5v2"/></svg>',book:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h14a2 2 0 0 1 2 2v15H6a2 2 0 0 1-2-2V4Zm0 13h16M8 8h8M8 11h6"/></svg>',check:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg>'};
-function newForm(prefill={}){
+function newForm({keepDraft=true}={}){
+  if(keepDraft)captureNewProjectDraft();
+  const prefill=keepDraft?(projectDrafts.get('new')||{}):{};
   projectLoad++;
-  const custom=Boolean(prefill.discipline&&!disciplines.includes(prefill.discipline));
-  const use=prefill.occupancy??buildingUses[0],customUse=Boolean(use&&!buildingUses.includes(use));
+  const custom=prefill.discipline==='Other';
+  const customUse=prefill.occupancy==='Other';
+  const use=buildingUses.includes(prefill.occupancy)?prefill.occupancy:'';
+  const selectedUse=customUse?(String(prefill.customOccupancy||'').trim()||'Other — enter building use'):(use||'Not yet specified');
+  const detailsOpen=customUse||(prefill.detailsOpen!=null?Boolean(prefill.detailsOpen):Boolean(prefill.notes||prefill.siteDescription));
   state.selected=null;state.detail=null;state.tab='overview';history.replaceState(null,'','/');renderSidebar();$('#breadcrumb').innerHTML='WORKSPACE <span>/</span> NEW RESEARCH';
   $('#main').innerHTML=`<div class="intro"><div><span class="eyebrow">A BETTER START TO DESIGN</span><h1>Know your jurisdiction.</h1><p>Find the authorities, people, and adopted codes that matter to your project.</p></div><span class="intro-badge">Built for engineers & architects</span></div>
   <div class="new-grid"><form id="project-form" class="panel"><div class="panel-padding"><div class="panel-head"><span class="step-number">01</span><h2>Your project</h2></div>
   <div class="field"><label for="address">Project address</label><input id="address" name="address" required minlength="8" maxlength="500" autocomplete="street-address" placeholder="Street address, city, state, ZIP" value="${esc(prefill.address||'')}"><p class="field-help">A complete address helps distinguish city, county, and special-district authority.</p></div>
-  <div class="form-row"><div class="field"><label for="discipline">Your discipline</label><select name="discipline" id="discipline" required><option value="">Select your discipline</option>${disciplines.map(d=>`<option ${prefill.discipline===d?'selected':''}>${d}</option>`).join('')}<option value="Other" ${custom?'selected':''}>Other — enter your discipline</option></select><div class="field" id="custom-discipline-field" ${custom?'':'hidden'} style="margin-top:14px"><label for="custom-discipline">Your discipline or specialty</label><input id="custom-discipline" name="customDiscipline" minlength="2" maxlength="100" placeholder="e.g. Acoustics, telecommunications" value="${esc(custom?prefill.discipline:'')}" ${custom?'required':'disabled'}><p class="field-help">Research will follow the discipline you enter.</p></div></div><div class="field"><label for="name">Project name</label><input id="name" name="name" required maxlength="100" placeholder="e.g. Westside renovation" value="${esc(prefill.name||'')}"></div></div>
-  <details class="extra" ${prefill.notes||prefill.siteDescription?'open':''}><summary>Add project context <span class="optional">optional</span></summary><div class="form-row"><div class="field"><label for="scope">Scope of work <span class="optional">optional</span></label><select name="scope" id="scope">${['Not yet specified','New construction','Renovation / alteration','Addition','Tenant improvement','Change of occupancy','Existing building assessment'].map(s=>`<option ${prefill.scope===s?'selected':''}>${s}</option>`).join('')}</select></div><div class="field"><label for="occupancy">Building use <span class="optional">optional</span></label><select name="occupancy" id="occupancy">${buildingUses.map(u=>`<option ${use===u?'selected':''}>${u}</option>`).join('')}<option value="" ${use===''?'selected':''}>Not yet specified</option><option value="Other" ${customUse?'selected':''}>Other — enter building use</option></select><div class="field" id="custom-occupancy-field" ${customUse?'':'hidden'} style="margin-top:14px"><label for="custom-occupancy">Your building use</label><input id="custom-occupancy" name="customOccupancy" minlength="2" maxlength="100" placeholder="e.g. Cold storage, aircraft hangar" value="${esc(customUse?use:'')}" ${customUse?'required':'disabled'}></div></div></div><div class="form-row"><div class="field"><label for="permit-date">Expected permit date <span class="optional">optional</span></label><input type="date" name="permitDate" id="permit-date" value="${esc(prefill.permitDate||'')}"></div><div class="field"><label for="country">Country <span class="optional">optional</span></label><input id="country" name="country" value="${esc(prefill.country||'United States')}"></div></div><div class="field"><label for="site-description">Parcel number (APN) or site description <span class="optional">optional</span></label><input id="site-description" name="siteDescription" maxlength="500" placeholder="APN, lot/tract, or site location when no street address is assigned" value="${esc(prefill.siteDescription||'')}"><p class="field-help">Helps locate new-tract or unaddressed sites. You can correct the address or this description later when you continue research.</p></div><label for="notes">Additional context <span class="optional">optional</span></label><textarea id="notes" name="notes" rows="3" maxlength="4000" placeholder="Known AHJ, proposed systems (sprinklers, pumps, batteries, generators, fuel), equipment quantities, and owner/insurer requirements">${esc(prefill.notes||'')}</textarea></details>
+  <div class="form-row"><div class="field"><label for="discipline">Your discipline</label><select name="discipline" id="discipline" required><option value="">Select your discipline</option>${disciplines.map(d=>`<option ${prefill.discipline===d?'selected':''}>${d}</option>`).join('')}<option value="Other" ${custom?'selected':''}>Other — enter your discipline</option></select><div class="field" id="custom-discipline-field" ${custom?'':'hidden'} style="margin-top:14px"><label for="custom-discipline">Your discipline or specialty</label><input id="custom-discipline" name="customDiscipline" minlength="2" maxlength="100" placeholder="e.g. Acoustics, telecommunications" value="${esc(custom?(prefill.customDiscipline||''):'')}" ${custom?'required':'disabled'}><p class="field-help">Research will follow the discipline you enter.</p></div></div><div class="field"><label for="name">Project name</label><input id="name" name="name" required maxlength="100" placeholder="e.g. Westside renovation" value="${esc(prefill.name||'')}"></div></div>
+  <p class="selected-use" id="selected-building-use">Building use: <strong id="selected-building-use-value">${esc(selectedUse)}</strong> <span class="field-help">Included in the research brief. Change it under Add project context.</span></p>
+  <details class="extra" ${detailsOpen?'open':''}><summary>Add project context <span class="optional">optional</span></summary><div class="form-row"><div class="field"><label for="scope">Scope of work <span class="optional">optional</span></label><select name="scope" id="scope">${['Not yet specified','New construction','Renovation / alteration','Addition','Tenant improvement','Change of occupancy','Existing building assessment'].map(s=>`<option ${prefill.scope===s?'selected':''}>${s}</option>`).join('')}</select></div><div class="field"><label for="occupancy">Building use <span class="optional">optional</span></label><select name="occupancy" id="occupancy">${buildingUses.map(u=>`<option ${use===u?'selected':''}>${u}</option>`).join('')}<option value="" ${!customUse&&use===''?'selected':''}>Not yet specified</option><option value="Other" ${customUse?'selected':''}>Other — enter building use</option></select><div class="field" id="custom-occupancy-field" ${customUse?'':'hidden'} style="margin-top:14px"><label for="custom-occupancy">Your building use</label><input id="custom-occupancy" name="customOccupancy" minlength="2" maxlength="100" placeholder="e.g. Cold storage, aircraft hangar" value="${esc(customUse?(prefill.customOccupancy||''):'')}" ${customUse?'required':'disabled'}></div></div></div><div class="form-row"><div class="field"><label for="permit-date">Expected permit date <span class="optional">optional</span></label><input type="date" name="permitDate" id="permit-date" value="${esc(prefill.permitDate||'')}"></div><div class="field"><label for="country">Country <span class="optional">optional</span></label><input id="country" name="country" value="${esc(prefill.country??'United States')}"></div></div><div class="field"><label for="site-description">Parcel number (APN) or site description <span class="optional">optional</span></label><input id="site-description" name="siteDescription" maxlength="500" placeholder="APN, lot/tract, or site location when no street address is assigned" value="${esc(prefill.siteDescription||'')}"><p class="field-help">Helps locate new-tract or unaddressed sites. You can correct the address or this description later when you continue research.</p></div><label for="notes">Additional context <span class="optional">optional</span></label><textarea id="notes" name="notes" rows="3" maxlength="4000" placeholder="Known AHJ, proposed systems (sprinklers, pumps, batteries, generators, fuel), equipment quantities, and owner/insurer requirements">${esc(prefill.notes||'')}</textarea></details>
   <div class="section-divider"></div><div class="panel-head"><span class="step-number">02</span><h2>How would you like to research?</h2></div><div class="mode-choices"><label class="mode-choice"><span class="mode-title"><input type="radio" name="mode" value="realtime" ${prefill.mode!=='batch'?'checked':''}> Research now</span><p>Start immediately.<br>Follow progress as it happens.</p></label><label class="mode-choice"><span class="mode-title"><input type="radio" name="mode" value="batch" ${prefill.mode==='batch'?'checked':''}> Research later</span><p>Queue your research.<br>Receive results by stage.</p><span class="saving">50% lower model token prices</span></label></div><p class="field-help" id="mode-help">Both modes use the same evidence checks. Search fees are unchanged.</p><p class="field-help">Estimated costs appear on the project as research runs. Your Anthropic invoice is authoritative.</p><div class="inline-error" role="alert" id="project-error"></div></div><div class="form-bottom"><p>Every report includes sources<br>and questions still to resolve.</p><button class="button primary" type="submit" id="start-research">Start research <span aria-hidden="true">↗</span></button></div></form>
   <aside><div class="panel coverage"><div class="coverage-title">YOUR RESEARCH BRIEF</div>${[['pin','The right authorities','Building, planning, fire, and other agencies with authority over your address.'],['people','People you can contact','Publicly listed contacts, their responsibilities, and how to reach them.'],['book','The editions that apply','Adopted codes, referenced standards, effective dates, and local amendments.'],['check','Evidence you can inspect','Original sources, supporting passages, and clear gaps to confirm with the AHJ.']].map(([icon,title,text])=>`<div class="coverage-item"><span class="coverage-icon">${icons[icon]}</span><div><h3>${title}</h3><p>${text}</p></div></div>`).join('')}</div><div class="evidence-note"><h3>Published doesn’t always mean adopted.</h3><p>The research traces local adoption documents and referenced editions. Unconfirmed requirements stay visible as questions to resolve.</p></div><p class="settings-hint">${state.bootstrap?.keyConfigured?'Your Claude connection is ready.':'Bring your own Claude API key. <button type="button" id="connect-hint">Connect your account</button> to begin.'}</p></aside></div>`;
   $('#project-form').addEventListener('submit',startProject);
+  $('#project-form').addEventListener('input',()=>{syncBuildingUse();captureNewProjectDraft();});
+  $('#project-form').addEventListener('change',()=>{syncBuildingUse();captureNewProjectDraft();});
+  $('details.extra').addEventListener('toggle',captureNewProjectDraft);
   $('#discipline').addEventListener('change',()=>{const custom=$('#discipline').value==='Other';$('#custom-discipline-field').hidden=!custom;$('#custom-discipline').disabled=!custom;$('#custom-discipline').required=custom;if(custom)$('#custom-discipline').focus();});
-  $('#occupancy').addEventListener('change',()=>{const custom=$('#occupancy').value==='Other';$('#custom-occupancy-field').hidden=!custom;$('#custom-occupancy').disabled=!custom;$('#custom-occupancy').required=custom;if(custom)$('#custom-occupancy').focus();});
+  $('#occupancy').addEventListener('change',()=>{syncBuildingUse();if($('#occupancy').value==='Other')$('#custom-occupancy').focus();});
   $('#connect-hint')?.addEventListener('click',openSettings);
   for(const radio of document.querySelectorAll('[name=mode]'))radio.addEventListener('change',()=>{$('#mode-help').textContent=radio.value==='batch'?'Batch stages can each take up to 24 hours; a multi-stage report can take longer. Search fees are unchanged.':'Both modes use the same evidence checks. Search fees are unchanged.';});
 }
@@ -157,7 +200,7 @@ function renderConnectionNote(){
   note.hidden=!show;note.textContent=show?view.title:'';note.classList.toggle('error',view.status==='invalid');
   $('#api-key').placeholder=({connected:'Connected · enter a key to replace it',checking:'Checking saved key · enter a key to replace it',unavailable:'Saved key not yet verified · enter a key to replace it',invalid:'Key not accepted · enter a new key'})[view.status]||'sk-ant-…';
 }
-async function startProject(e){e.preventDefault();if(['missing','invalid'].includes(connectionView().status)){openSettings();return;}const button=$('#start-research');button.disabled=true;button.textContent='Creating project…';try{const body=Object.fromEntries(new FormData(e.target));if(body.discipline==='Other'){body.discipline=body.customDiscipline.trim();}delete body.customDiscipline;const p=await api('/api/projects',{method:'POST',body});await refreshProjects();await selectProject(p.id);}catch(error){$('#project-error').textContent=error.message;}finally{button.disabled=false;button.innerHTML='Start research <span aria-hidden="true">↗</span>';}}
+async function startProject(e){e.preventDefault();if(['missing','invalid'].includes(connectionView().status)){openSettings();return;}const button=$('#start-research');button.disabled=true;button.textContent='Creating project…';try{const body=Object.fromEntries(new FormData(e.target));if(body.discipline==='Other'){body.discipline=body.customDiscipline.trim();}delete body.customDiscipline;const p=await api('/api/projects',{method:'POST',body});projectDrafts.delete('new');await refreshProjects();await selectProject(p.id,{capture:false});}catch(error){if($('#project-error'))$('#project-error').textContent=error.message;}finally{if(button.isConnected){button.disabled=false;button.innerHTML='Start research <span aria-hidden="true">↗</span>';}}}
 async function refreshProjects(){await projectLists.run(async isCurrent=>{const projects=await api('/api/projects');if(!isCurrent())return;state.projects=projects;renderSidebar();});}
 function applySavedProject(project){
   projectLists.invalidate();detailGeneration++;
@@ -168,7 +211,7 @@ function applySavedProject(project){
   const option=$('#diagnostic-project')?.querySelector(`option[value="${CSS.escape(project.id)}"]`);
   if(option)option.textContent=project.name;
 }
-async function selectProject(id){const load=++projectLoad;state.selected=id;state.detail=null;state.tab=state.tab==='chat'?'chat':'overview';history.replaceState(null,'',`/#project=${encodeURIComponent(id)}`);renderSidebar();$('#main').innerHTML='<div class="loading">Opening project…</div>';try{const detail=await api(`/api/projects/${id}`);if(load!==projectLoad||state.selected!==id)return;state.detail=detail;renderProject();}catch(e){if(load===projectLoad)$('#main').innerHTML=`<div class="error-panel">${esc(e.message)}</div>`;}}
+async function selectProject(id,{capture=true}={}){if(capture)captureNewProjectDraft();const load=++projectLoad;state.selected=id;state.detail=null;state.tab=state.tab==='chat'?'chat':'overview';history.replaceState(null,'',`/#project=${encodeURIComponent(id)}`);renderSidebar();$('#main').innerHTML='<div class="loading">Opening project…</div>';try{const detail=await api(`/api/projects/${id}`);if(load!==projectLoad||state.selected!==id)return;state.detail=detail;renderProject();}catch(e){if(load===projectLoad)$('#main').innerHTML=`<div class="error-panel">${esc(e.message)}</div>`;}}
 function statusClass(status){return ['complete','verified'].includes(status)?'green':['partial','budget','attention','conflicting','inferred','unverified','needs_key'].includes(status)?'amber':['failed','canceled'].includes(status)?'red':'';}
 function badge(status){return `<span class="status-pill ${statusClass(status)}">${esc(({verified:'Source-supported',inferred:'Conditional',conflicting:'Conflicting',unverified:'Unconfirmed'})[status]||statuses[status]||status)}</span>`;}
 function href(url){try{const u=new URL(url);return ['http:','https:'].includes(u.protocol)?u.href:'';}catch{return '';}}
@@ -536,7 +579,16 @@ setInterval(async()=>{
 },1000);
 function renderSpending(){const s=state.bootstrap?.spending;$('#spending-summary').innerHTML=s?`<div><small>TODAY</small><strong>${money(s.today)}</strong></div><div><small>ALL PROJECTS</small><strong>${money(s.total)}</strong></div><div><small>PENDING</small><strong>${money(s.pending)}</strong></div>`:'';}
 function openSettings(){const b=state.bootstrap;renderSpending();api('/api/bootstrap').then(next=>{state.bootstrap=next;renderSpending();}).catch(()=>{});$('#remember-label').hidden=!b.windows;$('#remember-key').checked=Boolean(b.persisted);$('#api-key').value='';renderConnectionNote();$('#key-note').textContent=b.persisted?'Your key is protected for this Windows account.':'Kept in memory for this session. Never included in reports.';$('#settings-error').textContent='';$('#settings-dialog').showModal();}
-$('#new-project').addEventListener('click',()=>newForm());$('#open-settings').addEventListener('click',openSettings);$('#settings-top').addEventListener('click',openSettings);
+$('#new-project').addEventListener('click',()=>{
+  if($('#project-form')){
+    captureNewProjectDraft();
+    if(projectDrafts.has('new')&&!confirm('Discard this new project draft? The address, name, and other fields you entered will be cleared.'))return;
+    projectDrafts.delete('new');
+    newForm({keepDraft:false});
+    return;
+  }
+  newForm();
+});$('#open-settings').addEventListener('click',openSettings);$('#settings-top').addEventListener('click',openSettings);
 for(const b of document.querySelectorAll('[data-close]'))b.addEventListener('click',()=>document.getElementById(b.dataset.close).close());
 let licenseLoaded=false;
 $('#open-about').addEventListener('click',()=>{$('#about-version').textContent=state.bootstrap?.version||'—';$('#about-dialog').showModal();});
