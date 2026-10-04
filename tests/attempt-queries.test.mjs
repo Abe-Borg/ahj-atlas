@@ -144,8 +144,8 @@ test('terminal projects still apply received research, with decoding deferred un
 
 test('legacy search caps are backfilled once without changing requests, charges or reservations',t=>{
   const dir=mkdtempSync(path.join(os.tmpdir(),'atlas-search-cap-upgrade-'));
-  t.after(()=>rmSync(dir,{recursive:true,force:true}));
-  let s=new Store(dir);t.after(()=>s.close());
+  let s=new Store(dir);
+  t.after(()=>{s.close();rmSync(dir,{recursive:true,force:true});});
   const p=s.create(input);
   for(const state of ['dispatching','pending','unknown','received','settled','errored'])insert(s,p.id,{stageId:'verification',state});
   insert(s,p.id,{stageId:'chat',state:'unknown'});
