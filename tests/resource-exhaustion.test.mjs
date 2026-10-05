@@ -467,7 +467,7 @@ test('provider output ceiling, spend, stream deadline, and batch retention stop 
   assert.ok(s.diagnostics(imported.id).some(d=>d.event==='batch.result_failed'));
 });
 
-test('a real-time stream that hits the deadline records elapsed time',async t=>{
+test('a started stream that hits the deadline records elapsed time and an estimate before retrying',async t=>{
   const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-exhausted-stream-')),store=new Store(dir);
   const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});
   const fetchImpl=async(url,options)=>{
@@ -486,7 +486,11 @@ test('a real-time stream that hits the deadline records elapsed time',async t=>{
   assert.equal(row.details.outcome,'stopped');
   assert.equal(row.details.limit,60);
   assert.ok(row.details.used>=0&&row.details.used<5000);
-  assert.equal(row.attempt_id,store.attempts(project.id)[0].id);
-  assert.equal(store.stage(project.id,'jurisdiction').status,'blocked');
+  const attempt=store.attemptSummaries(project.id)[0];
+  assert.equal(row.attempt_id,attempt.id);
+  assert.equal(attempt.state,'errored');assert.equal(attempt.estimated,1);assert.equal(attempt.actual,attempt.reserve);
+  assert.deepEqual(attempt.usage,{input_tokens:1,output_tokens:0});assert.ok(attempt.next_poll>Date.now());
+  assert.equal(store.project(project.id).reserved,0);assert.equal(store.project(project.id).status,'waiting');
+  assert.equal(store.stage(project.id,'jurisdiction').status,'queued');
   assert.ok(store.diagnostics(project.id).some(d=>d.event==='request.failed'));
 });
