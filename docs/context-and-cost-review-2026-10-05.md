@@ -11,7 +11,7 @@ This file is uncommitted. Keep it, move it, or delete it as you decide.
 - Three functions build every model request: `researchPayload` (jurisdiction, contacts, codes, Opus evidence check), `reviewPayload` (final report) and `chatPayload` (Chat with Atlas). Everything else persists what came back or runs tools.
 - Context is never handed from one stage to another in memory. Every handoff goes through SQLite: stage briefs (`stages.output`), checkpoints (`stages.checkpoint`), the source register (`sources`), the saved report (`projects.report`), question responses, and for chat a frozen opening snapshot (`chat_evidence`).
 - Every model call re-sends its whole conversation. The app leans on prompt caching to make that cheap, and its prefix discipline is correct: stable material first, volatile material last, and the saved original request reused byte-for-byte inside a conversation.
-- Verdict: the architecture is already where a careful cost review would push it. The remaining savings fall into three groups. (a) Two caching decisions (research TTL in real-time mode, and in batch mode) that can only be settled from the usage you already record; the queries are in section 9. (b) Three quality-neutral code changes: stop rebuilding the chat opening on every research round when someone chats mid-research; stop sending the final chat request with `tool_choice: none` if usage confirms it rewrites the whole conversation; trim duplicated brief text from fresh-context research requests. (c) The one large lever, effort, which is a quality trade and needs the small eval your own docs already sketch.
+- Verdict: the architecture is already where a careful cost review would push it. The remaining savings fall into three groups. (a) Two caching decisions (research TTL in real-time mode, and in batch mode) that can only be settled from the usage you already record; the queries are in section 9. (b) Three quality-neutral code changes: stop rebuilding the chat opening on every research round when someone chats mid-research; stop sending the final chat request with `tool_choice: none` if usage confirms it rewrites the whole conversation; trim the brief text that fresh-context research requests send twice. (c) The one large lever, effort, which is a quality trade and needs the small eval your own docs already sketch.
 
 ---
 
@@ -21,7 +21,7 @@ This file is uncommitted. Keep it, move it, or delete it as you decide.
 |---|---|---|---|
 | `projects.input` | name, address, discipline, scope, occupancy, permitDate, notes (including appended "User clarification: …"), country, siteDescription, `previousAddresses` (last 5), `questionResponses` snapshot taken at resume | `Store.create`, `Engine.resume` | `research_context.projectInputs`; `evidence_package.project`; chat `context` preview |
 | `stages.messages` | the exact message array of the stage's current conversation segment: first user turn, assistant blocks (thinking notes, signatures, server tool results, tool calls), tool results | `Engine.applyOnce`; cleared by `freshContext` and `resume` | continuation rounds of `researchPayload` / `reviewPayload` |
-| `stages.output` | the stage brief: the `finish_research` brief (plus NFPA checklist), or accumulated text for partial stages, up to 240,000 chars | `applyOnce`, `markPartial` | `priorJurisdictionBrief` (first 20,000 chars), `priorWorkingBrief` (last 24,000), `evidencePackage.stages[].findings` (first 80,000), chat `research` preview |
+| `stages.output` | the stage brief: the `finish_research` brief (plus NFPA checklist), capped at 240,000 chars, or accumulated text for partial stages (not capped) | `applyOnce`, `markPartial` | `priorJurisdictionBrief` (first 20,000 chars), `priorWorkingBrief` (last 24,000), `evidencePackage.stages[].findings` (first 80,000), chat `research` preview |
 | `stages.checkpoint` | brief ≤ 6,000 chars, ≤ 12 quote-verified claims, ≤ 20 questions, ≤ 100 source IDs, ≤ 6 progress notes × 2,500 chars, ≤ 5 saved lookups × 2,400 chars | `save_progress` (validated), `checkpointFromMessages` | `research_context.checkpoint` (≤ 24,000 chars), `evidencePackage`, chat `research` preview |
 | `attempts.payload / response / usage` | every request body and response verbatim, plus usage and cost | `Store.reserve`, `Engine.record`, chat | `latestAttemptPayload` (prefix reuse), `previousMessageId` (cache diagnostics), chat restart recovery, cost ledger |
 | `sources` | url, title, text (≤ 180,000 chars for web and fetched pages, ≤ 2,000,000 for uploads), `read_full`, kind, retrieved, document_date | `ResearchTools` (read, render, fetch capture, upload, search capture) | `evidencePackage` excerpts, chat opening excerpts and tail, `read_saved_source`, `validateReport` quote checks |
@@ -121,7 +121,7 @@ Limits: at most N requests … searches and reads remaining · workflow text
 | `projectInputs` (all of `projects.input`) | yes | yes | yes | yes |
 | `priorJurisdictionBrief` (first 20,000 chars of the jurisdiction brief) | no | yes | yes | no |
 | `checkpoint` (≤ 24,000) and `priorWorkingBrief` (last 24,000 chars of this stage's output) | only when the stage already has output or a checkpoint (resume, restart, fresh context) | same | same | same |
-| `evidencePackage` (100,000 chars of ranked excerpts from `sources`, each non-review stage's brief ≤ 80,000 chars plus its checkpoint, the review checkpoint) | same condition | same | same | always |
+| `evidencePackage` (100,000 chars of ranked excerpts from `sources`; for each non-review stage its brief and, while the stage is not complete, its checkpoint, together cut at 80,000 chars; the review checkpoint) | same condition | same | same | always |
 | `sourceLeads` (id, url, title, readFull of every source) | no | no | fire-protection projects, first conversation only | no |
 
 So a brand-new project's jurisdiction stage starts with nothing but the inputs and the assignment. Contacts and codes add the jurisdiction brief. Everything larger enters only when a stage resumes or restarts, or for the evidence check.
@@ -299,7 +299,7 @@ Caching rules that shape the numbers below (from Anthropic's prompt-caching page
 - 1-hour breakpoints must precede 5-minute ones; the automatic top-level breakpoint and an explicit marker on the last block must agree on TTL.
 - Minimum cacheable prefix is 512 tokens on both models.
 - Server tools insert their own 5-minute writes after their results.
-- Changing `tool_choice` keeps the tools and system caches but invalidates the messages cache. Changing `thinking` or top-level `effort` invalidates the messages cache. Changing model or tool definitions invalidates everything.
+- Per Anthropic's documented invalidation hierarchy (the one rule here taken from Anthropic's guidance rather than re-fetched today): changing `tool_choice` keeps the tools and system caches but invalidates the messages cache; changing `thinking` or top-level `effort` invalidates the messages cache; changing the model or the tool definitions invalidates everything.
 
 Per-round input cost ≈ (cached prefix × $0.20/M) + (new tokens × write rate) + (uncached tokens × input rate). Output cost = (visible + thinking tokens) × output rate. Everything below is arithmetic on the app's own limits, not a measurement.
 
@@ -359,11 +359,11 @@ Ranked by expected effect. Only the first group is quality-neutral by constructi
 
 **2. Batch-mode TTL: check the hit rate.** Each batch round is a separate submission polled every minute, so hits depend on Anthropic's turnaround. Query 2 restricted to `mode = 'batch'` gives the read share. Below about 40 percent, the 5-minute TTL would be cheaper in batch mode (worked example D) because a missed 1-hour write costs 2× instead of 1.25×.
 
-**3. Stop rebuilding the chat opening on every research round.** The revision digest in `savedChatEvidence` includes each stage's `status` and `note` and the latest research attempt ID, all of which change on every research round. Anyone who chats while research is running therefore pays a full 1-hour write of the opening on every reply (worked example C: $1.20 or $2.40 each). The quality-neutral fix is to digest only what the opening actually needs to stay correct for citations, which is `report`, each stage's `output` and `checkpoint`, and move `status` and `note` into the uncached context block (they are already there as project status, and `read_project research` is live). Rebuild on stage completion and report change, not on every round.
+**3. Stop rebuilding the chat opening on every research round.** The revision digest in `savedChatEvidence` covers the saved report, every stage's `status`, `output`, `note` and `checkpoint`, and the latest research attempt ID. Four of those change on every applied round: the status flips between queued, preparing and running; the note is reset; a new attempt row appears; and `checkpointFromMessages` recomputes the checkpoint's source IDs, progress notes and saved lookups from the whole conversation after each round. Anyone who chats while research is running therefore pays a full 1-hour write of the opening on every reply (worked example C: $1.20 or $2.40 each). The quality-neutral fix is to digest only what changes at stage completion, the saved `report` and each stage's `output`, and to leave the rest to the channels that already carry it live: the project's status and note sit in the uncached context block, and `read_project research` returns each stage's current status, note and checkpoint. The snapshot keeps whatever checkpoint existed when it was built, which the system prompt already describes as a saved snapshot. The residual cost is that a mid-stage `save_progress` reaches the opening only when its stage completes.
 
 **4. The final chat request and `tool_choice: none`.** Per Anthropic's invalidation rules, changing `tool_choice` invalidates the messages cache; your 2026-09-29 note says the same. If that holds, every reply that reaches the final-answer path (any fetched PDF, 120,000 fetched chars, 17+ searches, 28+ reads, the 20th request, or 17 minutes elapsed) rewrites the whole conversation including the opening at 1-hour rates: $1.20 to $2.40 on a large project, plus the history and the round's tool results. Confirm it first: query 5 lists each reply's rounds; on a reply that ended through the final path, compare the last round's `cache_creation.ephemeral_1h_input_tokens` with its `cache_read_input_tokens`. If the last round wrote the prefix again, replace `tool_choice: none` with the system-role instruction alone and answer any further tool call with an error result (the loop already finishes `limited` in that case). The hard guarantee becomes a soft one, bounded by the existing request cap; the saving is a full rewrite per affected reply. This is the one item here where the behaviour changes slightly, so I list it as "confirm, then decide".
 
-**5. Duplicated text in fresh-context research requests.** When a stage resumes or restarts, `research_context` carries `priorWorkingBrief` (last 24,000 chars of the stage's output), `priorJurisdictionBrief` (20,000) and `checkpoint` (24,000), and `evidencePackage.stages[].findings` carries the same output (first 80,000 chars) and the same checkpoint again. Up to roughly 70,000 duplicated chars (about 17,000 tokens, $0.04 at the 5-minute write rate on Sonnet, $0.09 on Opus) per fresh request, up to five fresh requests per stage. Small, but free: drop the fields from `research_context` when the package is present, or exclude the current stage from the package's `stages` list.
+**5. Duplicated text in fresh-context research requests.** When contacts or codes resumes or restarts, `research_context` carries `priorJurisdictionBrief` (the first 20,000 chars of the jurisdiction brief) and `evidencePackage.stages[jurisdiction].findings` carries the first 80,000 chars of the same brief, so those 20,000 chars (about 5,000 tokens) are always sent twice. The stage's own `priorWorkingBrief` (the last 24,000 chars of its output) and `checkpoint` (≤ 24,000) are duplicated only when the output is short: the package keeps the first 80,000 chars of output plus checkpoint, so the working brief sits fully inside it only when the output is at most 80,000 chars, the checkpoint only when the output is at most about 56,000, and above 104,000 chars the two regions do not overlap at all. Dropping `priorWorkingBrief` unconditionally would therefore discard the newest findings in exactly the long-output restarts that need them. The safe change is to omit `priorJurisdictionBrief` whenever the package is present, and to omit the other two only when the package already contains them, or to have the package carry the current stage's tail explicitly. Savings: about 5,000 tokens per fresh contacts or codes request always, up to roughly 17,000 for stages with short outputs; a few cents per restart at most.
 
 **6. Pre-warm the chat cache while a project is open (optional).** A 1-hour entry dies if the next message comes 61 minutes later, and the next reply then rewrites the opening. A `max_tokens: 0`, non-streaming re-send of the next reply's prefix (opening, history including the finished turn, the same thinking and effort settings, a placeholder latest message) about 55 minutes after the last request started refreshes the opening for one cache read ($0.06 at 300,000 tokens) and writes the new turn at a few cents. It pays off whenever there is more than about a 5 percent chance (Sonnet) or 2.5 percent (Opus) that the user continues within the next hour. The trade is a paid request without a click, which the trust pages currently describe as not happening outside the listed automatic behaviours; it would need to be a visible, probably opt-in, behaviour. Chat has no structured output or batch, so none of the rejected combinations apply.
 
@@ -375,7 +375,7 @@ Ranked by expected effect. Only the first group is quality-neutral by constructi
 
 **9. Chat opening size.** The 400,000-char excerpt allowance, the 240,000-char report and research previews, and the 120,000-char register are the dial behind worked example C. They were raised deliberately on 2026-09-30 for quality. Query 5 shows the real opening sizes and rounds per reply; if typical replies use many rounds on very large openings, a smaller opening with the existing on-demand tools would cut the per-round read cost proportionally, but the model would see less up front. Decide only with the numbers and the eval.
 
-**10. `fetchContentTokens` versus the 120,000-char bound.** A single web fetch may return 60,000 tokens (about 240,000 chars) of text, which by itself exceeds the 120,000-char restart bound. So any large fetch forces a checkpoint restart and spends one of the four. Aligning the fetch cap with the bound (around 30,000 tokens) would avoid that, at the cost of less text from very long blocked pages. Fetched text is also saved to the register, so `read_saved_source` recovers the rest; still a trade.
+**10. `fetchContentTokens` versus the 120,000-char bound.** A single web fetch may return 60,000 tokens (about 240,000 chars) of text, which by itself exceeds the 120,000-char restart bound, so any large fetch forces a checkpoint restart and spends one of the four. Aligning the cap with the bound (around 30,000 tokens) would avoid that, but the cost is permanent: `captureFetches` saves only the text the provider returned, clipped to 180,000 chars, so anything beyond `max_content_tokens` never reaches the source register and `read_saved_source` cannot recover it. Web fetch is used when the local reader is blocked, so there is usually no other route to that text. Treat this as an evidence-quality trade, not a tuning knob.
 
 ### 8.3 Considered and not recommended
 
@@ -484,21 +484,36 @@ SELECT chat_turn_id, MIN(created) AS started, MAX(n) AS rounds,
 FROM rounds GROUP BY chat_turn_id ORDER BY started;
 ```
 
-**Query 6. Chat replies whose first round rewrote the opening while research had run in the previous hour (item 3)**
+**Query 6. Chat replies that rewrote the opening although the cache should have been warm (item 3).** On a reply's first round the opening is either read back (a large `cache_read`) or written again (a large `write_1h`); every reply also writes its new history turn and message, so a nonzero write alone proves nothing. The query keeps only replies whose previous reply on the same model started under an hour earlier, which rules out expiry and model switches, and whose first round wrote at least half of its prompt instead of reading it. `research_since_previous_chat` separates rebuilds caused by the revision digest (item 3) from the one other remaining cause, a source-update tail above 80,000 chars. A project's first reply and a reply on a different depth than the previous one are legitimate writes and are excluded.
 
 ```sql
 WITH first_round AS (
-  SELECT chat_turn_id, project_id, MIN(created) AS created
-  FROM attempts WHERE stage_id='chat' AND state='settled' GROUP BY chat_turn_id)
-SELECT f.project_id, f.chat_turn_id, f.created,
-  json_extract(a.usage,'$.cache_creation.ephemeral_1h_input_tokens') AS write_1h,
-  json_extract(a.usage,'$.cache_read_input_tokens')                 AS cache_read,
+  SELECT a.chat_turn_id, a.project_id, a.model_key, a.created,
+    COALESCE(json_extract(a.usage,'$.input_tokens'),0)                             AS u,
+    COALESCE(json_extract(a.usage,'$.cache_read_input_tokens'),0)                  AS rd,
+    COALESCE(json_extract(a.usage,'$.cache_creation.ephemeral_1h_input_tokens'),0) AS w1h
+  FROM attempts a
+  WHERE a.stage_id='chat' AND a.state='settled'
+    AND a.rowid=(SELECT MIN(b.rowid) FROM attempts b
+                 WHERE b.chat_turn_id=a.chat_turn_id AND b.state='settled')),
+with_prev AS (
+  SELECT f.*,
+    (SELECT MAX(p.created) FROM attempts p
+     WHERE p.project_id=f.project_id AND p.stage_id='chat' AND p.state='settled'
+       AND p.model_key=f.model_key AND p.created<f.created) AS prev_same_model_at
+  FROM first_round f)
+SELECT w.project_id, w.chat_turn_id, w.created, w.model_key,
+  ROUND((julianday(w.created)-julianday(w.prev_same_model_at))*1440,1) AS minutes_since_same_model_chat,
+  w.rd AS cache_read, w.w1h AS write_1h,
+  ROUND(100.0*w.w1h/NULLIF(w.u+w.rd+w.w1h,0),0) AS write_pct,
   EXISTS(SELECT 1 FROM attempts r
-         WHERE r.project_id=f.project_id AND r.stage_id!='chat'
-           AND julianday(r.created) BETWEEN julianday(f.created)-1.0/24 AND julianday(f.created)) AS research_in_prior_hour
-FROM first_round f
-JOIN attempts a ON a.chat_turn_id=f.chat_turn_id AND a.created=f.created
-ORDER BY f.created;
+         WHERE r.project_id=w.project_id AND r.stage_id!='chat'
+           AND julianday(r.created) BETWEEN julianday(w.prev_same_model_at) AND julianday(w.created)) AS research_since_previous_chat
+FROM with_prev w
+WHERE w.prev_same_model_at IS NOT NULL
+  AND (julianday(w.created)-julianday(w.prev_same_model_at))*1440 < 60
+  AND w.w1h >= 0.5*(w.u+w.rd+w.w1h)
+ORDER BY w.created;
 ```
 
 If a response includes `usage.output_tokens_details.thinking_tokens`, `json_extract(usage,'$.output_tokens_details.thinking_tokens')` separates thinking from visible output for item 8.
