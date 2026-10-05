@@ -31,6 +31,15 @@ export const nfpaEvidenceText=evidenceText+' Synthetic test ordinance: the Examp
 export function nfpaReport(){const r=report();r.fireStandards=[{name:'NFPA 13 — Sprinkler systems',edition:'2019',authority:'Example District (synthetic)',adoptionType:'direct',adoptionInstrument:'Synthetic test ordinance; not an actual adoption.',effectiveDate:'',amendments:'No amendments established by this synthetic example.',applicability:'Sprinkler installation. Example only, not design guidance.',notes:'This row demonstrates the individual edition and evidence display.',status:'verified',applicabilityStatus:'applicable',adoptionSourceId:'S1',editionSourceId:'S1',evidence:[{sourceId:'S1',quote:'the Example District adopts NFPA 13, 2019 edition, for sprinkler installations.',pageOrSection:'Synthetic test ordinance'}]}];return r;}
 
 export const chatResponse=(text='A source-linked answer [S1].',patch={})=>({id:'msg_chat',role:'assistant',stop_reason:'end_turn',content:[{type:'text',text}],usage:{input_tokens:1000,output_tokens:400},...patch});
+export const fetchBlocks=(url,source,id='srvtoolu_fetch')=>[
+  {type:'server_tool_use',id,name:'web_fetch',input:{url}},
+  {type:'web_fetch_tool_result',tool_use_id:id,content:{type:'web_fetch_result',url,content:{type:'document',source,title:'Synthetic fetched document'}}},
+];
+export async function pdfFetchBlocks(url,text='Synthetic ordinance: the county adopts the 2024 International Fire Code.'){
+  const {default:PDFDocument}=await import('pdfkit');
+  const buffer=await new Promise(resolve=>{const doc=new PDFDocument(),chunks=[];doc.on('data',c=>chunks.push(c));doc.on('end',()=>resolve(Buffer.concat(chunks)));doc.text(text);doc.end();});
+  return fetchBlocks(url,{type:'base64',media_type:'application/pdf',data:buffer.toString('base64')});
+}
 export class ChatProvider {
   constructor(fn){this.fn=fn;this.calls=[];this.preflights=[];this.counted=1000;}
   async preflight(...args){this.preflights.push(args);}
