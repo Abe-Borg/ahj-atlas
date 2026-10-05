@@ -89,6 +89,7 @@ export const FACTS = {
     "wrapUpMs": 180000,
     "answerMs": 600000,
     "excerptChars": 400000,
+    "evidenceTailChars": 80000,
     "preview": {
       "report": 240000,
       "research": 240000,

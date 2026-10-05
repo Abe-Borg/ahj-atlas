@@ -8,6 +8,7 @@ import { createApp } from '../server.mjs';
 import { Store } from '../lib/store.mjs';
 import { chatPayload,projectSection,ProjectChat,describeLookup,CHAT_TOOLS } from '../lib/chat.mjs';
 import { initialChatEvidence } from '../lib/chat-citations.mjs';
+import { addDocument } from '../lib/documents.mjs';
 import { ResearchTools, searchTool, TOOL_DEFS } from '../lib/research-tools.mjs';
 import { remainingSearches } from '../lib/prompts.mjs';
 import { CHAT_LIMITS,LIMITS,MODELS,costMicros } from '../lib/config.mjs';
@@ -25,6 +26,19 @@ async function setup(t,provider=new ChatProvider()){
 }
 const body=(message='Explain the findings.',patch={})=>({clientId:randomUUID(),message,...patch});
 async function settled(chat){await Promise.all([...chat.running.values()].map(j=>j.promise));}
+// The first user message may also contain the oldest chat turn or current context.
+// Its opening ends at the evidence breakpoint, not at the end of the merged turn.
+const opening=payload=>{
+  const content=payload.messages[0].content,end=content.findIndex(b=>b.cache_control)+1;
+  assert.ok(end>0);return content.slice(0,end).map(({cache_control,...b})=>b);
+};
+const submittedResults=payload=>{
+  const blocks=[];
+  const visit=content=>{for(const b of content){if(b.type==='search_result')blocks.push(b);else if(b.type==='tool_result'&&!b.is_error&&Array.isArray(b.content))visit(b.content);}};
+  for(const m of payload.messages)if(m.role==='user')visit(m.content);
+  return blocks;
+};
+const nativeCitation=(block,index)=>({type:'search_result_location',source:block.source,title:block.title,cited_text:block.content[0].text,search_result_index:index,start_block_index:0,end_block_index:1});
 // Answers with a final reply once the app turns tools off, otherwise asks for one lookup.
 const lookupUntilFinal=(patch={})=>payload=>payload.tool_choice?.type==='none'?chatResponse('Final answer from the gathered evidence.'):chatResponse('',{stop_reason:'tool_use',content:[{type:'tool_use',id:'tool_'+randomUUID(),name:'read_project',input:{section:'report',offset:0,length:500}}],...patch});
 
@@ -83,6 +97,109 @@ test('chat caches the evidence and earlier turns for an hour while refreshing co
   s.updateProject(a.id,{report:{...s.project(a.id).report,summary:'REVISED_EVIDENCE'}});
   c.start(a.id,body('Fourth question'));await settled(c);assert.notEqual(provider.calls[3].payload.messages[0].content[0].text,first.messages[0].content[0].text);
   c.start(b.id,body());await settled(c);assert.equal(provider.calls[4].payload.diagnostics.previous_message_id,null);assert.ok(!JSON.stringify(provider.calls[4].payload).includes(a.id));
+});
+
+test('chat searches, a read crossing the excerpt budget and an upload leave the next opening identical and sources citable after history',async t=>{
+  const readUrl='https://county.example.gov/new-code',leadUrl='https://county.example.gov/discovery';
+  const signed={type:'redacted_thinking',data:'unchanged-evidence-signature'};
+  const provider=new ChatProvider((payload,n)=>{
+    if(n===1)return chatResponse('',{stop_reason:'tool_use',content:[signed,
+      {type:'server_tool_use',id:'search',name:'web_search',input:{query:'county code'}},
+      {type:'web_search_tool_result',tool_use_id:'search',content:[
+        {type:'web_search_result',url:'https://example.com/ALPHA_PRIVATE',title:'ALPHA_PRIVATE source',encrypted_content:'old-url'},
+        {type:'web_search_result',url:readUrl,title:'New county code',encrypted_content:'new-url'},
+        {type:'web_search_result',url:leadUrl,title:'Discovery-only county page',encrypted_content:'lead'},
+      ]},
+      {type:'tool_use',id:'read',name:'read_source',input:{url:readUrl,length:CHAT_LIMITS.toolChars}},
+    ],usage:{input_tokens:1000,output_tokens:100,server_tool_use:{web_search_requests:1}}});
+    const results=submittedResults(payload);
+    if(n===2){
+      assert.deepEqual(opening(payload),opening(provider.calls[0].payload));
+      assert.deepEqual(payload.messages[1].content[0],signed);
+      const index=results.length-1;
+      return chatResponse('',{content:[{type:'text',text:'New page finding.',citations:[nativeCitation(results[index],index)]}]});
+    }
+    assert.deepEqual(opening(payload),opening(provider.calls[0].payload));
+    const oldIndex=0,newIndex=results.findIndex(b=>b.title.includes('New county code')),uploadIndex=results.findIndex(b=>b.title.includes('Owner letter.txt'));
+    assert.ok(newIndex>oldIndex);assert.ok(uploadIndex>newIndex);
+    return chatResponse('',{content:[{type:'text',text:'Saved evidence, new page and owner letter.',citations:[nativeCitation(results[oldIndex],oldIndex),nativeCitation(results[newIndex],newIndex),nativeCitation(results[uploadIndex],uploadIndex)]}]});
+  });
+  const {app,a,b,dir}=await setup(t,provider),s=app.store,c=app.services.chat;
+  for(let i=0;i<6;i++)s.source(a.id,{url:'https://example.com/saved-'+i,title:'Saved code '+i,text:('Saved code passage '+i+'. ').repeat(4000).slice(0,64000),readFull:true});
+  s.db.prepare("UPDATE sources SET retrieved='2000-01-01T00:00:00.000Z' WHERE project_id=?").run(a.id);
+  const before=s.sources(a.id).reduce((n,x)=>n+x.text.length,0);assert.ok(before<CHAT_LIMITS.excerptChars);
+  const pageText='New county code requires a synthetic permit. '.repeat(2000).slice(0,CHAT_LIMITS.toolChars);
+  c.tools.fetch=async url=>{assert.equal(url,readUrl);return {url,type:'text/html',buffer:Buffer.from('<title>New county code</title><p>'+pageText+'</p>')};};
+  c.start(a.id,body('Search and read the county code.'));await settled(c);
+  assert.equal(provider.calls.length,2);assert.equal(c.view(a.id).turns[0].status,'complete');
+  const read=s.sources(a.id).find(x=>x.url===readUrl),lead=s.sources(a.id).find(x=>x.url===leadUrl);
+  assert.ok(read.read_full);assert.equal(lead.read_full,false);assert.equal(lead.text,'');
+  assert.notEqual(s.sources(a.id)[0].retrieved,'2000-01-01T00:00:00.000Z');
+  assert.ok(s.sources(a.id).reduce((n,x)=>n+x.text.length,0)>CHAT_LIMITS.excerptChars);
+  const firstOpening=opening(provider.calls[0].payload);
+  assert.notDeepEqual(initialChatEvidence(s,a.id).find(b=>b.title.startsWith('S2:')).content,firstOpening.find(b=>b.title?.startsWith('S2:')).content);
+  assert.equal(c.view(a.id).turns[0].answerParts[0].citations[0].sourceId,read.id);
+  const upload=await addDocument(s,c.tools,a.id,{name:'Owner letter.txt',type:'text/plain',buffer:Buffer.from('Owner confirms the synthetic scope of work.')});
+  const turn=s.createChatTurn(a.id,{clientId:randomUUID(),message:'Compare the sources.'});
+  const next=chatPayload(s,turn);assert.deepEqual(opening(next),firstOpening);
+  assert.deepEqual(next.messages.map(m=>m.role),['user','assistant','user']);assert.equal(next.messages[1].content.at(-1).cache_control.ttl,'1h');
+  assert.ok(!JSON.stringify(next.messages.slice(0,2)).includes(readUrl));
+  const tail=next.messages.at(-1).content,updates=JSON.parse(tail[0].text.split('\n').slice(1).join('\n'));
+  assert.deepEqual(updates.map(x=>x.id),[read.id,lead.id,upload.id]);
+  assert.deepEqual(tail.filter(b=>b.type==='search_result').map(b=>b.title.split(':')[0]),[read.id,upload.id]);
+  assert.ok(!tail.some(b=>b.type==='search_result'&&b.title.startsWith(lead.id+':')));
+  assert.ok(!JSON.stringify(next).includes('BRAVO_PRIVATE'));
+  // Persistence retains the same opening and source versions in a separate Store.
+  const reopened=new Store(dir);try{assert.deepEqual(opening(chatPayload(reopened,turn)),firstOpening);assert.deepEqual(chatPayload(reopened,turn).messages.at(-1).content.filter(b=>b.type==='search_result'),tail.filter(b=>b.type==='search_result'));}finally{reopened.close();}
+  s.updateChatTurn(a.id,turn.id,{status:'stopped'});
+  c.start(a.id,body('Cite the old and new evidence.'));await settled(c);
+  assert.deepEqual(c.view(a.id).turns.at(-1).answerParts[0].citations.map(x=>x.sourceId),['S1',read.id,upload.id]);
+  assert.equal(s.chatEvidence(b.id),null);
+});
+
+test('updated text on an old source ID reaches the tail while timestamp-only recaptures do not',async t=>{
+  const {app,a,provider}=await setup(t),s=app.store,c=app.services.chat;
+  const long=s.source(a.id,{url:'https://example.com/long-title',title:'Long source original title',text:'Saved synthetic code text. '.repeat(6000),readFull:true});
+  c.start(a.id,body());await settled(c);const first=opening(provider.calls[0].payload),source=s.sources(a.id)[0];
+  s.source(a.id,{url:source.url,title:source.title,readFull:false});
+  c.start(a.id,body('Follow up.'));await settled(c);
+  assert.deepEqual(opening(provider.calls[1].payload),first);assert.equal(provider.calls[1].payload.messages.at(-1).content.filter(b=>b.type==='search_result').length,0);
+  s.source(a.id,{url:source.url,title:source.title,text:'A newly retrieved amendment applies to this synthetic site.',readFull:true});
+  c.start(a.id,body('Check the amendment.'));await settled(c);const next=provider.calls[2].payload;
+  assert.deepEqual(opening(next),first);
+  const changed=next.messages.at(-1).content.find(b=>b.type==='search_result');assert.match(changed.title,/^S1:/);assert.match(JSON.stringify(changed.content),/newly retrieved amendment/);
+  assert.notEqual(changed.source,first.find(b=>b.type==='search_result').source);
+  // Search engines may change the title of a retrieved URL. Send that metadata
+  // without duplicating its long text and needlessly crossing the tail bound.
+  s.source(a.id,{url:long.url,title:'Search title updated',readFull:false});
+  c.start(a.id,body('Use the updated title.'));await settled(c);const metadata=provider.calls[3].payload;
+  assert.deepEqual(opening(metadata),first);assert.match(metadata.messages.at(-1).content[0].text,/Search title updated/);
+  assert.deepEqual(metadata.messages.at(-1).content.filter(b=>b.type==='search_result').map(b=>b.title.split(':')[0]),['S1']);
+});
+
+test('a large source tail is folded into the opening once between replies',async t=>{
+  const {app,a,provider}=await setup(t),s=app.store,c=app.services.chat;
+  c.start(a.id,body());await settled(c);const first=opening(provider.calls[0].payload);
+  const upload=await addDocument(s,c.tools,a.id,{name:'Large owner document.txt',type:'text/plain',buffer:Buffer.from('Synthetic owner document section. '.repeat(6000))});
+  assert.ok(upload.text.length>CHAT_LIMITS.evidenceTailChars);
+  c.start(a.id,body('Read the added document.'));await settled(c);const folded=provider.calls[1].payload;
+  assert.notDeepEqual(opening(folded),first);assert.ok(opening(folded).some(b=>b.title?.startsWith(upload.id+':')));
+  assert.equal(folded.messages.at(-1).content.filter(b=>b.type==='search_result').length,0);
+  c.start(a.id,body('Continue.'));await settled(c);assert.deepEqual(opening(provider.calls[2].payload),opening(folded));
+  // A small later update starts a fresh, bounded tail rather than another rebuild.
+  const later=await addDocument(s,c.tools,a.id,{name:'Small follow-up.txt',type:'text/plain',buffer:Buffer.from('A short new source after compaction.')});
+  c.start(a.id,body('Read the follow-up.'));await settled(c);const follow=provider.calls[3].payload;
+  assert.deepEqual(opening(follow),opening(folded));assert.deepEqual(follow.messages.at(-1).content.filter(b=>b.type==='search_result').map(b=>b.title.split(':')[0]),[later.id]);
+});
+
+test('a research attempt refreshes the snapshot even with unchanged briefs, report and timestamps',async t=>{
+  const {app,a,provider}=await setup(t),s=app.store,c=app.services.chat;
+  const id=a.id,research=()=>{const attempt=s.reserve(id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:0});s.updateAttempt(attempt.id,{state:'settled',applied:1});s.db.prepare("UPDATE attempts SET created='2000-01-01T00:00:00.000Z' WHERE id=?").run(attempt.id);};
+  research();c.start(id,body());await settled(c);const first=opening(provider.calls[0].payload);
+  const added=s.source(id,{url:'https://county.example.gov/research',title:'New research page',text:'Research-round source evidence.',readFull:true});
+  research();c.start(id,body('After research.'));await settled(c);const next=provider.calls[1].payload;
+  assert.notDeepEqual(opening(next),first);assert.ok(opening(next).some(b=>b.title?.startsWith(added.id+':')));assert.equal(next.messages.at(-1).content.filter(b=>b.type==='search_result').length,0);
+  c.start(id,body('Follow up.'));await settled(c);assert.deepEqual(opening(provider.calls[2].payload),opening(next));
 });
 
 test('chat accepts section capitalization without changing signed inputs or relaxing lookup checks',async t=>{

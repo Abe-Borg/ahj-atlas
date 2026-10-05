@@ -4,6 +4,7 @@ import { mkdtempSync,rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../server.mjs';
+import { chatPayload } from '../lib/chat.mjs';
 import { input,FakeProvider } from './fixtures.mjs';
 
 async function setup(t){
@@ -23,13 +24,14 @@ test('deletion removes all project records, preserves other projects and keeps c
   s.updateChatTurn(p.id,turn.id,{status:'complete',answer:'Saved answer'});
   s.saveTool(a.id,'tool-1','read_project',{text:'Saved tool output'});
   s.source(p.id,{url:'https://example.com',title:'Saved source',text:'Evidence',readFull:true});
+  chatPayload(s,turn);assert.ok(s.chatEvidence(p.id));
   s.saveLinks(p.id,[{url:'https://example.com'}]);
   s.db.prepare('INSERT INTO question_responses(project_id,id,gap,status,answer,updated) VALUES(?,?,?,?,?,?)').run(p.id,'q1','{}','answered','Answer',new Date().toISOString());
   s.diagnostic('test',{projectId:p.id});
   assert.equal((await app.remove(p.id)).status,200);
   assert.equal(s.project(p.id),null);
   assert.deepEqual(s.list().map(p=>p.id),[other.id]);
-  for(const table of ['attempts','chat_turns','question_responses','known_links','events','sources','stages','diagnostics'])
+  for(const table of ['attempts','chat_turns','chat_evidence','question_responses','known_links','events','sources','stages','diagnostics'])
     assert.equal(s.db.prepare(`SELECT COUNT(*) n FROM ${table} WHERE project_id=?`).get(p.id).n,0,table);
   assert.equal(s.tool(a.id,'tool-1'),null);
   assert.deepEqual(s.db.prepare('PRAGMA foreign_key_check').all(),[]);
