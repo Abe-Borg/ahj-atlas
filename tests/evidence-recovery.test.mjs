@@ -7,12 +7,12 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {Store} from '../lib/store.mjs';
 import {Engine} from '../lib/engine.mjs';
-import {LIMITS} from '../lib/config.mjs';
+import {LIMITS,FETCH_HISTORY_CHARS} from '../lib/config.mjs';
 import {ResearchTools,sourceLinks} from '../lib/research-tools.mjs';
 import {selectPassages,allocateEvidence,mergeEvidence,validateProgress} from '../lib/evidence.mjs';
 import {researchPayload,reviewPayload,evidencePackage,validateReport} from '../lib/prompts.mjs';
 import {encodeReport} from '../lib/report-format.mjs';
-import {input,FakeProvider,fakeTools,report,nfpaReport,evidenceText} from './fixtures.mjs';
+import {input,FakeProvider,fakeTools,report,nfpaReport,evidenceText,fetchBlocks,pdfFetchBlocks} from './fixtures.mjs';
 
 function fixture(t){
   const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-evidence-')),store=new Store(dir),provider=new FakeProvider(),engine=new Engine(store,provider,()=>true,{autoStart:false,tools:fakeTools(store)}),project=store.create({...input,discipline:'Architecture'});
@@ -227,6 +227,61 @@ test('NFPA titled edition is accepted without mistaking neighboring standards or
   const make=quote=>{const r=report();r.fireStandards=[{...nfpaReport().fireStandards[0],name:'NFPA 1 Fire Code',edition:'2012',evidence:[{sourceId:'S1',quote,pageOrSection:'adoption'}]}];return validateReport(r,[{id:'S1',read_full:true,url:'https://example.com/adoption',text:evidenceText+' '+quote}],[],[],input).fireStandards[0];};
   assert.equal(make('NFPA 1, Fire Code — 2012 is hereby incorporated by reference.').status,'verified');
   for(const quote of ['NFPA 1, Fire Code, effective under Ordinance — 2012.','NFPA 1, Fire Code; NFPA 13 — 2012.','NFPA 1 as referenced by the 2012 International Building Code.'])assert.equal(make(quote).status,'unverified',quote);
+});
+
+for(const [mode,stageId] of [['realtime','jurisdiction'],['batch','jurisdiction'],['realtime','verification']])test(`${mode} ${stageId} checkpoints fetched PDFs before counting or sending later requests`,async t=>{
+  const {store:s,project:p,provider,engine:e}=fixture(t),url='https://county.example.gov/ordinance.pdf',blocks=await pdfFetchBlocks(url);
+  s.updateProject(p.id,{mode});e.tools=new ResearchTools(s);
+  const response={id:'msg_pdf',stop_reason:'tool_use',usage:{...usage,server_tool_use:{web_fetch_requests:1}},content:[
+    {type:'thinking',thinking:'The fetched ordinance is saved; the contact is still unresolved.',signature:'original-fetch-signature'},
+    ...blocks,{type:'tool_use',id:'saved_pdf',name:'read_saved_source',input:{sourceId:url,query:'',offset:0,length:1000}},
+  ]};
+  let replies=0;provider.response=()=>++replies===1?structuredClone(response):replies===2?{id:'msg_saved',stop_reason:'tool_use',usage,content:[{type:'tool_use',id:'saved_again',name:'read_saved_source',input:{sourceId:url,query:'',offset:0,length:1000}}]}:finished();
+  const counted=[];provider.count=async payload=>{counted.push(structuredClone(payload));return 1500;};
+  const dispatch=async()=>{await e.dispatch(p.id,stageId);if(mode==='batch')await e.pollBatch([...provider.batches.keys()].at(-1),p.id);};
+  await dispatch();
+  const first=s.attempts(p.id)[0],originalPayload=structuredClone(first.payload),source=s.sources(p.id).find(x=>x.url===url);
+  assert.equal(source.read_full,true);assert.match(source.text,/\[PDF page 1\]/);assert.match(source.text,/2024 International Fire Code/);
+  assert.deepEqual(s.stage(p.id,stageId).messages.find(m=>m.role==='assistant').content,response.content);
+  await dispatch();await dispatch();
+  const payloads=mode==='batch'?[...provider.batches.values()].map(b=>b.attempts[0].payload):provider.calls;
+  assert.equal(payloads.length,3);assert.equal(s.stage(p.id,stageId).context_resets,1);assert.equal(s.stage(p.id,stageId).status,'complete');
+  assert.equal(payloads[1].messages.length,1);assert.match(JSON.stringify(payloads[1].messages),/2024 International Fire Code/);
+  assert.match(JSON.stringify(payloads[1].messages),/contact is still unresolved/);
+  assert.ok(s.stage(p.id,stageId).checkpoint.sources.includes(source.id));
+  for(const payload of [...payloads.slice(1),...counted.slice(1)]){assert.ok(!JSON.stringify(payload).includes(blocks[1].content.content.source.data));assert.ok(!JSON.stringify(payload).includes('original-fetch-signature'));}
+  assert.deepEqual(payloads[2].system,payloads[1].system);assert.deepEqual(payloads[2].tools,payloads[1].tools);
+  assert.deepEqual(payloads[2].messages.slice(0,1),payloads[1].messages);
+  assert.deepEqual(s.attempt(first.id).payload,originalPayload);assert.deepEqual(s.attempt(first.id).response,response);
+  assert.ok(s.diagnostics(p.id).some(d=>d.event==='context.checkpoint'&&d.details.reason==='fetched_content'));
+  assert.ok(s.diagnostics(p.id).some(d=>d.event==='resource.exhausted'&&d.details.resource==='fetched_pdfs'&&d.details.outcome==='degraded'));
+  assert.ok(s.events(p.id).some(x=>/continuing from saved findings.*fetched PDF/.test(x.message)));
+});
+
+test('fetched PDF checkpoints obey the existing restart budget even if extraction fails',async t=>{
+  const {store:s,project:p,provider,engine:e}=fixture(t),url='https://county.example.gov/broken.pdf';e.tools=new ResearchTools(s);
+  provider.response=()=>({id:'msg_bad_pdf',stop_reason:'pause_turn',usage,content:fetchBlocks(url,{type:'base64',media_type:'application/pdf',data:Buffer.from('Invalid PDF').toString('base64')})});
+  s.updateStage(p.id,'jurisdiction',{context_resets:LIMITS.contextResets});await e.dispatch(p.id,'jurisdiction');
+  provider.response=finished;await e.dispatch(p.id,'jurisdiction');
+  assert.equal(s.stage(p.id,'jurisdiction').context_resets,LIMITS.contextResets+1);
+  assert.deepEqual(provider.calls[1].tools.map(x=>x.name),['finish_research']);assert.equal(provider.calls[1].messages.length,1);
+  assert.ok(s.diagnostics(p.id).some(d=>d.event==='fetch.extract_failed'));assert.equal(s.sources(p.id).find(x=>x.url===url).read_full,false);
+  assert.ok(s.stage(p.id,'jurisdiction').checkpoint.sources.includes(s.sources(p.id).find(x=>x.url===url).id));
+  assert.ok(s.diagnostics(p.id).some(d=>d.event==='resource.exhausted'&&d.details.resource==='checkpoint_restarts'));
+});
+
+test('research continues small fetched text unchanged and checkpoints at the cumulative character boundary',async t=>{
+  const {store:s,project:p,provider,engine:e}=fixture(t);e.tools=new ResearchTools(s);let replies=0;
+  const sizes=[FETCH_HISTORY_CHARS-1,1];
+  provider.response=()=>{const n=replies++;return n<2?{id:'msg_text_'+n,stop_reason:'tool_use',usage,content:[
+    ...fetchBlocks('https://county.example.gov/text-'+n,{type:'text',media_type:'text/plain',data:'x'.repeat(sizes[n])},'srvtoolu_text_'+n),
+    {type:'tool_use',id:'saved_'+n,name:'read_saved_source',input:{sourceId:'https://county.example.gov/text-'+n,query:'',offset:0,length:1000}},
+  ]}:finished();};
+  await e.dispatch(p.id,'jurisdiction');const first=s.attempts(p.id)[0];await e.dispatch(p.id,'jurisdiction');
+  assert.equal(s.stage(p.id,'jurisdiction').context_resets,0);assert.deepEqual(provider.calls[1].messages.slice(0,first.payload.messages.length),first.payload.messages);
+  assert.deepEqual(provider.calls[1].tools,first.payload.tools);assert.deepEqual(provider.calls[1].system,first.payload.system);
+  await e.dispatch(p.id,'jurisdiction');assert.equal(s.stage(p.id,'jurisdiction').context_resets,1);assert.equal(provider.calls[2].messages.length,1);
+  assert.ok(s.diagnostics(p.id).some(d=>d.event==='resource.exhausted'&&d.details.resource==='fetched_history_characters'&&d.details.used===FETCH_HISTORY_CHARS&&d.details.limit===FETCH_HISTORY_CHARS));
 });
 
 test('research saves pages fetched through web_fetch, counts them as reads, and offers the fetch tool within the read allowance',async t=>{

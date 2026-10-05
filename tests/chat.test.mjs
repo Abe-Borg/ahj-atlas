@@ -11,10 +11,10 @@ import { initialChatEvidence } from '../lib/chat-citations.mjs';
 import { addDocument } from '../lib/documents.mjs';
 import { ResearchTools, searchTool, TOOL_DEFS } from '../lib/research-tools.mjs';
 import { remainingSearches } from '../lib/prompts.mjs';
-import { CHAT_LIMITS,LIMITS,MODELS,costMicros } from '../lib/config.mjs';
+import { CHAT_LIMITS,LIMITS,FETCH_HISTORY_CHARS,MODELS,costMicros } from '../lib/config.mjs';
 import { ProviderError,validateCapabilities } from '../lib/provider.mjs';
 import { diagnosticReport } from '../lib/diagnostics.mjs';
-import { input,report,chatResponse,ChatProvider } from './fixtures.mjs';
+import { input,report,chatResponse,ChatProvider,fetchBlocks,pdfFetchBlocks } from './fixtures.mjs';
 
 async function setup(t,provider=new ChatProvider()){
   const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-chat-')),app=await createApp({dataDir:dir,port:0,provider,worker:false});
@@ -567,6 +567,74 @@ test('chat saves pages fetched through web_fetch to the register, counts them as
   assert.ok(s.events(a.id).some(e=>e.message===`Project chat: fetched a public page through Anthropic's web fetch (${source.id}).`));
   assert.ok(s.events(a.id).some(e=>/page fetch through Anthropic could not finish \(url_not_accessible\)/.test(e.message)));
   assert.match(provider.calls[0].payload.system,/web_fetch retrieves it through Anthropic/);assert.match(provider.calls[0].payload.system,/kind upload are documents the user added/);
+});
+
+test('a fetched PDF makes the next chat request final with the exact signed history, system and tools',async t=>{
+  const url='https://county.example.gov/ordinance.pdf',blocks=await pdfFetchBlocks(url),first=chatResponse('',{stop_reason:'tool_use',content:[
+    {type:'thinking',thinking:'Reading the ordinance.',signature:'pdf-prefix-signature'},...blocks,
+    {type:'tool_use',id:'by_url_pdf',name:'read_saved_source',input:{sourceId:url,query:'',offset:0,length:2000}},
+  ],usage:{input_tokens:1000,output_tokens:400,server_tool_use:{web_fetch_requests:1}}});
+  const provider=new ChatProvider((payload,n)=>{
+    if(n===1)return first;
+    assert.equal(n,2);assert.equal(payload.tool_choice.type,'none');
+    assert.deepEqual(payload.system,provider.calls[0].payload.system);assert.deepEqual(payload.tools,provider.calls[0].payload.tools);
+    assert.deepEqual(payload.messages.slice(0,provider.calls[0].payload.messages.length),provider.calls[0].payload.messages);
+    assert.deepEqual(payload.messages.find(m=>m.role==='assistant').content,first.content);
+    assert.match(JSON.stringify(payload.messages.find(m=>m.role==='user'&&Array.isArray(m.content)&&m.content.some(b=>b.type==='tool_result'))),/2024 International Fire Code/);
+    return chatResponse('The synthetic ordinance adopts the 2024 International Fire Code [S2].');
+  });
+  const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
+  const turn=c.view(a.id).turns[0];assert.equal(turn.status,'complete');assert.equal(provider.calls.length,2);
+  const firstAttempt=app.store.attempts(a.id)[0];assert.deepEqual(firstAttempt.response,first);
+  assert.equal(app.store.sources(a.id).find(s=>s.url===url).read_full,true);
+  assert.ok(app.store.events(a.id).some(e=>/fetched PDF.*ended lookups/.test(e.message)));
+  // A follow-up reply uses saved text, never the old binary document or signed blocks.
+  provider.fn=()=>chatResponse('Follow-up from saved evidence.');c.start(a.id,body('Follow up.'));await settled(c);
+  assert.ok(!JSON.stringify(provider.calls[2].payload).includes(blocks[1].content.content.source.data));
+  assert.ok(!JSON.stringify(provider.calls[2].payload).includes('pdf-prefix-signature'));
+});
+
+for(const repeats of [false,true])test(`chat allows one unchanged PDF server continuation${repeats?' and stops repeated pauses':' before its final answer'}`,async t=>{
+  const blocks=await pdfFetchBlocks('https://county.example.gov/paused.pdf'),paused=[{type:'redacted_thinking',data:'paused-pdf-signature'},...blocks];
+  const provider=new ChatProvider((payload,n)=>{
+    if(n===1)return chatResponse('',{stop_reason:'pause_turn',content:paused});
+    if(n===2){assert.deepEqual(payload.messages.at(-1),{role:'assistant',content:paused});assert.ok(!payload.tool_choice);return chatResponse('',{stop_reason:repeats?'pause_turn':'tool_use',content:repeats?[{type:'text',text:'Still checking.'}]:[{type:'tool_use',id:'local',name:'find_project_sources',input:{query:'ordinance',offset:0}}]});}
+    assert.equal(n,3);assert.equal(payload.tool_choice.type,'none');return chatResponse('Final answer after the pending turn.');
+  });
+  const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
+  assert.equal(c.view(a.id).turns[0].status,repeats?'limited':'complete');assert.equal(provider.calls.length,repeats?2:3);
+  for(const {payload} of provider.calls.slice(1)){assert.deepEqual(payload.system,provider.calls[0].payload.system);assert.deepEqual(payload.tools,provider.calls[0].payload.tools);assert.deepEqual(payload.messages.slice(0,provider.calls[0].payload.messages.length),provider.calls[0].payload.messages);}
+  if(repeats){assert.match(c.view(a.id).turns[0].note,/still pending/);assert.ok(app.store.events(a.id).some(e=>/stopped after one pending continuation/.test(e.message)));}
+});
+
+test('a PDF beside a pending server tool keeps the tool-results-only continuation before wrapping up',async t=>{
+  const url='https://county.example.gov/pending.pdf',blocks=await pdfFetchBlocks(url);
+  const provider=new ChatProvider((payload,n)=>{
+    if(n===1)return chatResponse('',{stop_reason:'tool_use',content:[...blocks,
+      {type:'server_tool_use',id:'srvtoolu_wait_pdf',name:'web_search',input:{query:'amendments'}},
+      {type:'tool_use',id:'saved_pending_pdf',name:'read_saved_source',input:{sourceId:url,query:'',offset:0,length:2000}},
+    ]});
+    if(n===2){const last=payload.messages.at(-1);assert.ok(!payload.tool_choice);assert.equal(last.role,'user');assert.ok(last.content.every(b=>b.type==='tool_result'));assert.equal(typeof last.content[0].content,'string');assert.match(last.content[0].content,/2024 International Fire Code/);return chatResponse('',{stop_reason:'tool_use',content:[{type:'web_search_tool_result',tool_use_id:'srvtoolu_wait_pdf',content:[]},{type:'tool_use',id:'local_pending',name:'find_project_sources',input:{query:'ordinance',offset:0}}]});}
+    assert.equal(n,3);assert.equal(payload.tool_choice.type,'none');return chatResponse('Final answer from the saved ordinance.');
+  });
+  const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
+  assert.equal(c.view(a.id).turns[0].status,'complete');assert.equal(provider.calls.length,3);
+  for(const {payload} of provider.calls.slice(1)){assert.deepEqual(payload.system,provider.calls[0].payload.system);assert.deepEqual(payload.tools,provider.calls[0].payload.tools);assert.deepEqual(payload.messages.slice(0,provider.calls[0].payload.messages.length),provider.calls[0].payload.messages);}
+});
+
+test('chat ends lookups at the cumulative fetched-text boundary and preserves smaller fetches',async t=>{
+  const sizes=[FETCH_HISTORY_CHARS-1,1];
+  const provider=new ChatProvider((payload,n)=>n<=2?chatResponse('',{stop_reason:'tool_use',content:[
+    ...fetchBlocks('https://county.example.gov/text-'+n,{type:'text',media_type:'text/plain',data:'x'.repeat(sizes[n-1])},'srvtoolu_text_'+n),
+    {type:'tool_use',id:'local_'+n,name:'find_project_sources',input:{query:'ordinance',offset:0}},
+  ]}):chatResponse('Final answer from fetched text.'));
+  const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
+  assert.equal(c.view(a.id).turns[0].status,'complete');assert.equal(provider.calls.length,3);
+  assert.ok(!provider.calls[1].payload.tool_choice);assert.equal(provider.calls[2].payload.tool_choice.type,'none');
+  assert.deepEqual(provider.calls[1].payload.messages.slice(0,provider.calls[0].payload.messages.length),provider.calls[0].payload.messages);
+  assert.deepEqual(provider.calls[2].payload.messages.slice(0,provider.calls[1].payload.messages.length),provider.calls[1].payload.messages);
+  assert.equal(new Set(provider.calls.map(c=>JSON.stringify(c.payload.tools))).size,1);
+  assert.equal(app.store.events(a.id).filter(e=>/fetched PDF.*ended lookups/.test(e.message)).length,1);
 });
 
 test('a reply ends lookups before one more request of web fetches could exceed its page reads',async t=>{
