@@ -492,5 +492,6 @@ test('a started stream that hits the deadline records elapsed time and an estima
   assert.deepEqual(attempt.usage,{input_tokens:1,output_tokens:0});assert.ok(attempt.next_poll>Date.now());
   assert.equal(store.project(project.id).reserved,0);assert.equal(store.project(project.id).status,'waiting');
   assert.equal(store.stage(project.id,'jurisdiction').status,'queued');
-  assert.ok(store.diagnostics(project.id).some(d=>d.event==='request.failed'));
+  const failed=store.diagnostics(project.id).find(d=>d.event==='request.failed');assert.ok(failed);
+  assert.equal(store.project(project.id).active_ms,failed.details.durationMs);assert.ok(failed.details.durationMs>=row.details.used);
 });

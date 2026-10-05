@@ -8,7 +8,7 @@ import { Anthropic, ProviderError } from '../lib/provider.mjs';
 import { Engine } from '../lib/engine.mjs';
 import { ProjectChat } from '../lib/chat.mjs';
 import { Store } from '../lib/store.mjs';
-import { costMicros } from '../lib/config.mjs';
+import { costMicros, LIMITS } from '../lib/config.mjs';
 import { diagnosticReport } from '../lib/diagnostics.mjs';
 import { input, fakeTools } from './fixtures.mjs';
 
@@ -48,7 +48,7 @@ async function tick(engine){
 
 test('a dropped started stream records partial billing and retries only after backoff',async t=>{
   let clock=Date.now();t.mock.method(Date,'now',()=>clock);
-  const {store:s,engine:e,tools,calls}=fixture(t,n=>n===1?dropped:complete),p=s.create(input);
+  const {store:s,engine:e,tools,calls}=fixture(t,n=>{clock+=1000;return n===1?dropped:complete;}),p=s.create(input);
   await tick(e);
   const attempt=s.attemptSummaries(p.id)[0],expected=costMicros({...partialUsage,output_tokens:4},'research');
   assert.equal(attempt.state,'errored');assert.equal(attempt.estimated,1);assert.equal(attempt.applied,1);
@@ -56,6 +56,7 @@ test('a dropped started stream records partial billing and retries only after ba
   assert.deepEqual(attempt.usage,{...partialUsage,output_tokens:4});assert.equal(attempt.next_poll,clock+30000);
   assert.deepEqual(s.spending(),{today:expected/1e6,total:expected/1e6,pending:0});
   assert.equal(s.project(p.id).status,'waiting');assert.equal(s.project(p.id).reserved,0);
+  assert.equal(s.project(p.id).active_ms,1000);
   assert.equal(s.stage(p.id,'jurisdiction').status,'queued');assert.deepEqual(s.stage(p.id,'jurisdiction').messages,[]);
   assert.match(s.events(p.id)[0].message,/Estimated cost: .*recorded automatically/);
   assert.equal(diagnosticReport(s).projects[0].attempts[0].estimated,true);assert.equal(tools.calls,0);
@@ -64,6 +65,25 @@ test('a dropped started stream records partial billing and retries only after ba
   clock++;await tick(e);assert.equal(calls(),2);
   const success=s.attemptSummaries(p.id)[1];assert.equal(success.state,'settled');assert.equal(success.estimated,0);
   assert.equal(success.actual,costMicros({...partialUsage,output_tokens:16},'research'));assert.equal(s.project(p.id).reserved,0);
+  assert.equal(s.project(p.id).active_ms,2000);
+});
+
+test('long failed streams consume active time and prevent a third research request',async t=>{
+  let clock=Date.now();t.mock.method(Date,'now',()=>clock);
+  const duration=30*60*1000;
+  const {store:s,engine:e,calls}=fixture(t,()=>{clock+=duration;return dropped;}),p=s.create(input);
+  await tick(e);
+  assert.equal(s.project(p.id).active_ms,duration);assert.equal(s.attemptSummaries(p.id)[0].next_poll,clock+30000);
+  await tick(e);assert.equal(calls(),1);assert.equal(s.project(p.id).active_ms,duration);
+  clock+=30000;await tick(e);
+  assert.equal(calls(),2);assert.equal(s.project(p.id).active_ms,2*duration);
+  assert.equal(s.attemptSummaries(p.id)[1].next_poll,clock+60000);
+  clock+=60000;await tick(e);
+  assert.equal(calls(),2);assert.equal(s.attemptSummaries(p.id).length,2);assert.equal(s.project(p.id).reserved,0);
+  assert.equal(s.stage(p.id,'jurisdiction').status,'partial');assert.match(s.stage(p.id,'jurisdiction').note,/active research time allowance/);
+  const exhausted=s.diagnostics(p.id).find(d=>d.event==='resource.exhausted'&&d.details.resource==='active_time');
+  assert.equal(exhausted.details.limit,LIMITS.activeMs);assert.equal(exhausted.details.used,2*duration);
+  assert.equal(exhausted.details.outcome,'stopped');
 });
 
 test('a third consecutive started-stream failure blocks the stage with all costs estimated',async t=>{
