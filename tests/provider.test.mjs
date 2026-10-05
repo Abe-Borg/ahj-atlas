@@ -62,10 +62,13 @@ test('SDK stream preserves opaque blocks, partial tool JSON, citations, and cumu
   assert.equal(result.data.usage.input_tokens,500);assert.equal(result.data.usage.output_tokens,40);assert.equal(result.data.usage.cache_creation.ephemeral_1h_input_tokens,150);assert.equal(result.data.stop_details.test_detail,'retained');
   assert.equal(costMicros(result.data.usage,'review'),24310);
 });
-test('lost streams and errors after generation remain uncertain and are never retried',async()=>{
+test('lost streams and errors after generation retain usage for a bounded caller retry',async()=>{
   for(const tail of [[],[{type:'error',error:{type:'overloaded_error',message:'Overloaded'}}]]){
     let calls=0;const c=client(async()=>{calls++;return eventsResponse([initial,...tail]);});
-    await assert.rejects(c.message(payload),e=>e.ambiguous===true&&e.retryable===false);assert.equal(calls,1);
+    await assert.rejects(c.message(payload),e=>{
+      assert.equal(e.ambiguous,false);assert.equal(e.retryable,true);assert.equal(e.requestId,'req_fixture');
+      assert.equal(e.streamedCharacters,0);assert.deepEqual(e.partialUsage,initial.message.usage);return true;
+    });assert.equal(calls,1);
   }
 });
 
@@ -136,7 +139,7 @@ test('key checks distinguish DNS, timeout, certificate and interrupted connectio
 });
 test('whole-stream deadline still applies after response headers',async()=>{
   const c=client(async(url,options)=>new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode(`event: message_start\ndata: ${JSON.stringify(initial)}\n\n`));options.signal.addEventListener('abort',()=>controller.error(new Error('aborted')),{once:true});}}),{headers:{'content-type':'text/event-stream'}}),{streamDeadlineMs:40});
-  const keepAlive=setTimeout(()=>{},500);try{await assert.rejects(c.message(payload),e=>e.ambiguous);}finally{clearTimeout(keepAlive);}
+  const keepAlive=setTimeout(()=>{},500);try{await assert.rejects(c.message(payload),e=>!e.ambiguous&&e.retryable&&e.partialUsage.input_tokens===100&&e.streamedCharacters===0&&e.exhausted.resource==='stream_deadline');}finally{clearTimeout(keepAlive);}
 });
 test('model checks retain capabilities and follow model pagination',async()=>{
   const urls=[],models=[{id:'claude-sonnet-5-5',max_tokens:128000,capabilities:{batch:{supported:true}}},{id:'claude-opus-5-5',max_tokens:128000,capabilities:{structured_outputs:{supported:true}}}];

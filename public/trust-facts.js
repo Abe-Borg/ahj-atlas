@@ -134,6 +134,7 @@ export const FACTS = {
   "parallelReads": 2,
   "retries": 2,
   "retryBaseMs": 30000,
+  "streamCharactersPerToken": 4,
   "outputRecoveries": 1,
   "pollMs": 60000,
   "keyRetryStartMs": 60000,

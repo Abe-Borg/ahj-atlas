@@ -4,7 +4,7 @@ import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {FACTS as F,RUNTIME,SHORT_POINTS,SECTIONS,shortHTML,dossierHTML} from '../public/trust.js';
-import {MODELS,STAGE_DEFS,LIMITS,CHAT_LIMITS,CHAT_MODES,PRICE_DATE,cacheTTL,costMicros,usd} from '../lib/config.mjs';
+import {MODELS,STAGE_DEFS,LIMITS,CHAT_LIMITS,CHAT_MODES,PRICE_DATE,STREAM_CHARACTERS_PER_TOKEN,cacheTTL,costMicros,usd} from '../lib/config.mjs';
 import {DIAGNOSTIC_LIMIT} from '../lib/diagnostics.mjs';
 import {Anthropic} from '../lib/provider.mjs';
 import {researchPayload,reviewPayload,validateReport} from '../lib/prompts.mjs';
@@ -17,6 +17,7 @@ const source=file=>readFileSync(new URL('../'+file,import.meta.url),'utf8');
 test('quoted settings match executable constants',()=>{
   assert.deepEqual(F.models,MODELS);assert.deepEqual(F.stages,STAGE_DEFS);
   assert.deepEqual(F.research,LIMITS);assert.deepEqual(F.chat,CHAT_LIMITS);assert.deepEqual(F.modes,CHAT_MODES);
+  assert.equal(F.streamCharactersPerToken,STREAM_CHARACTERS_PER_TOKEN);
   assert.equal(F.priceDate,PRICE_DATE);assert.equal(F.diagnosticEvents,DIAGNOSTIC_LIMIT);
   assert.equal(F.realtimeCacheTTL,cacheTTL('realtime'));assert.equal(F.batchCacheTTL,cacheTTL('batch'));
   const perMillion=costMicros({input_tokens:F.million},'research');assert.equal(perMillion,MODELS.research.input*F.million);assert.equal(usd(perMillion),MODELS.research.input);
