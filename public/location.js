@@ -6,12 +6,18 @@ export function isUnitedStates(country){
   const name=String(country||'').toLowerCase().replace(/[^a-z]/g,'');
   return name.includes('unitedstates')||/^(?:the)?(?:us|usa|america)$/.test(name);
 }
-// The supported country a saved or entered value names, or '' for any other value.
-// In a country field "CA" is Canada's ISO code; in an address it can mean California.
+// The supported country a value names as a whole, or '' for any other value, so "not
+// United States" is refused. In a country field "CA" is Canada's ISO code; in an address it
+// can mean California.
 export function countryName(value){
-  if(isUnitedStates(value))return 'United States';
-  return /^(?:canada|ca)$/.test(String(value||'').toLowerCase().replace(/[^a-z]/g,''))?'Canada':'';
+  const name=String(value||'').toLowerCase().replace(/[^a-z]/g,'');
+  if(/^(?:the)?(?:unitedstates(?:ofamerica)?|us|usa|america)$/.test(name))return 'United States';
+  return /^(?:canada|ca)$/.test(name)?'Canada':'';
 }
+// A country named at the end of an address without a comma before it, as in
+// "Toronto Ontario Canada" or "Springfield IL 62701 United States". A bare "us" is a
+// word, so only the capitals "US" count.
+const COUNTRY_SUFFIX=/(?:^|[\s,])(united\s+states(?:\s+of\s+america)?|u\.?\s?s\.?\s?a\.?|u\.\s?s\.|canada)\s*$/i,US_SUFFIX=/(?:^|[\s,])(US)\s*$/;
 export const STATES={AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',DC:'District of Columbia',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',PR:'Puerto Rico',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming'};
 export const PROVINCES={AB:'Alberta',BC:'British Columbia',MB:'Manitoba',NB:'New Brunswick',NL:'Newfoundland and Labrador',NS:'Nova Scotia',NT:'Northwest Territories',NU:'Nunavut',ON:'Ontario',PE:'Prince Edward Island',QC:'Quebec',SK:'Saskatchewan',YT:'Yukon'};
 // Canada Post never uses D, F, I, O, Q or U, nor W or Z as the first letter.
@@ -44,6 +50,8 @@ export function addressCountry(address){
     if(last.toLowerCase().replace(/[^a-z]/g,'')==='ca')return null;
     const named=countryName(last);if(named)return {country:named,definite:true};
   }
+  const suffix=(last.match(COUNTRY_SUFFIX)||last.match(US_SUFFIX))?.[1];
+  if(suffix)return {country:countryName(suffix),definite:true};
   let zip=false;
   for(let i=parts.length-1;i>=0;i--){
     if(ZIP.test(parts[i])){zip=true;continue;}

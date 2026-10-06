@@ -20,9 +20,9 @@ test('country names normalize to the two supported countries',()=>{
   assert.deepEqual(COUNTRIES,['United States','Canada']);
   for(const value of ['United States','united states of america','US','U.S.','USA','U.S.A.','America'])assert.equal(countryName(value),'United States',value);
   for(const value of ['Canada','CANADA','CA','ca'])assert.equal(countryName(value),'Canada',value);
-  for(const value of ['Mexico','México','Puerto Rico','Australia',''])assert.equal(countryName(value),'',value);
+  for(const value of ['Mexico','México','Puerto Rico','Australia','not united states','United States of Americafoo','Canadian','',null])assert.equal(countryName(value),'',value);
   assert.equal(projectCountry(''),'United States');assert.equal(projectCountry('  '),'United States');assert.equal(projectCountry('U.S.A.'),'United States');assert.equal(projectCountry('canada'),'Canada');
-  assert.throws(()=>projectCountry('Mexico'),/Choose United States or Canada/);
+  for(const value of ['Mexico','not united states'])assert.throws(()=>projectCountry(value),/Choose United States or Canada/,value);
 });
 
 test('an address reads as Canadian or American only when it says so',()=>{
@@ -31,11 +31,13 @@ test('an address reads as Canadian or American only when it says so',()=>{
     ['1234, rue Sainte-Catherine Ouest, Montréal (Québec) H3G 1P1','Canada',true],['1234, rue Sainte-Catherine Ouest, Montréal (Québec)','Canada',false],
     ['1055 W Georgia St, Vancouver, BC','Canada',false],['200 Main St, Calgary, Alberta','Canada',false],['10 Main St, Halifax, NS, Canada','Canada',true],
     ['21000 Atlantic Blvd, Ashburn VA 20147','United States',true],['21000 Atlantic Blvd, Ashburn, VA','United States',false],['21000 Atlantic Blvd, Ashburn, VA, 20147','United States',true],
-    ['4000 Data Center Way, Mesa, Arizona 85215, USA','United States',true],['123 Main St, Ontario, CA 91761','United States',true],['100 George St, New Brunswick, NJ 08901','United States',true],
+    ['4000 Data Center Way, Mesa, Arizona 85215, USA','United States',true],
+    // A country at the end without a comma before it is read too.
+    ['1 King Street West Toronto Ontario Canada','Canada',true],['123 Main St, Springfield IL 62701 United States','United States',true],['123 Main St, Springfield IL 62701 U.S.A.','United States',true],['123 Main St, Springfield IL US','United States',true],['123 Main St, Ontario, CA 91761','United States',true],['100 George St, New Brunswick, NJ 08901','United States',true],
   ];
   for(const [address,country,definite] of reads)assert.deepEqual(addressCountry(address),{country,definite},address);
   // A bare "CA" may be Canada or California; no region, or a road named "US 50", decides nothing.
-  for(const address of ['10 Main St, Toronto, Ontario, CA','123 Main St, Ontario, CA',input.address,'4500 Centre St NE, Calgary','12345 Yonge St, Toronto','1 Main St, Somewhere, US 50',''])assert.equal(addressCountry(address),null,address);
+  for(const address of ['10 Main St, Toronto, Ontario, CA','123 Main St, Ontario, CA',input.address,'4500 Centre St NE, Calgary','12345 Yonge St, Toronto','1 Main St, Somewhere, US 50','5 Rue des us',''])assert.equal(addressCountry(address),null,address);
   assert.deepEqual(regionIn('Montréal (Québec) H3G 1P1',PROVINCES),{region:'Quebec',rest:'Montréal'});
   assert.deepEqual(regionIn('Trois-Rivières QC',PROVINCES),{region:'Quebec',rest:'Trois-Rivières'});
   assert.deepEqual(regionIn('Mesa, Arizona 85215',STATES),{region:'Arizona',rest:'Mesa,'});
