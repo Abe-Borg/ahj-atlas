@@ -70,7 +70,7 @@ test('a new project shows Not yet specified, keeps that use visible, and restore
   await page.select('#scope','New construction');
   await page.select('#occupancy','Office');
   await page.$eval('#permit-date',el=>{el.value='2026-11-02';el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});
-  await page.$eval('#country',el=>{el.value='Canada';el.dispatchEvent(new Event('input',{bubbles:true}));});
+  await page.select('#country','Canada');
   await page.type('#site-description','APN 42');
   await page.type('#notes','Two generators');
   await page.click('input[name=mode][value=batch]');
@@ -156,5 +156,46 @@ test('a new project shows Not yet specified, keeps that use visible, and restore
   await page.reload();
   await page.waitForSelector('#project-form');
   assert.equal(await page.$eval('#address',e=>e.value),'');
+  assert.deepEqual(errors,[]);
+});
+
+test('the country follows the address until chosen, warns about a mismatch, and the server refuses one',async t=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-new-project-country-'));
+  const app=await createApp({dataDir:dir,port:0,provider:new FakeProvider(),worker:false});
+  app.services.engine.tick=async()=>{};
+  let browser;
+  t.after(async()=>{await browser?.close();await app.close();rmSync(dir,{recursive:true,force:true});});
+  browser=await puppeteer.launch({executablePath:browserPath(),headless:true,pipe:true,args:process.platform==='linux'?['--no-sandbox']:[],env:{...process.env,XDG_CONFIG_HOME:path.join(dir,'config')}});
+  const page=await browser.newPage(),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.setViewport({width:1440,height:1000});
+  await page.goto(app.url);
+  await page.waitForSelector('#project-form');
+  const country=()=>page.$eval('#country',e=>e.value),note=()=>page.$eval('#country-note',e=>e.textContent);
+  const retype=async value=>{await page.$eval('#address',e=>{e.value='';});await page.type('#address',value);};
+  assert.equal(await country(),'United States');
+  await retype('1 King St W, Toronto, ON M5H 1A1');
+  assert.equal(await country(),'Canada');assert.equal(await note(),'');
+  await retype('21000 Atlantic Blvd, Ashburn VA 20147');
+  assert.equal(await country(),'United States');
+  await retype('1234, rue Sainte-Catherine Ouest, Montréal (Québec) H3G 1P1');
+  assert.equal(await country(),'Canada');
+  // A choice the user makes stands; a definite reading that disagrees is pointed out.
+  await page.select('#country','United States');
+  assert.equal(await note(),'This address appears to be in Canada.');
+  await retype('1 King St W, Toronto, ON M5H 1A1');
+  assert.equal(await country(),'United States');
+  await page.type('#name','Toronto data hall');
+  await page.select('#discipline','Fire protection');
+  await page.click('#start-research');
+  await page.waitForFunction(()=>document.querySelector('#project-error')?.textContent.includes('appears to be in Canada'));
+  assert.equal(app.store.list().length,0);
+  await page.select('#country','Canada');
+  assert.equal(await note(),'');
+  await page.click('#start-research');
+  await page.waitForSelector('#project-name');
+  const [created]=app.store.list();
+  assert.equal(created.input.country,'Canada');assert.equal(created.address,'1 King St W, Toronto, ON M5H 1A1');
+  assert.match(await page.$eval('.report-meta',e=>e.textContent),/Canada/);
   assert.deepEqual(errors,[]);
 });

@@ -22,6 +22,7 @@ try{
   assert.equal(await page.$eval('#site-description',e=>e.maxLength),500);
   console.log('Open correction dialog');await page.goto(app.url+'/#project='+p.id);await page.reload();await page.locator('#resume-research').click();await page.waitForSelector('#action-dialog[open]');
   assert.equal(await page.$eval('#resume-address',e=>e.value),input.address);assert.equal(await page.$eval('#resume-site',e=>e.value),'');
+  assert.deepEqual(await page.$eval('#resume-country',e=>[e.value,[...e.options].map(o=>o.value)]),['United States',['United States','Canada']]);
   console.log('Server validation');await page.$eval('#resume-address',e=>{e.value='Too few';});await page.locator('#action-submit').click();
   await page.waitForFunction(()=>document.querySelector('#action-error').textContent.includes('complete project address'));
   assert.equal(s.project(p.id).address,input.address);
@@ -38,8 +39,17 @@ try{
   assert.equal(await page.$eval('#resume-address',e=>e.value),corrected);assert.equal(await page.$eval('#resume-site',e=>e.value),'APN 0123-456-789');
   assert.equal(await page.$eval('#action-dialog',e=>e.scrollWidth<=e.clientWidth),true);
   mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/address-correction-mobile.png',fullPage:true});
+  console.log('Country correction');await page.keyboard.press('Escape');finish();await page.setViewport({width:1440,height:1000});await page.reload();await page.locator('#resume-research').click();await page.waitForSelector('#action-dialog[open]');
+  await page.$eval('#resume-address',e=>{e.value='';});await page.type('#resume-address','1 King St W, Toronto, ON M5H 1A1');
+  assert.equal(await page.$eval('#resume-country',e=>e.value),'Canada');assert.equal(await page.$eval('#resume-country-note',e=>e.textContent),'');
+  await page.select('#resume-country','United States');assert.equal(await page.$eval('#resume-country-note',e=>e.textContent),'This address appears to be in Canada.');
+  await page.locator('#action-submit').click();await page.waitForFunction(()=>document.querySelector('#action-error').textContent.includes('appears to be in Canada'));
+  assert.equal(s.project(p.id).input.country,'United States');
+  await page.select('#resume-country','Canada');await page.locator('#action-submit').click();await page.waitForFunction(()=>!document.querySelector('#action-dialog').open);
+  await page.waitForFunction(()=>document.querySelector('.report-meta')?.textContent.includes('Canada'));
+  assert.equal(s.project(p.id).input.country,'Canada');assert.equal(s.project(p.id).input.previousCountry,'United States');
   assert.deepEqual(errors,[]);
-  console.log('Address correction browser checks passed: optional site field, prefilled dialog, server validation, correction, header, Activity and mobile layout.');
+  console.log('Address correction browser checks passed: optional site field, prefilled dialog, server validation, correction, header, Activity, mobile layout and country correction.');
 }finally{
   await browser?.close();await app?.close();
   assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-address-ui-')));rmSync(dir,{recursive:true,force:true});
