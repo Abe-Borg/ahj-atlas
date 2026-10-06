@@ -62,6 +62,12 @@ test('a project is created only in the United States or Canada, with a country t
   assert.equal(s.list().length,before);
 });
 
+test('research requests localize web search to a Canadian project without a country code',async t=>{
+  const s=setup(t),p=s.create({...input,address:TORONTO,country:'Canada'});
+  const search=researchPayload(s,p,s.stage(p.id,'jurisdiction')).tools.find(tool=>tool.name==='web_search');
+  assert.deepEqual(search.user_location,{type:'approximate',city:'Toronto',region:'Ontario',timezone:'America/Toronto'});
+});
+
 test('correcting the country reopens jurisdiction research and tells research the previous country',async t=>{
   const s=setup(t),e=engine(t,s),p=s.create(input);complete(s,p.id);
   assert.doesNotMatch(researchPayload(s,p,s.stage(p.id,'jurisdiction')).messages[0].content,/corrected the project country/);
