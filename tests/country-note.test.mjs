@@ -8,6 +8,7 @@ import { Store } from '../lib/store.mjs';
 import { researchPayload, reviewPayload } from '../lib/prompts.mjs';
 import { chatPayload } from '../lib/chat.mjs';
 import { countryNote } from '../lib/country-note.mjs';
+import { projectTerms } from '../lib/evidence.mjs';
 import { input } from './fixtures.mjs';
 
 const TORONTO='1 King St W, Toronto, ON M5H 1A1';
@@ -44,4 +45,16 @@ test('a US project, or one saved with another country, gets no note',async t=>{
   for(const country of ['United States','USA','Mexico',''])assert.equal(countryNote({...input,country}),'',country);
   const s=setup(t),{research,review,chat}=texts(s,s.create(input));
   for(const text of [...research,review,chat])assert.doesNotMatch(text,/Canadian project|This project is in Canada|Canadian frameworks/);
+});
+
+test('a Canadian site description is called a parcel identifier, and its generic land-description words are not search terms',async t=>{
+  const s=setup(t),site='Legal land description: SW-12-24-1-W5M, Plan 1234 Block 5';
+  const canada=s.create({...input,address:'200 Main St SW, Calgary, Alberta T2P 1M2',country:'Canada',siteDescription:site}),us=s.create({...input,siteDescription:'APN 0123-456-789'});
+  const jurisdiction=p=>researchPayload(s,p,s.stage(p.id,'jurisdiction')).messages[0].content;
+  assert.match(jurisdiction(canada),/siteDescription is a user-provided parcel identifier \(such as a PID, assessment roll number, lot number or legal land description\) or site description/);
+  assert.match(jurisdiction(us),/siteDescription is a user-provided parcel number \(APN\) or site description/);
+  const terms=projectTerms(canada.input);
+  assert.ok(terms.includes('SW-12-24-1-W5M')&&terms.includes('Calgary'));
+  for(const generic of ['Legal','land','description','Plan','Block'])assert.ok(!terms.includes(generic),generic);
+  assert.ok(projectTerms({...input,siteDescription:'PID 012-345-678; roll number 1234-567-890-12345'}).includes('012-345-678'));
 });
