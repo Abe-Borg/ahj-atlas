@@ -93,6 +93,24 @@ test('additional standards discovered by researchers cannot disappear from the f
   const out=validateReport(report(),[source],[{id:'codes',status:'complete',output:'NFPA 750 | conditional | Investigate water mist alternative and its adoption basis.'}],[],input);
   assert.ok(out.fireStandards.some(r=>r.name.startsWith('NFPA 750')&&r.status==='unverified'));assert.ok(out.gaps.some(g=>g.question.includes('NFPA 750')));
 });
+test('table cells, Canadian referenced-documents rows and French editions verify, and Canadian parent-code years do not',()=>{
+  const lines=['NFPA | 13-2019 | Installation of Sprinkler Systems | 3.2.4.8.(4)','NFPA | 13R-2016 | Residential Sprinklers | 3.2.5.12.(2)','NFPA 13 | 2019 | Sprinkler systems','La norme NFPA 13, édition 2019, s’applique.','NFPA 13, National Building Code of Canada, 2020','NFPA 13 as referenced in the 2024 OBC'];
+  const s={...source,text:source.text+' '+lines.join(' ')};
+  const status=(edition,quote,pageOrSection='Division B, Table 1.3.1.2')=>{const r=report();r.fireStandards=[row({edition,evidence:[{sourceId:'S1',quote,pageOrSection}]})];return validateReport(r,[structuredClone(s)],[],[],input).fireStandards[0].status;};
+  assert.equal(status('2019',lines[0]),'verified');
+  assert.equal(status('2016',lines[1]),'unverified');
+  assert.equal(status('2019',lines[2],'Adoption table'),'verified');
+  assert.equal(status('2019',lines[3],'Code de construction'),'verified');
+  assert.equal(status('2020',lines[4],'Sentence 3.2.5.13.(1)'),'unverified');
+  assert.equal(status('2024',lines[5],'Ontario'),'unverified');
+});
+test('a Canadian fire protection project is pointed to the Canadian referenced-documents table',async t=>{
+  const {store}=fixture(t),us=store.create(input),canada=store.create({...input,address:'1 King St W, Toronto, ON M5H 1A1',country:'Canada'});
+  const codes=p=>researchPayload(store,p,store.stage(p.id,'codes')).messages[0].content;
+  assert.match(codes(canada),/referenced-standards chapter \(for example Division B, Table 1\.3\.1\.2 of the national or provincial building or fire code\)/);
+  assert.match(codes(us),/referenced-standards chapter \(for example IBC Chapter 35 or IFC Chapter 80\)/);
+  assert.match(reviewPayload(store,canada).system,/Division B, Table 1\.3\.1\.2 of the national or provincial building or fire code/);
+});
 test('compact reference-table notation works without confusing NFPA 13 and 13R',()=>{
   const r=report(),s={...source,text:source.text+' 13—19 Standard for the Installation of Sprinkler Systems. 13R—16 Residential Sprinklers.'};r.fireStandards=[row({evidence:[...row().evidence,{sourceId:'S1',quote:'13—19 Standard for the Installation of Sprinkler Systems.',pageOrSection:'NFPA referenced standards table'}]})];
   assert.equal(validateReport(r,[s],[],[],input).fireStandards[0].status,'verified');
