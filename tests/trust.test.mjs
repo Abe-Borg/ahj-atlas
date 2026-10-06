@@ -6,6 +6,7 @@ import path from 'node:path';
 import {FACTS as F,RUNTIME,SHORT_POINTS,SECTIONS,shortHTML,dossierHTML} from '../public/trust.js';
 import {MODELS,STAGE_DEFS,LIMITS,CHAT_LIMITS,CHAT_MODES,PRICE_DATE,STREAM_CHARACTERS_PER_TOKEN,cacheTTL,costMicros,usd} from '../lib/config.mjs';
 import {DIAGNOSTIC_LIMIT} from '../lib/diagnostics.mjs';
+import {RESOURCE_MONITOR} from '../lib/resources.mjs';
 import {Anthropic} from '../lib/provider.mjs';
 import {researchPayload,reviewPayload,validateReport} from '../lib/prompts.mjs';
 import {chatPayload} from '../lib/chat.mjs';
@@ -18,7 +19,7 @@ test('quoted settings match executable constants',()=>{
   assert.deepEqual(F.models,MODELS);assert.deepEqual(F.stages,STAGE_DEFS);
   assert.deepEqual(F.research,LIMITS);assert.deepEqual(F.chat,CHAT_LIMITS);assert.deepEqual(F.modes,CHAT_MODES);
   assert.equal(F.streamCharactersPerToken,STREAM_CHARACTERS_PER_TOKEN);
-  assert.equal(F.priceDate,PRICE_DATE);assert.equal(F.diagnosticEvents,DIAGNOSTIC_LIMIT);
+  assert.equal(F.priceDate,PRICE_DATE);assert.equal(F.diagnosticEvents,DIAGNOSTIC_LIMIT);assert.deepEqual(F.resourceMonitor,RESOURCE_MONITOR);
   assert.equal(F.realtimeCacheTTL,cacheTTL('realtime'));assert.equal(F.batchCacheTTL,cacheTTL('batch'));
   const perMillion=costMicros({input_tokens:F.million},'research');assert.equal(perMillion,MODELS.research.input*F.million);assert.equal(usd(perMillion),MODELS.research.input);
   assert.equal(costMicros({cache_creation_input_tokens:100},'research'),Math.ceil(100*MODELS.research.input*F.shortCacheFactor));
@@ -135,7 +136,7 @@ test('runtime inventory coverage, five rows and ledger references',()=>{
   const listed=[...ledger.matchAll(/^\| ([UA]\d\d) \|/gm)].map(m=>m[1]);
   assert.deepEqual(RUNTIME.map(r=>r.id),listed);assert.equal(new Set(listed).size,listed.length);
   for(const r of RUNTIME){assert.ok(r.you&&r.runs&&r.sent&&r.ai&&r.bounds);const card=html.split(`data-claim="${r.id}"`)[1].split('</article>')[0];for(const label of ['You do','What runs','What is sent','AI involved','Bounded by'])assert.ok(card.includes(`<dt>${label}</dt>`),r.id+label);}
-  for(const id of ['U01','U02','U04','U10','U13','U18','U19','U20','U21','U22','U23','U24','U26','U27','A04','A05','A06'])assert.equal(RUNTIME.find(r=>r.id===id).ai,'None.');
+  for(const id of ['U01','U02','U04','U10','U13','U18','U19','U20','U21','U22','U23','U24','U26','U27','A04','A05','A06','A07'])assert.equal(RUNTIME.find(r=>r.id===id).ai,'None.');
   for(const [id] of SHORT_POINTS)assert.ok(ledger.includes(`| ${id} |`));
   for(const s of SECTIONS)for(const id of s.claim.split(' '))assert.ok(ledger.includes(`| ${id} |`));
   assert.equal(SECTIONS.length,12);assert.equal(SHORT_POINTS.length,7);

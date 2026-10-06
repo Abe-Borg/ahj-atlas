@@ -99,6 +99,6 @@ test('diagnostic endpoints require local mutation authorization and record brows
   assert.equal((await fetch(app.url+'/api/diagnostics/download',{headers:{'sec-fetch-site':'cross-site'}})).status,403);
   await fetch(app.url+'/api/diagnostics/client',{method:'POST',headers,body:JSON.stringify({message:'Browser failure sk-ant-private-key',location:'https://example.com/?key=secret'})});
   const result=await(await fetch(app.url+'/api/diagnostics',{method:'POST',headers,body:'{}'})).json();
-  assert.equal(result.format,'ahj-atlas-diagnostics');assert.ok(result.events.some(e=>e.event==='browser.error'));assert.ok(!JSON.stringify(result).includes('sk-ant-'));assert.ok(!JSON.stringify(result).includes(state.token));
+  assert.equal(result.format,'ahj-atlas-diagnostics');assert.ok(result.events.some(e=>e.event==='browser.error'));assert.ok(Number.isFinite(result.application.resources.current.rssBytes));assert.deepEqual(Object.keys(result.starvation),['host','provider','allowances']);assert.ok(!JSON.stringify(result).includes('sk-ant-'));assert.ok(!JSON.stringify(result).includes(state.token));
   const download=await fetch(app.url+'/api/diagnostics/download',{headers:{'sec-fetch-site':'same-origin'}});assert.equal(download.status,200);assert.ok(download.headers.get('content-disposition').includes('attachment'));assert.equal((await download.json()).format,'ahj-atlas-diagnostics');
 });

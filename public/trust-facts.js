@@ -120,6 +120,16 @@ export const FACTS = {
   },
   "priceDate": "2026-09-28",
   "diagnosticEvents": 5000,
+  "resourceMonitor": {
+    "intervalMs": 5000,
+    "historySamples": 720,
+    "recoverSamples": 6,
+    "loopDelayMs": 500,
+    "pausedMs": 10000,
+    "systemCpu": 0.95,
+    "heapFraction": 0.85,
+    "systemMemoryFree": 0.05
+  },
   "hosts": {
     "anthropic": "api.anthropic.com",
     "census": "geocoding.geo.census.gov",

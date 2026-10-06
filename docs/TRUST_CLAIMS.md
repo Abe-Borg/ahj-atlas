@@ -4,7 +4,7 @@ Discovery completed before trust copy was written. Authority: executable impleme
 
 ## Inventory and granularity
 
-The runtime inventory has **30 user action groups and 6 automatic behavior groups**. A group combines named controls with the same work, outbound data and failure behavior; it does not omit controls. Each ID below is a runtime card, including purely local actions. No file drop, generic JSON import, global undo, permit-submission command or email-sending action is implemented. The desktop has an initial source-workspace import, not a JSON-export restore command. Form selectors, chat depth/mode selectors, disclosure toggles and navigation are included in U01/U02/U14/U22. Native file-save cancellation is U19; modal Back/Close/Escape is U22. OS keyboard activation invokes the same controls; there is no app-defined global keyboard-command dispatcher.
+The runtime inventory has **30 user action groups and 7 automatic behavior groups**. A group combines named controls with the same work, outbound data and failure behavior; it does not omit controls. Each ID below is a runtime card, including purely local actions. No file drop, generic JSON import, global undo, permit-submission command or email-sending action is implemented. The desktop has an initial source-workspace import, not a JSON-export restore command. Form selectors, chat depth/mode selectors, disclosure toggles and navigation are included in U01/U02/U14/U22. Native file-save cancellation is U19; modal Back/Close/Escape is U22. OS keyboard activation invokes the same controls; there is no app-defined global keyboard-command dispatcher.
 
 | ID | Named user triggers | Executable source / symbol | Verification |
 |---|---|---|---|
@@ -44,6 +44,7 @@ The runtime inventory has **30 user action groups and 6 automatic behavior group
 | A04 | remembered key check; unavailable-key checks while visible | createServices.verifyKey; public/app.js:refreshConnection | tests/provider.test.mjs; tests/connection-ui.mjs |
 | A05 | packaged desktop update lookup at launch, hourly/visibility trigger, cached daily | public/app.js:init,checkUpdates; createUpdateChecker.check; desktop/main.mjs:createBackend | tests/update-check.test.mjs |
 | A06 | local refresh, live reply saves, persistence and local browser error records | public/app.js:refreshSelected,recordClientError; liveReply; Store methods | tests/diagnostics.test.mjs; trust dialogs browser test |
+| A07 | host resource sampling, starvation episodes, host windows on timed events and the starvation summary | lib/resources.mjs:ResourceMonitor,starvationSummary; Store.diagnostic; createServices; diagnosticReport | tests/resources.test.mjs; tests/diagnostics.test.mjs |
 
 ## Network inventory (5 route classes; 3 fixed external API hosts)
 
@@ -92,6 +93,7 @@ User-facing numbers are interpolated from `public/trust-facts.js`, never scatter
 | Facts object fields | Authority / symbol | Units / qualification |
 |---|---|---|
 | models, stages, research, chat, modes, priceDate, diagnosticEvents | lib/config.mjs:MODELS,STAGE_DEFS,LIMITS,CHAT_LIMITS,CHAT_MODES,PRICE_DATE; diagnostics.mjs:DIAGNOSTIC_LIMIT | tokens differ from characters; milliseconds converted only for display; all price fields dollars per million tokens |
+| resourceMonitor | lib/resources.mjs:RESOURCE_MONITOR | sampling interval, pause and event-loop thresholds in milliseconds; history and recovery in samples; CPU, heap and free-memory thresholds as fractions of the whole; observations, not limits |
 | hosts.anthropic, hosts.census, hosts.updates, hosts.releaseDownloads | provider.mjs:Anthropic constructor base; research-tools.mjs:locate; update-check.mjs:RELEASES_API,REPOSITORY | fixed API hosts plus the release-download host; its asset-storage redirect, public sources and links remain variable |
 | serverHost, serverPort, requestBytes | server.mjs:createApp signature/listen and body parsing | source default only; desktop port is assigned dynamically; ATLAS_PORT / ATLAS_DATA_DIR overrides |
 | workerMs, researchWorkers, parallelReads, retries, retryBaseMs, outputRecoveries | engine.mjs:constructor,tick,parallelReads,dispatch,applyOnce,importBatch | retries counted from errored attempts for stage; the count spans the project’s recorded stage attempts, so continuation does not discard earlier errors |
