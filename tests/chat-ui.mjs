@@ -1,4 +1,4 @@
-// Optional real-browser regression, with fake responses and no paid API calls.
+// Real-browser regression run by npm run test:ui, with fake responses and no paid API calls.
 import assert from 'node:assert/strict';
 import { mkdtempSync,mkdirSync,rmSync } from 'node:fs';
 import os from 'node:os';

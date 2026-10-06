@@ -49,6 +49,8 @@ jobs:
         run: npm test
       - name: Desktop tests
         run: npm run test:desktop
+      - name: Browser UI checks
+        run: npm run test:ui
       - name: Audit synthetic unpacked package
         run: npm run package:win:smoke
       - name: Audit production unpacked package

@@ -1,4 +1,4 @@
-// Optional local-browser regression: node tests/questions-ui.mjs. No paid calls.
+// Browser regression run by npm run test:ui. No paid calls.
 import assert from 'node:assert/strict';
 import { mkdtempSync,mkdirSync,rmSync } from 'node:fs';
 import os from 'node:os';
