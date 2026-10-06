@@ -18,7 +18,9 @@ try {
   phase="launch browser";console.log(phase);
   browser=await puppeteer.launch({executablePath:browserPath(),headless:true});phase="open page";page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.setViewport({width:1440,height:1080});
   phase="new project labels";console.log(phase);await page.goto(app.url);await page.waitForSelector('#project-form');await page.click('details.extra>summary');
-  for(const id of ['scope','occupancy','permit-date','country','site-description','notes'])assert.match(await page.$eval(`label[for="${id}"]`,e=>e.textContent),/optional/);
+  for(const id of ['scope','occupancy','permit-date','site-description','notes'])assert.match(await page.$eval(`label[for="${id}"]`,e=>e.textContent),/optional/);
+  // The country is required and sits beside the address, outside the optional context.
+  assert.deepEqual(await page.$eval('#country',e=>[e.required,Boolean(e.closest('details')),[...e.options].map(o=>o.value),e.value,document.querySelector('label[for="country"]').textContent]),[true,false,['United States','Canada'],'United States','Country']);
   assert.match(await page.$eval('details.extra>summary',e=>e.textContent),/optional/);
   phase="building use dropdown";console.log(phase);
   assert.equal(await page.$eval('#occupancy',e=>e.value),'');assert.equal(await page.$eval('#occupancy option:checked',e=>e.textContent),'Not yet specified');assert.equal(await page.$eval('#custom-occupancy-field',e=>e.hidden),true);assert.equal(await page.$eval('#custom-occupancy',e=>e.disabled),true);

@@ -22,7 +22,7 @@
     "test:desktop:window": "node tests/desktop-window-smoke.mjs",
     "test:ui": "node tests/address-correction-ui.mjs && node tests/chat-ui.mjs && node tests/connection-ui.mjs && node tests/delete-project-ui.mjs && node tests/documents-ui.mjs && node tests/questions-ui.mjs && node tests/update-ui.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check server.mjs && node --check public/app.js && node --check public/markdown.js && node --check public/latest-refresh.js && node --check desktop/main.mjs && node --check desktop/lifecycle.mjs && node --check desktop/paths.mjs && node --check desktop/migration.mjs && node --check desktop/navigation.mjs && node --check desktop/window-state.mjs && node --check desktop/downloads.mjs && node --check desktop/update-check.mjs && node --check lib/download-filename.mjs"
+    "check": "node --check server.mjs && node --check public/app.js && node --check public/markdown.js && node --check public/latest-refresh.js && node --check public/location.js && node --check desktop/main.mjs && node --check desktop/lifecycle.mjs && node --check desktop/paths.mjs && node --check desktop/migration.mjs && node --check desktop/navigation.mjs && node --check desktop/window-state.mjs && node --check desktop/downloads.mjs && node --check desktop/update-check.mjs && node --check lib/download-filename.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.128.0",

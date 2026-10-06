@@ -7,7 +7,7 @@ import os from 'node:os';
 import { createApp } from '../server.mjs';
 import { Store } from '../lib/store.mjs';
 import { chatPayload,projectSection,ProjectChat } from '../lib/chat.mjs';
-import { CLARIFICATION_PREFIX } from '../lib/chat-actions.mjs';
+import { CLARIFICATION_PREFIX, describeAction } from '../lib/chat-actions.mjs';
 import { CHAT_LIMITS } from '../lib/config.mjs';
 import { diagnosticReport } from '../lib/diagnostics.mjs';
 import ExcelJS from 'exceljs';
@@ -37,7 +37,7 @@ const answer=(questionId,text,reason='The user confirmed it.')=>call('propose_qu
 const dismiss=(questionId)=>call('propose_question_update',{questionId,status:'dismissed',answer:'',reason:'Not a priority for this phase.'});
 const research=(clarification,reason='The report predates this context.')=>call('propose_research_round',{focus:'clarification',clarification,reason});
 const nfpa=()=>call('propose_research_round',{focus:'nfpa_standards',clarification:'',reason:'Check the adopted NFPA editions.'});
-const locate=(address,siteDescription='')=>call('propose_address_correction',{address,siteDescription,reason:'The user gave the assigned address.'});
+const locate=(address,siteDescription='',country='')=>call('propose_address_correction',{address,country,siteDescription,reason:'The user gave the assigned address.'});
 // The first request proposes; the next one answers.
 const proposing=(calls,final='Apply the cards below if they look right.',text='Here is what I propose.')=>new ChatProvider((payload,n)=>n===1?chatResponse('',{stop_reason:'tool_use',content:[{type:'text',text},...calls]}):chatResponse(final));
 async function reply(c,id){c.start(id,body());await settled(c);return c.view(id).turns.at(-1);}
@@ -149,6 +149,24 @@ test('research, NFPA and location proposals start research through engine.resume
   p=s.project(l.id);assert.equal(p.address,CORRECTED);assert.equal(p.input.siteDescription,'Lot 7, Tract 5521');
   s.updateProject(l.id,{status:'complete'});s.updateChatTurn(l.id,turn.id,{proposals:[...c.view(l.id).turns.at(-1).proposals,repeat]});
   const noop=await post(l.id,{turnId:turn.id,proposalId:repeat.id});assert.equal(noop.status,400);assert.match((await noop.json()).error,/already uses this address/);
+});
+
+test('a location proposal names the country for an address in the other country, and applying it corrects both',async t=>{
+  const provider=new ChatProvider();
+  const {app,create,post}=await setup(t,provider),s=app.store,c=app.services.chat,TORONTO='1 King St W, Toronto, ON M5H 1A1';
+  const p=create('COUNTRY_PRIVATE');
+  provider.fn=(payload,n)=>n===1?chatResponse('',{stop_reason:'tool_use',content:[locate(TORONTO),locate('','','United States'),locate('','','Mexico'),locate(TORONTO,'','Canada')]}):chatResponse('Apply it if it looks right.');
+  const turn=await reply(c,p.id),messages=results(provider).map(r=>r.is_error?r.content:'ok');
+  assert.match(messages[0],/appears to be in Canada\. Choose Canada as the country/);assert.match(messages[1],/already uses this address, country and site description/);
+  assert.match(messages[2],/Invalid proposal arguments/);assert.equal(messages[3],'ok');
+  assert.equal(turn.proposals.length,1);assert.deepEqual({...turn.proposals[0],id:'',created:''},{id:'',created:'',action:'correct_location',address:TORONTO,country:'Canada',reason:'The user gave the assigned address.',status:'proposed'});
+  assert.equal(describeAction(turn.proposals[0]),`correct the project location to the address “${TORONTO}” and the country Canada`);
+  assert.equal((await post(p.id,{turnId:turn.id,proposalId:turn.proposals[0].id})).status,200);
+  const next=s.project(p.id);
+  assert.equal(next.address,TORONTO);assert.equal(next.input.country,'Canada');assert.equal(next.input.previousCountry,'United States');
+  assert.ok(s.stages(p.id).every(x=>x.status==='queued'));
+  assert.ok(s.events(p.id).some(e=>e.message==='Project country changed from United States to Canada. Jurisdiction research and the stages that depend on it were reopened.'));
+  assert.ok(s.events(p.id).some(e=>e.message==='You applied a proposal from project chat (correct the project location).'));
 });
 
 test('paid proposals wait for research and chat, go stale after research runs, and a refused apply stays applicable',async t=>{
