@@ -76,6 +76,13 @@ test('a window reduces the samples that overlapped an operation to their worst v
   assert.deepEqual(m.window(900_000,999_000),{samples:0});
   const bounded=monitor(store,{historySamples:2});bounded.m.sample();for(let i=0;i<5;i++){bounded.advance();bounded.m.sample();}
   assert.equal(bounded.m.samples.length,2);assert.equal(bounded.m.summary().samples,5);
+  // A synchronous stall holds the timer back; the window takes the overdue sample so the stall is its own.
+  const stalled=monitor(store);stalled.m.start();t.after(()=>stalled.m.stop());
+  stalled.advance();stalled.m.sample();
+  stalled.advance({ms:9000,loopMs:8500});
+  assert.deepEqual(stalled.m.window(stalled.state.now-8000),{samples:1,starved:{event_loop:1},loopDelayMs:8500,lateMs:4000,systemCpu:0.1,processCpu:0.011,heapFraction:0.1,systemMemoryFree:0.5});
+  assert.equal(stalled.m.summary().samples,2);assert.deepEqual(stalled.m.summary().active,['event_loop']);
+  stalled.advance({ms:1000});assert.deepEqual(stalled.m.window(stalled.state.now-500),{samples:0});assert.equal(stalled.m.summary().samples,2);
 });
 
 test('timed diagnostic rows carry the host window; untimed rows and recovery rows do not',t=>{
@@ -91,7 +98,7 @@ test('timed diagnostic rows carry the host window; untimed rows and recovery row
   assert.deepEqual(byEvent['stream.completed'].resources,{samples:9});
 });
 
-test('the starvation summary counts host episodes, starved work, throttled requests once and spent allowances',()=>{
+test('the starvation summary counts host episodes, starved work, throttled requests once per provider request and spent allowances',()=>{
   const summary=starvationSummary([
     {id:1,event:'resource.starved',details:{signal:'event_loop',value:900}},
     {id:2,event:'resource.recovered',details:{signal:'event_loop',starvedMs:15000}},
@@ -102,6 +109,8 @@ test('the starvation summary counts host episodes, starved work, throttled reque
     {id:7,event:'stream.failed',attempt_id:'a2',details:{durationMs:10,error:{status:429,type:'rate_limit_error',retryAfterMs:7000,requestId:'req_2'}}},
     {id:8,event:'request.failed',attempt_id:'a2',details:{durationMs:12,error:{status:429,type:'rate_limit_error',retryAfterMs:7000,requestId:'req_2'}}},
     {id:9,event:'api.failed',attempt_id:null,details:{durationMs:5,error:{status:529,type:'overloaded_error',requestId:'req_9'}}},
+    {id:16,event:'api.failed',attempt_id:'a5',details:{error:{status:429,type:'rate_limit_error',retryAfterMs:1000,requestId:'req_poll_1'}}},
+    {id:17,event:'api.failed',attempt_id:'a5',details:{error:{status:529,type:'overloaded_error',requestId:'req_poll_2'}}},
     {id:10,event:'batch.result_failed',attempt_id:'a3',details:{error:{status:0,type:'rate_limit_error'}}},
     {id:11,event:'request.failed',attempt_id:'a4',details:{error:{status:500,type:'api_error'}}},
     {id:12,event:'resource.exhausted',details:{resource:'rounds',outcome:'stopped'}},
@@ -109,7 +118,7 @@ test('the starvation summary counts host episodes, starved work, throttled reque
     {id:14,event:'resource.exhausted',details:{resource:'searches',outcome:'refused'}},
     {id:15,event:'resource.exhausted',details:{resource:'pdf_pages'}},
   ]);
-  assert.deepEqual(summary,{host:{episodes:{event_loop:2,system_cpu:1},recoveries:{event_loop:1},starvedMs:{event_loop:15000},timedRows:2,timedRowsStarved:1,starvedSamplesDuringWork:{event_loop:2}},provider:{rateLimited:2,overloaded:1,retryAfterMs:7000,throttledRequests:3},allowances:{rounds:{stopped:1,degraded:1},searches:{refused:1},pdf_pages:{unknown:1}}});
+  assert.deepEqual(summary,{host:{episodes:{event_loop:2,system_cpu:1},recoveries:{event_loop:1},starvedMs:{event_loop:15000},timedRows:2,timedRowsStarved:1,starvedSamplesDuringWork:{event_loop:2}},provider:{rateLimited:3,overloaded:2,retryAfterMs:8000,throttledRequests:5},allowances:{rounds:{stopped:1,degraded:1},searches:{refused:1},pdf_pages:{unknown:1}}});
   assert.deepEqual(starvationSummary([]),{host:{episodes:{},recoveries:{},starvedMs:{},timedRows:0,timedRowsStarved:0,starvedSamplesDuringWork:{}},provider:{rateLimited:0,overloaded:0,retryAfterMs:0,throttledRequests:0},allowances:{}});
 });
 
