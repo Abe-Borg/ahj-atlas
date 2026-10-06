@@ -41,6 +41,10 @@ test('an address reads as Canadian or American only when it says so',()=>{
   assert.deepEqual(regionIn('Montréal (Québec) H3G 1P1',PROVINCES),{region:'Quebec',rest:'Montréal'});
   assert.deepEqual(regionIn('Trois-Rivières QC',PROVINCES),{region:'Quebec',rest:'Trois-Rivières'});
   assert.deepEqual(regionIn('Mesa, Arizona 85215',STATES),{region:'Arizona',rest:'Mesa,'});
+  assert.deepEqual(regionIn('Charleston West Virginia 25301',STATES),{region:'West Virginia',rest:'Charleston'});
+  assert.deepEqual(regionIn('Washington D.C. 20500',STATES),{region:'District of Columbia',rest:'Washington'});
+  assert.deepEqual(regionIn('Vancouver B.C.',PROVINCES),{region:'British Columbia',rest:'Vancouver'});
+  assert.deepEqual(addressCountry('1600 Pennsylvania Ave NW, Washington, D.C. 20500'),{country:'United States',definite:true});
   assert.equal(Object.keys(PROVINCES).length,13);assert.ok(Object.keys(PROVINCES).every(code=>!STATES[code]));
 });
 
