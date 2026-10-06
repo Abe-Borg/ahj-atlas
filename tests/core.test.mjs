@@ -8,7 +8,7 @@ import { Engine } from '../lib/engine.mjs';
 import { costMicros, reserveMicros, LIMITS } from '../lib/config.mjs';
 import { validateReport, researchPayload } from '../lib/prompts.mjs';
 import { isPublicIP, validatePublicUrl, htmlText, isUnitedStates, ResearchTools, searchLocation, searchTool } from '../lib/research-tools.mjs';
-import { STATES } from '../public/location.js';
+import { STATES, PROVINCES, PROVINCE_TIMEZONES } from '../public/location.js';
 import { selectPassages } from '../lib/evidence.mjs';
 import { ProviderError } from '../lib/provider.mjs';
 import { input, evidenceText, report, FakeProvider, fakeTools } from './fixtures.mjs';
@@ -165,7 +165,7 @@ test('a page read shows its most relevant links and remembers every link for cha
   const result=JSON.parse((await tools.read(p.id,{url:'https://city.example.gov/'})).text);
   assert.equal(result.links.length,LIMITS.pageLinks);assert.equal(s.knownLinks(p.id).length,150);assert.ok(s.knownUrl(p.id,'https://city.example.gov/doc/149'));
 });
-test('web search is localized to a US project city and state read from its address',()=>{
+test('web search is localized to a project city and state or province read from its address',()=>{
   assert.deepEqual(searchLocation({address:'123 Main St, Springfield, IL 62701',country:'United States'}),{type:'approximate',city:'Springfield',region:'Illinois',country:'US'});
   assert.deepEqual(searchLocation({address:'4000 Data Center Way, Mesa, Arizona 85215, USA'}),{type:'approximate',city:'Mesa',region:'Arizona',country:'US'});
   assert.deepEqual(searchLocation({address:'Parcel 12, New Albany OH 43054',country:'USA'}),{type:'approximate',city:'New Albany',region:'Ohio',country:'US'});
@@ -186,6 +186,21 @@ test('web search is localized to a US project city and state read from its addre
   assert.deepEqual(searchLocation({address:'21000 Atlantic Blvd Ashburn VA, 20147'}),{type:'approximate',region:'Virginia',country:'US'});
   // No recognizable state: the country alone. Another country: no location at all.
   assert.deepEqual(searchLocation({address:'100 Test Avenue, Example District, Test State 00000'}),{type:'approximate',country:'US'});
-  assert.equal(searchLocation({address:'1 King St W, Toronto, ON M5H 1A1',country:'Canada'}),null);assert.ok(!Object.hasOwn(searchTool(4,{address:'Toronto',country:'Canada'}),'user_location'));
+  // A Canadian project sends its city, province and the province's time zone, but no country code.
+  const canada=(address,city,region,timezone)=>assert.deepEqual(searchLocation({address,country:'Canada'}),{type:'approximate',...(city?{city}:{}),region,timezone},address);
+  canada('1 King St W, Toronto, ON M5H 1A1','Toronto','Ontario','America/Toronto');
+  canada('100 Queen St, Ottawa ON K1A0A9','Ottawa','Ontario','America/Toronto');
+  canada('1234, rue Sainte-Catherine Ouest, Montréal (Québec) H3G 1P1','Montréal','Quebec','America/Toronto');
+  canada('1055 W Georgia St, Vancouver, B.C. V6E 3P3','Vancouver','British Columbia','America/Vancouver');
+  canada('200 Main St SW, Calgary, Alberta T2P 1M2','Calgary','Alberta','America/Edmonton');
+  canada('10 Main St, Halifax, NS B3H 1A1, Canada','Halifax','Nova Scotia','America/Halifax');
+  canada('10 Main St, Toronto, ON, CA','Toronto','Ontario','America/Toronto');
+  canada('1 King Street West Toronto Ontario Canada','','Ontario','America/Toronto');
+  for(const [region,timezone] of Object.entries(PROVINCE_TIMEZONES)){canada(`1 Main St, Capital, ${region}`,'Capital',region,timezone);assert.ok(Intl.supportedValuesOf('timeZone').includes(timezone),timezone);}
+  assert.deepEqual(Object.keys(PROVINCE_TIMEZONES).sort(),Object.values(PROVINCES).sort());
+  // No province, or a project saved with another country: no location at all.
+  for(const input of [{address:'4500 Centre St NE, Calgary',country:'Canada'},{address:'Toronto',country:'Canada'},{address:'1 Main St, Mexico City',country:'Mexico'}])assert.equal(searchLocation(input),null,input.address);
+  assert.ok(!Object.hasOwn(searchTool(4,{address:'Toronto',country:'Canada'}),'user_location'));
+  assert.deepEqual(searchTool(4,{address:'1 King St W, Toronto, ON M5H 1A1',country:'Canada'}).user_location,{type:'approximate',city:'Toronto',region:'Ontario',timezone:'America/Toronto'});
   assert.deepEqual(searchTool(4,{address:'123 Main St, Springfield, IL 62701'}),{type:'web_search_20250305',name:'web_search',max_uses:4,allowed_callers:['direct'],user_location:{type:'approximate',city:'Springfield',region:'Illinois',country:'US'}});
 });

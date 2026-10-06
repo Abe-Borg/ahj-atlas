@@ -24,9 +24,14 @@ export function countrySuffix(part){
 }
 export const STATES={AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',DC:'District of Columbia',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',PR:'Puerto Rico',GU:'Guam',VI:'Virgin Islands',AS:'American Samoa',MP:'Northern Mariana Islands',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming'};
 export const PROVINCES={AB:'Alberta',BC:'British Columbia',MB:'Manitoba',NB:'New Brunswick',NL:'Newfoundland and Labrador',NS:'Nova Scotia',NT:'Northwest Territories',NU:'Nunavut',ON:'Ontario',PE:'Prince Edward Island',QC:'Quebec',SK:'Saskatchewan',YT:'Yukon'};
+// Canonical IANA zones, one per province or territory; web search uses them to place a
+// Canadian project. Where a province spans zones, this is the zone of most of it.
+export const PROVINCE_TIMEZONES={Alberta:'America/Edmonton','British Columbia':'America/Vancouver',Manitoba:'America/Winnipeg','New Brunswick':'America/Moncton','Newfoundland and Labrador':'America/St_Johns','Nova Scotia':'America/Halifax','Northwest Territories':'America/Edmonton',Nunavut:'America/Iqaluit',Ontario:'America/Toronto','Prince Edward Island':'America/Halifax',Quebec:'America/Toronto',Saskatchewan:'America/Regina',Yukon:'America/Whitehorse'};
 // Canada Post never uses D, F, I, O, Q or U, nor W or Z as the first letter.
 const POSTAL_CODE=/(?<![\p{L}\d])[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z][ -]?\d[ABCEGHJ-NPRSTV-Z]\d(?![\p{L}\d])/iu;
 const ZIP=/^\d{5}(?:-\d{4})?$/,ENDS_WITH_ZIP=/(?:^|\s)\d{5}(?:-\d{4})?$/;
+// An address part that is only a ZIP code or a postal code.
+export const isPostalPart=part=>ZIP.test(String(part??'').trim())||new RegExp(`^${POSTAL_CODE.source}$`,'iu').test(String(part??'').trim());
 // Accents are compared without their marks, so "Québec" matches Quebec.
 const fold=text=>text.normalize('NFD').replace(/\p{M}/gu,'').toLowerCase();
 // "U.S." in "St. Thomas, U.S. Virgin Islands" qualifies the region; it is not a city.
