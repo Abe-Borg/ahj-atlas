@@ -18,7 +18,8 @@ try{
   const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   console.log('New project form');await page.setViewport({width:1440,height:1000});await page.goto(app.url);await page.waitForSelector('#project-form');
   await page.click('details.extra>summary');
-  assert.match(await page.$eval('label[for="site-description"]',e=>e.textContent),/optional/);
+  assert.match(await page.$eval('label[for="site-description"]',e=>e.textContent),/^Parcel number or site description optional$/);
+  assert.match(await page.$eval('#address',e=>e.placeholder),/state or province, ZIP or postal code/);
   assert.equal(await page.$eval('#site-description',e=>e.maxLength),500);
   console.log('Open correction dialog');await page.goto(app.url+'/#project='+p.id);await page.reload();await page.locator('#resume-research').click();await page.waitForSelector('#action-dialog[open]');
   assert.equal(await page.$eval('#resume-address',e=>e.value),input.address);assert.equal(await page.$eval('#resume-site',e=>e.value),'');
