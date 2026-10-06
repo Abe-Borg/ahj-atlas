@@ -29,6 +29,8 @@ const POSTAL_CODE=/(?<![\p{L}\d])[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z][ -]?\d[A
 const ZIP=/^\d{5}(?:-\d{4})?$/,ENDS_WITH_ZIP=/(?:^|\s)\d{5}(?:-\d{4})?$/;
 // Accents are compared without their marks, so "Québec" matches Quebec.
 const fold=text=>text.normalize('NFD').replace(/\p{M}/gu,'').toLowerCase();
+// "U.S." in "St. Thomas, U.S. Virgin Islands" qualifies the region; it is not a city.
+const withoutQualifier=rest=>rest.trim().replace(/(?:^|\s)(?:u\.\s?s\.(?:\s?a\.)?|usa?|united states)$/i,'').trim();
 // The state or province ending one comma-separated part of an address, by two-letter code
 // (dotted codes such as "D.C." included) or full name, after any ZIP or postal code;
 // "Montréal (Québec)" reads as Quebec. rest is the text before it.
@@ -36,12 +38,12 @@ export function regionIn(segment,regions=STATES){
   // The ZIP code is the one ending the part, never a five-digit street number before it.
   const text=String(segment).normalize('NFC').trim().replace(/\b\d{5}(?:-\d{4})?$/,'').replace(POSTAL_CODE,'').replace(/[()]/g,' ').replace(/\s+/g,' ').replace(/[\s,]+$/,'').trim();
   const code=text.match(/(?:^|\s)(?:([A-Za-z]{2})|([A-Za-z])\.\s?([A-Za-z])\.?)$/),key=code&&(code[1]||code[2]+code[3]).toUpperCase();
-  if(key&&regions[key])return {region:regions[key],rest:text.slice(0,code.index).trim()};
+  if(key&&regions[key])return {region:regions[key],rest:withoutQualifier(text.slice(0,code.index))};
   // Longest names first, so "West Virginia" is not read as Virginia.
   const folded=fold(text),name=Object.values(regions).sort((a,b)=>b.length-a.length).find(n=>folded===n.toLowerCase()||folded.endsWith(' '+n.toLowerCase()));
   if(!name)return null;
   // Folding keeps a precomposed accented letter one character long, so the lengths agree.
-  const rest=(folded.length===text.length?text:folded).slice(0,text.length-name.length).trim();
+  const rest=withoutQualifier((folded.length===text.length?text:folded).slice(0,text.length-name.length));
   return {region:name,rest};
 }
 // The country an address names, or null. A postal code, a state followed by its ZIP code,

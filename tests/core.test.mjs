@@ -178,6 +178,8 @@ test('web search is localized to a US project city and state read from its addre
   assert.deepEqual(searchLocation({address:'1600 Pennsylvania Ave NW, Washington, D.C. 20500'}),{type:'approximate',city:'Washington',region:'District of Columbia',country:'US'});
   assert.deepEqual(searchLocation({address:'700 Sherman Ave, Coeur d’Alene, ID 83814'}),{type:'approximate',city:'Coeur d’Alene',region:'Idaho',country:'US'});
   assert.deepEqual(searchLocation({address:'1 Marine Dr, Hagåtña, GU 96910'}),{type:'approximate',city:'Hagåtña',region:'Guam',country:'US'});
+  for(const address of ['1 Main St, St. Thomas, U.S. Virgin Islands 00802','1 Main St, St. Thomas, US Virgin Islands 00802','1 Main St, St. Thomas VI 00802'])
+    assert.deepEqual(searchLocation({address}),{type:'approximate',city:'St. Thomas',region:'Virgin Islands',country:'US'},address);
   // A street line's direction or street type is not a state, unless the street line is the whole address.
   for(const address of ['4500 Main St NE, Albuquerque 87102','12 Oak Ct, Springfield'])assert.deepEqual(searchLocation({address}),{type:'approximate',country:'US'},address);
   assert.deepEqual(searchLocation({address:'21000 Atlantic Blvd Ashburn VA 20147'}),{type:'approximate',region:'Virginia',country:'US'});
