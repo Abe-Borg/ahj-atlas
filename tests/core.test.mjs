@@ -8,6 +8,7 @@ import { Engine } from '../lib/engine.mjs';
 import { costMicros, reserveMicros, LIMITS } from '../lib/config.mjs';
 import { validateReport, researchPayload } from '../lib/prompts.mjs';
 import { isPublicIP, validatePublicUrl, htmlText, isUnitedStates, ResearchTools, searchLocation, searchTool } from '../lib/research-tools.mjs';
+import { STATES } from '../public/location.js';
 import { selectPassages } from '../lib/evidence.mjs';
 import { ProviderError } from '../lib/provider.mjs';
 import { input, evidenceText, report, FakeProvider, fakeTools } from './fixtures.mjs';
@@ -169,6 +170,18 @@ test('web search is localized to a US project city and state read from its addre
   assert.deepEqual(searchLocation({address:'4000 Data Center Way, Mesa, Arizona 85215, USA'}),{type:'approximate',city:'Mesa',region:'Arizona',country:'US'});
   assert.deepEqual(searchLocation({address:'Parcel 12, New Albany OH 43054',country:'USA'}),{type:'approximate',city:'New Albany',region:'Ohio',country:'US'});
   assert.deepEqual(searchLocation({address:'1 Main St, Washington, DC 20001'}),{type:'approximate',city:'Washington',region:'District of Columbia',country:'US'});
+  // Every state, DC and Puerto Rico, by code or name, with or without a ZIP, a comma or a trailing country.
+  for(const [code,name] of Object.entries(STATES))for(const address of [`100 Main St, Springfield, ${code} 12345`,`100 Main St, Springfield ${name} 12345-6789`,`100 Main St, Springfield, ${name.toUpperCase()}`,`100 Main St, Springfield, ${code.toLowerCase()} 12345, USA`,`100 Main St, Springfield ${code} 12345 United States`])
+    assert.deepEqual(searchLocation({address}),{type:'approximate',city:'Springfield',region:name,country:'US'},address);
+  // "West Virginia" is not Virginia; "D.C." with periods is the District, not Washington State.
+  assert.deepEqual(searchLocation({address:'1 Data Way, Charleston, West Virginia 25301'}),{type:'approximate',city:'Charleston',region:'West Virginia',country:'US'});
+  assert.deepEqual(searchLocation({address:'1600 Pennsylvania Ave NW, Washington, D.C. 20500'}),{type:'approximate',city:'Washington',region:'District of Columbia',country:'US'});
+  assert.deepEqual(searchLocation({address:'700 Sherman Ave, Coeur d’Alene, ID 83814'}),{type:'approximate',city:'Coeur d’Alene',region:'Idaho',country:'US'});
+  assert.deepEqual(searchLocation({address:'1 Marine Dr, Hagåtña, GU 96910'}),{type:'approximate',city:'Hagåtña',region:'Guam',country:'US'});
+  // A street line's direction or street type is not a state, unless the street line is the whole address.
+  for(const address of ['4500 Main St NE, Albuquerque 87102','12 Oak Ct, Springfield'])assert.deepEqual(searchLocation({address}),{type:'approximate',country:'US'},address);
+  assert.deepEqual(searchLocation({address:'21000 Atlantic Blvd Ashburn VA 20147'}),{type:'approximate',region:'Virginia',country:'US'});
+  assert.deepEqual(searchLocation({address:'21000 Atlantic Blvd Ashburn VA, 20147'}),{type:'approximate',region:'Virginia',country:'US'});
   // No recognizable state: the country alone. Another country: no location at all.
   assert.deepEqual(searchLocation({address:'100 Test Avenue, Example District, Test State 00000'}),{type:'approximate',country:'US'});
   assert.equal(searchLocation({address:'1 King St W, Toronto, ON M5H 1A1',country:'Canada'}),null);assert.ok(!Object.hasOwn(searchTool(4,{address:'Toronto',country:'Canada'}),'user_location'));
