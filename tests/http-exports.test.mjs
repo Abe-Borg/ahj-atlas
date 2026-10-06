@@ -39,20 +39,12 @@ test('PDF and Excel exports are real documents with sources, gaps, literal cells
   const {getDocument}=await import('pdfjs-dist/legacy/build/pdf.mjs');const document=await getDocument({data:new Uint8Array(pdf),isEvalSupported:false,useSystemFonts:true}).promise;assert.ok(document.numPages>0);let all='';for(let i=1;i<=document.numPages;i++){const pg=await document.getPage(i);all+=(await pg.getTextContent()).items.map(v=>v.str).join(' ');}assert.ok(all.includes('Fixture Building Code'));assert.ok(all.includes('Source register'));await document.loadingTask.destroy();
   const response=await fetch(`${app.url}/api/projects/${p.id}/export?format=xlsx`);assert.equal(response.status,200);assert.ok(response.headers.get('content-disposition').includes('.xlsx'));
 });
-test('export attachment names survive Unicode, invalid Windows characters, and long project names',async t=>{
+// Filename rules are covered in desktop-downloads.test.mjs; this checks the export response uses them.
+test('export responses carry the cleaned Unicode attachment name',async t=>{
   const {app}=await setup(t);
-  for(const name of ['Café 東京 project','Reserved : <> / \\ ? * name','Long '+ 'x'.repeat(95),'CON.txt','LPT1.backup']){
-    const project=app.store.create({...input,name});
-    const response=await fetch(`${app.url}/api/projects/${project.id}/export?format=json`);
-    assert.equal(response.status,200);
-    const disposition=response.headers.get('content-disposition');
-    const encoded=disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1];
-    assert.ok(encoded);
-    const filename=decodeURIComponent(encoded);
-    assert.match(filename,/ - AHJ research\.json$/);
-    assert.ok(!/[<>:"/\\|?*\x00-\x1f]/.test(filename));
-    assert.ok(filename.length<150);
-    if(name.startsWith('Café'))assert.ok(filename.startsWith('Café 東京'));
-    if(name==='CON.txt'||name==='LPT1.backup')assert.equal(filename,'Project - AHJ research.json');
-  }
+  const project=app.store.create({...input,name:'Café 東京 : site*?'});
+  const response=await fetch(`${app.url}/api/projects/${project.id}/export?format=json`);
+  assert.equal(response.status,200);
+  const encoded=response.headers.get('content-disposition').match(/filename\*=UTF-8''([^;]+)/)?.[1];
+  assert.equal(decodeURIComponent(encoded),'Café 東京 site - AHJ research.json');
 });

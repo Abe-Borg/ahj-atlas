@@ -1,4 +1,4 @@
-// Optional local-browser regression: node tests/address-correction-ui.mjs. No paid calls.
+// Browser regression run by npm run test:ui. No paid calls.
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync,mkdirSync } from 'node:fs';
 import os from 'node:os';
@@ -27,7 +27,7 @@ try{
   assert.equal(s.project(p.id).address,input.address);
   console.log('Submit correction');await page.$eval('#resume-address',e=>{e.value='';});await page.type('#resume-address',corrected);await page.type('#resume-site','APN 0123-456-789');
   await page.locator('#action-submit').click();await page.waitForFunction(()=>!document.querySelector('#action-dialog').open);
-  await page.waitForFunction(text=>document.querySelector('.intro p')?.textContent===text,{},corrected);
+  await page.waitForFunction(text=>document.querySelector('.intro p:not(.field-help)')?.textContent===text,{},corrected);
   assert.match(await page.$eval('.intro',e=>e.textContent),/Parcel \/ site: APN 0123-456-789/);
   const saved=s.project(p.id);assert.equal(saved.address,corrected);assert.equal(saved.input.siteDescription,'APN 0123-456-789');
   assert.ok(s.stages(p.id).every(stage=>stage.status==='queued'));

@@ -138,10 +138,6 @@ test('a truncated research response keeps its finished progress notes for the re
   const stage=s.stage(p.id,'jurisdiction');assert.equal(stage.status,'queued');assert.equal(stage.recoveries,1);assert.deepEqual(stage.messages,[]);
   assert.deepEqual(stage.checkpoint.observations,[note]);assert.equal(s.events(p.id).filter(v=>v.message==='Jurisdiction: '+note).length,1);
 });
-test('truncation recovery happens only once and charges both results',async t=>{
-  const {store:s,engine:e,provider}=fixture(t),p=s.create(input);provider.response=()=>({stop_reason:'max_tokens',content:[{type:'text',text:'Partial findings.'}],usage:{input_tokens:100,output_tokens:600}});
-  await e.dispatch(p.id,'jurisdiction');await e.dispatch(p.id,'jurisdiction');assert.equal(s.stage(p.id,'jurisdiction').status,'partial');assert.equal(s.stage(p.id,'jurisdiction').recoveries,1);assert.equal(s.attempts(p.id).length,2);assert.ok(s.project(p.id).cost>0);
-});
 test('retry scheduling honors provider delay while a spending cap stops immediately',async t=>{
   const {store:s,engine:e,provider}=fixture(t),p=s.create(input);provider.message=async()=>{throw new ProviderError('Overloaded',{status:529,retryable:true,retryAfterMs:300000});};const before=Date.now();await e.dispatch(p.id,'jurisdiction');assert.equal(s.project(p.id).status,'waiting');assert.ok(s.attempts(p.id)[0].next_poll>=before+300000);assert.equal(s.project(p.id).reserved,0);
   s.updateProject(p.id,{status:'queued'});provider.message=async()=>{throw providerError({error:{type:'rate_limit_error',details:{error_code:'enforced_spend_limit_reached'}}},{status:429});};await e.dispatch(p.id,'jurisdiction');assert.equal(s.project(p.id).status,'attention');

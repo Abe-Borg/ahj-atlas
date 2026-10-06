@@ -146,6 +146,8 @@ test('output truncation grants one recovery and the next cutoff stops the stage'
   assert.equal(stopped.details.used,LIMITS.output);
   assert.equal(stopped.details.limit,LIMITS.output);
   assert.equal(s.stage(p.id,'jurisdiction').status,'partial');
+  assert.equal(s.attempts(p.id).length,2);
+  assert.ok(s.project(p.id).cost>0);
   ready(s,p.id,'review');
   s.updateStage(p.id,'review',{status:'queued',recoveries:1});
   s.updateProject(p.id,{status:'queued'});

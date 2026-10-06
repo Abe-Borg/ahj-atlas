@@ -13,8 +13,8 @@ let app,browser;
 try{
   app=await createApp({dataDir:dir,port:0,provider:new FakeProvider(),worker:false});
   const p=app.store.create({...input,name:'Documents project'});
-  const letter=path.join(dir,'Fire <Marshal> letter.txt'),word=path.join(dir,'notes.docx');
-  writeFileSync(letter,'The county enforces the 2024 International Fire Code with local amendments.');writeFileSync(word,Buffer.from('PK\u0003\u0004word'));
+  const letter='Fire <Marshal> letter.txt',word=path.join(dir,'notes.docx');
+  writeFileSync(word,Buffer.from('PK\u0003\u0004word'));
   browser=await puppeteer.launch({executablePath:browserPath(),headless:true,pipe:true});
   const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setViewport({width:1440,height:1000});await page.goto(app.url+'/#project='+p.id);
@@ -26,7 +26,9 @@ try{
   await(await page.$('#document-file')).uploadFile(word);await page.locator('#document-upload button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('#document-error')?.textContent.includes('Save other formats'));
   // A text file joins the register and appears as your document, with its name escaped.
-  await(await page.$('#document-file')).uploadFile(letter);await page.locator('#document-upload button[type=submit]').click();
+  // Windows cannot store this name on disk, so the file is built in the page.
+  await page.$eval('#document-file',(e,name)=>{const files=new DataTransfer();files.items.add(new File(['The county enforces the 2024 International Fire Code with local amendments.'],name,{type:'text/plain'}));e.files=files.files;},letter);
+  await page.locator('#document-upload button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('.source-card')?.textContent.includes('your document'),{timeout:10000});
   const card=await page.$eval('.source-card',e=>({text:e.textContent,html:e.innerHTML}));
   assert.match(card.text,/Fire <Marshal> letter\.txt/);assert.ok(!card.html.includes('<marshal>'));assert.match(card.text,/Added by you to this project/);assert.match(card.text,/Read as evidence/);
