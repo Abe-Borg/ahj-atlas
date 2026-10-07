@@ -141,8 +141,16 @@ test('diagnostic reports carry the host summary, per-project and workspace starv
 
 test('the real monitor samples this process and stops cleanly',async t=>{
   const store=storeFixture(t),m=new ResourceMonitor(store,{settings:{intervalMs:20}});
-  m.start();assert.ok(m.summary().running);assert.ok(m.start()===m);await new Promise(r=>setTimeout(r,120));
-  const sample=m.sample();m.stop();
+  t.after(()=>m.stop());
+  m.start();assert.ok(m.summary().running);assert.ok(m.start()===m);
+  // A manual sample just after the interval timer can share its timestamp on
+  // Windows. Observe a real timer sample instead, allowing for a busy runner.
+  let sample;
+  for(let tries=0;tries<100&&!sample;tries++){
+    await new Promise(r=>setTimeout(r,20));
+    sample=m.samples.find(s=>s.intervalMs>0);
+  }
+  m.stop();
   assert.ok(sample&&sample.intervalMs>0);assert.ok(sample.rssBytes>0);assert.ok(sample.heapFraction>0&&sample.heapFraction<1);assert.ok(sample.systemMemoryFree>=0&&sample.systemMemoryFree<=1);assert.ok(sample.cores>=1);assert.ok(sample.processCpu>=0);assert.ok(sample.loopDelayMs>=0);assert.ok(sample.heapLimitBytes>sample.heapUsedBytes);
   assert.equal(m.summary().running,false);assert.ok(m.summary().samples>=1);
   const peek=m.peek();assert.ok(/^\d{4}-/.test(peek.at));assert.ok(Array.isArray(peek.starved));assert.ok(peek.rssBytes>0);

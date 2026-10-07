@@ -20,7 +20,7 @@ async function runToReport(engine,store,id){for(let i=0;i<40;i++){await engine.t
 
 test('cache-aware billing applies batch discount only to tokens',()=>{
   const u={input_tokens:100000,output_tokens:20000,cache_read_input_tokens:100000,cache_creation_input_tokens:999999,cache_creation:{ephemeral_5m_input_tokens:50000,ephemeral_1h_input_tokens:10000},server_tool_use:{web_search_requests:10}};
-  assert.equal(costMicros(u,'research','realtime'),685000);assert.equal(costMicros(u,'research','batch'),392500);
+  assert.equal(costMicros(u,'research','realtime'),675000);assert.equal(costMicros(u,'research','batch'),387500);
   assert.equal(costMicros({cache_read_input_tokens:100000},'review'),20000);
 });
 test('continuing a completed report only reopens research for a substantive follow-up',async t=>{

@@ -6,7 +6,7 @@ export const FACTS = {
       "label": "Claude Sonnet 5.5",
       "input": 2,
       "output": 10,
-      "cacheRead": 0.2
+      "cacheRead": 0.1
     },
     "review": {
       "id": "claude-opus-5-5",
@@ -14,6 +14,19 @@ export const FACTS = {
       "input": 4,
       "output": 20,
       "cacheRead": 0.2
+    },
+    "economy": {
+      "id": "claude-haiku-5-5",
+      "label": "Claude Haiku 5.5",
+      "input": 0.1,
+      "output": 0.5,
+      "cacheRead": 0.01,
+      "longContext": {
+        "threshold": 100000,
+        "input": 0.5,
+        "output": 2.5,
+        "cacheRead": 0.05
+      }
     }
   },
   "stages": [
@@ -98,6 +111,19 @@ export const FACTS = {
       "questions": 40000,
       "notes": 40000
     },
+    "economy": {
+      "excerptChars": 80000,
+      "historyChars": 60000,
+      "evidenceTailChars": 20000,
+      "preview": {
+        "report": 40000,
+        "research": 40000,
+        "sources": 20000,
+        "context": 20000,
+        "questions": 20000,
+        "notes": 20000
+      }
+    },
     "cacheTTL": "1h",
     "searchesPerRequest": 4,
     "searches": 20,
@@ -112,13 +138,18 @@ export const FACTS = {
       "modelKey": "research",
       "effort": "high"
     },
+    "economy": {
+      "label": "Economy",
+      "modelKey": "economy",
+      "effort": "medium"
+    },
     "opus": {
       "label": "Premium",
       "modelKey": "review",
       "effort": "high"
     }
   },
-  "priceDate": "2026-09-28",
+  "priceDate": "2026-10-07",
   "diagnosticEvents": 5000,
   "resourceMonitor": {
     "intervalMs": 5000,

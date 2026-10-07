@@ -246,7 +246,7 @@ test('Standard and Premium replies reason at high effort on their model, check t
   const standardAttempt=s.attempts(a.id).find(x=>x.model_key==='research'),premiumAttempt=s.attempts(a.id).find(x=>x.model_key==='review');assert.equal(standardAttempt.model_key,'research');assert.equal(premiumAttempt.model_key,'review');
   assert.equal(premiumAttempt.actual,costMicros(chatResponse().usage,'review','realtime'));assert.ok(premiumAttempt.actual>standardAttempt.actual);
   const view=c.view(a.id);assert.deepEqual(view.turns.map(t=>t.mode),['standard','opus']);assert.equal(view.turns[1].modeLabel,'Premium · Claude Opus 5.5');
-  assert.deepEqual(view.modes,[{id:'standard',label:'Standard',model:'Claude Sonnet 5.5',effort:'high'},{id:'opus',label:'Premium',model:'Claude Opus 5.5',effort:'high'}]);
+  assert.deepEqual(view.modes,[{id:'standard',label:'Standard',model:'Claude Sonnet 5.5',effort:'high'},{id:'economy',label:'Economy',model:'Claude Haiku 5.5',effort:'medium'},{id:'opus',label:'Premium',model:'Claude Opus 5.5',effort:'high'}]);
   // The Opus capability check now covers high effort, which Opus research stages do not use.
   const opusModel=capabilities=>({id:MODELS.review.id,max_tokens:CHAT_LIMITS.output,capabilities});
   validateCapabilities([opusModel({effort:{high:{supported:true}}})],{modelKeys:['review'],outputLimits:{review:CHAT_LIMITS.output},efforts:{review:'high'}});
@@ -256,7 +256,7 @@ test('a reply saved with the retired Deep depth keeps its label, and a new messa
   const {app,provider,a}=await setup(t),s=app.store,c=app.services.chat;
   const earlier=s.createChatTurn(a.id,{clientId:randomUUID(),message:'Earlier deep question',mode:'deep'});s.updateChatTurn(a.id,earlier.id,{status:'complete',answer:'Earlier answer.'});
   const turn=c.view(a.id).turns.find(x=>x.id===earlier.id);assert.equal(turn.mode,'deep');assert.equal(turn.modeLabel,'Deep · Claude Sonnet 5.5');
-  assert.throws(()=>c.start(a.id,body('Deep question',{mode:'deep'})),/Choose Standard or Premium/);assert.equal(provider.calls.length,0);
+  assert.throws(()=>c.start(a.id,body('Deep question',{mode:'deep'})),/Choose Economy, Standard or Premium/);assert.equal(provider.calls.length,0);
 });
 test('lookup tools enforce the server-side project binding and preserve access beyond context previews',async t=>{
   const {app,a,b}=await setup(t),s=app.store,c=app.services.chat;
@@ -347,7 +347,7 @@ test('unknown or unusable charges stay pending without blocking chat, changing r
   });
 });
 test('a declined chat request gets its own status, discards partial output and offers the other model',async t=>{
-  for(const [mode,retry,label] of [['standard','opus',/try Premium \(Claude Opus 5\.5\)/],['opus','standard',/try Standard \(Claude Sonnet 5\.5\)/]])await t.test(mode,async t=>{
+  for(const [mode,retry,label] of [['economy','standard',/try Standard \(Claude Sonnet 5\.5\)/],['standard','opus',/try Premium \(Claude Opus 5\.5\)/],['opus','standard',/try Standard \(Claude Sonnet 5\.5\)/]])await t.test(mode,async t=>{
     // The decline arrives mid-stream, after part of an answer was shown.
     const provider=new ChatProvider((payload,n,options)=>{
       options.onEvent({type:'message_start',message:{}});options.onEvent({type:'content_block_start',index:0,content_block:{type:'text',text:''}});options.onEvent({type:'content_block_delta',index:0,delta:{type:'text_delta',text:'Partial ALPHA text'}});
@@ -358,7 +358,7 @@ test('a declined chat request gets its own status, discards partial output and o
     assert.match(turn.note,/declined to answer this message under a usage-policy safeguard \(general_harms\)/);assert.match(turn.note,label);assert.match(turn.note,/explanation: Synthetic explanation/);assert.equal(turn.retryMode,retry);
     assert.equal(provider.calls.length,1);assert.ok(turn.cost>0);
     assert.ok(s.diagnostics(a.id).some(d=>d.event==='chat.declined'&&d.details.category==='general_harms'));assert.ok(!JSON.stringify(s.diagnostics(a.id)).includes('Partial ALPHA'));
-    assert.match(provider.calls[0].payload.system,/even when you feel confident/);assert.equal(provider.calls[0].payload.thinking.display,'updates');
+    assert.match(provider.calls[0].payload.system,/even when you feel confident/);assert.equal(provider.calls[0].payload.thinking.display,mode==='economy'?'omitted':'updates');
   });
 });
 test('replies wrap up with a final answer at the lookup, request and time limits',async t=>{
