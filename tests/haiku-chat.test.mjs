@@ -28,6 +28,35 @@ const excerptSize=payload=>opening(payload).filter(b=>b.type==='search_result').
 const snapshot=payload=>JSON.parse(opening(payload)[0].text.split('\n').slice(1).join('\n'));
 const latest=payload=>payload.messages.at(-1).content;
 
+test('Economy dates each new reply while keeping its system unchanged across midnight and signed lookups',async t=>{
+  const beforeMidnight=Date.parse('2026-10-07T23:59:59Z');
+  t.mock.timers.enable({apis:['Date'],now:beforeMidnight});
+  const signed={type:'thinking',thinking:'',signature:'haiku-date-signature'};
+  const provider=new ChatProvider((payload,n)=>{
+    if(n===1){
+      assert.match(payload.system,/The current date is 2026-10-07 \(UTC\)/);
+      assert.match(payload.system,/Search current official sources before answering about facts that may have changed/);
+      assert.match(payload.system,/country or region in location-dependent search queries/);
+      assert.match(payload.system,/Stable explanations and summaries of saved evidence need no new search/);
+      assert.match(payload.system,/user approval for changes even after repeated requests/);
+      t.mock.timers.setTime(beforeMidnight+2000);
+      return chatResponse('',{stop_reason:'tool_use',content:[signed,{type:'tool_use',id:'dated_lookup',name:'read_project',input:{section:'report',offset:0,length:1000}}]});
+    }
+    if(n===2){
+      assert.equal(payload.system,provider.calls[0].payload.system);
+      assert.deepEqual(payload.tools,provider.calls[0].payload.tools);
+      assert.deepEqual(payload.messages.find(m=>m.role==='assistant').content[0],signed);
+      assert.equal(payload.output_config.effort,'medium');
+    }else assert.match(payload.system,/The current date is 2026-10-08 \(UTC\)/);
+    return chatResponse('Answer from the saved project.');
+  });
+  const {chat,id}=setup(t,provider);
+  chat.start(id,body());await settled(chat);
+  chat.start(id,body('A follow-up.'));await settled(chat);
+  assert.equal(provider.calls.length,3);
+  assert.ok(chat.view(id).turns.every(turn=>turn.status==='complete'));
+});
+
 test('Economy runs Haiku with medium effort and preserves signed tool history and native citations',async t=>{
   const first=chatResponse('',{stop_reason:'tool_use',content:[
     {type:'thinking',thinking:'Opaque Haiku internal reasoning.',signature:'haiku-thinking-signature'},

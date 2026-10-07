@@ -35,6 +35,16 @@ All chat runs in real time, including chat on a batch research project. Native w
 - Responses are read by block type, preserving native citations and hidden signed thinking for continuations.
 - A Haiku decline offers **Try again with Standard**. Retrying requires a click and creates a new paid reply; no automatic provider fallback is enabled.
 
+## Prompting-guide review
+
+Reviewed against [Prompting Claude Haiku 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-haiku-5-5) on October 7, 2026. Two additions apply to Atlas: Economy's system prompt now states the current UTC date with a targeted reminder to search current official sources for changeable facts and include the project region in relevant queries; it also reinforces the project, evidence and approval rules when a user presses for exceptions. Stable explanations and saved-evidence summaries do not require a new search.
+
+The date is captured at the start of a new reply and stays unchanged through that reply's signed continuations. A later reply refreshes it; changing the date in the system prefix can reduce cache reuse across UTC days. Previously persisted requests keep their submitted prompts.
+
+Medium adaptive thinking remains the starting point. Chat already allows 128,000 output tokens, checks for unusable empty replies, separates user input from tool results and harness notices, and handles refusals without automatic Haiku retries. Atlas chat does not request structured JSON output, accept new user messages mid-reply, or edit code, so the guide's special instructions for those workflows require no changes. Raising Haiku to high effort or adding early-stopping prompts needs evidence from representative AHJ evaluations rather than a blanket change.
+
+The date regression test crosses UTC midnight between signed tool calls and verifies that a new reply refreshes the date. Prompt assertions verify submitted instructions, not Haiku's actual search rate or resistance to persuasion. Those require live evaluations.
+
 ## Verification
 
 Fake-provider and browser tests cover Economy selection, payload settings, context profiles, switching models, source/citation tools, refusal retry, both pricing tiers, cached-input thresholds, estimates and saved-request reconciliation. They do not make paid API calls or establish live account access or AHJ research accuracy.
