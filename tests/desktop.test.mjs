@@ -166,10 +166,13 @@ test('dispatching and pending batch attempts require close confirmation between 
 });
 
 test('production paths preserve the existing local DPAPI directory and isolate development',()=>{
-  const app={isPackaged:true,getPath:name=>name==='userData'?'C:\\Users\\u\\AppData\\Local\\AHJ Atlas':'C:\\Users\\u\\AppData\\Roaming'};
-  const prod=desktopPaths({app,env:{LOCALAPPDATA:'C:\\Users\\u\\AppData\\Local',ATLAS_DESKTOP_DATA_DIR:'ignored'}});
-  assert.equal(prod.dataDir,path.join('C:\\Users\\u\\AppData\\Local\\AHJ Atlas','data'));
-  assert.equal(prod.credentialDir,path.join('C:\\Users\\u\\AppData\\Local','AHJ Atlas'));
+  // Use the host's separators so the simulated app and native path operations
+  // agree when this Windows-directory preservation test runs on Linux too.
+  const local=path.join('C:','Users','u','AppData','Local'),userData=path.join(local,'AHJ Atlas');
+  const app={isPackaged:true,getPath:name=>name==='userData'?userData:path.join('C:','Users','u','AppData','Roaming')};
+  const prod=desktopPaths({app,env:{LOCALAPPDATA:local,ATLAS_DESKTOP_DATA_DIR:'ignored'}});
+  assert.equal(prod.dataDir,path.join(userData,'data'));
+  assert.equal(prod.credentialDir,path.join(local,'AHJ Atlas'));
   assert.equal(prod.userData,prod.credentialDir);
   assert.equal(prod.migrationEnabled,true);
   const dev=desktopPaths({app:{...app,isPackaged:false},env:{ATLAS_DESKTOP_DATA_DIR:'C:\\disposable'},tempDir:'C:\\Temp'});

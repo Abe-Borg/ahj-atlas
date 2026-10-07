@@ -72,6 +72,28 @@ test('lost streams and errors after generation retain usage for a bounded caller
   }
 });
 
+test('Haiku uses the existing SDK with omitted thinking, native iteration usage, and no progress beta',async()=>{
+  const iterations=[{type:'message',model:'claude-haiku-5-5',input_tokens:500,output_tokens:40,cache_creation_input_tokens:200,cache_read_input_tokens:300,cache_creation:{ephemeral_5m_input_tokens:50,ephemeral_1h_input_tokens:150}}];
+  const haiku={...payload,model:'claude-haiku-5-5',max_tokens:128000,thinking:{type:'adaptive',display:'omitted'},output_config:{effort:'medium'}},seen=[];
+  const c=client(async(url,options)=>{
+    seen.push({path:new URL(url).pathname,beta:new Headers(options.headers).get('anthropic-beta'),body:JSON.parse(options.body)});
+    if(String(url).endsWith('/count_tokens'))return new Response(JSON.stringify({input_tokens:1000}),{headers:{'content-type':'application/json'}});
+    if(String(url).endsWith('/batches'))return new Response(JSON.stringify({id:'msgbatch_haiku',processing_status:'in_progress'}),{headers:{'content-type':'application/json'}});
+    return eventsResponse([{...initial,message:{...initial.message,model:haiku.model}},
+      {type:'content_block_start',index:0,content_block:{type:'thinking',thinking:'',signature:''}},
+      {type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'haiku-opaque'}},{type:'content_block_stop',index:0},
+      {type:'content_block_start',index:1,content_block:{type:'text',text:'Haiku fixture answer.'}},{type:'content_block_stop',index:1},
+      {...ending[0],usage:{...ending[0].usage,iterations}},
+      {type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:40,input_tokens:null,cache_creation_input_tokens:null,cache_read_input_tokens:null,cache_creation:null,server_tool_use:null,iterations:null}},ending[1]]);
+  });
+  assert.equal(await c.count(haiku),1000);
+  const {data}=await c.message(haiku);assert.equal(data.model,haiku.model);assert.equal(data.content[0].signature,'haiku-opaque');assert.equal(data.content[1].text,'Haiku fixture answer.');
+  assert.equal(data.usage.input_tokens,500);assert.equal(data.usage.cache_read_input_tokens,300);assert.equal(data.usage.cache_creation.ephemeral_1h_input_tokens,150);assert.equal(data.usage.server_tool_use.web_search_requests,2);assert.deepEqual(data.usage.iterations,iterations);
+  await c.batch([{id:'haiku_fixture',payload:haiku}]);
+  assert.ok(seen.every(x=>x.beta===null));assert.deepEqual(seen.map(x=>x.path),['/v1/messages/count_tokens','/v1/messages','/v1/messages/batches']);
+  assert.ok(seen.every(x=>!['temperature','top_p','top_k'].some(k=>Object.hasOwn(x.body,k))));
+});
+
 test('cache comparison metadata reaches generation and survives streaming without entering token counts',async()=>{
   const sent=[],diagnostics={cache_miss_reason:{type:'messages_changed',cache_missed_input_tokens:450}};
   const c=client(async(url,options)=>{
