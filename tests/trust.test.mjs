@@ -77,7 +77,8 @@ const inlineFacts=[
   ['pageSectionMax','lib/prompts.mjs',/pageOrSection:String\(e.pageOrSection\|\|''\).slice\(0,(\d+)\)/],
   ['pdfDefaultPages','lib/research-tools.mjs',/Number\(input.pageCount\)\|\|(\d+)/],
   ['pdfMaxPages','lib/research-tools.mjs',/Math.min\((\d+),Number\(input.pageCount\)/],
-  ['pdfMaxPage','lib/research-tools.mjs',/Math.min\((\d+),Number\(input.page\)/],
+  ['pdfMaxPage','lib/research-tools.mjs',/PDF_PAGE_MAX=(\d+)/],
+  ['refusalMinutes','lib/research-tools.mjs',/REFUSAL_MS=(\d+)\*60000/],
   ['previousAddresses','lib/engine.mjs',/p.address\].slice\(-(\d+)\)/],
   ['manualChargeMax','lib/services.mjs',/amount<0\|\|amount>(\d+)/],
 ];
@@ -87,7 +88,7 @@ test('quoted literal bounds match executable sources',()=>{
     assert.match(expression,/^[\d*]+$/);const value=expression.split('*').reduce((a,b)=>a*Number(b),1);
     assert.equal(F[key],value,`${key} drifted from ${file}`);
   }
-  assert.equal(F.pdfSearchPages,Number(source('lib/research-tools.mjs').match(/page\+\(query\?(\d+):pageCount-1\)/)?.[1])+1);
+  assert.equal(F.pdfSearchPages,Number(source('lib/research-tools.mjs').match(/PDF_QUERY_PAGES=(\d+)/)?.[1]));assert.match(source('lib/research-tools.mjs'),/Math\.min\(PDF_PAGE_MAX,Number\(input\.page\)\|\|1\)/);assert.match(source('lib/research-tools.mjs'),/page\+\(query\?PDF_QUERY_PAGES:pageCount\)-1/);
   assert.equal(F.serverHost,source('server.mjs').match(/server.listen\(port,'([^']+)'/)[1]);
   assert.equal(new Anthropic(()=> '').base,'https://'+F.hosts.anthropic);
   assert.equal(new URL(source('lib/research-tools.mjs').match(/const url='([^']+geocoder[^']+)'/)[1]).hostname,F.hosts.census);

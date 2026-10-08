@@ -34,6 +34,15 @@ test('completion rejects broad coverage, omitted standards and unsupported compl
   done.standards=done.standards.filter(t=>t.standard!=='NFPA 13');assert.match(completionError(done,'codes',input),/missing NFPA 13/);
   assert.equal(completionError(done,'codes',{discipline:'Mechanical'}),'');
 });
+test('completion accepts Canadian and labelled single-standard rows but names grouped rows',()=>{
+  const finding='Referenced-documents table not yet read; obtain the edition from the AHJ.';
+  const done={brief:'The provincial code references these standards; editions remain unresolved.',coverage:{jurisdiction:'supported',contacts:'unresolved',codes:'unresolved',process:'unresolved'},standards:[...fireProfile(input).map(t=>({standard:t.standard==='NFPA 13'?'NFPA 13 – Sprinkler systems':t.standard,applicability:'unresolved',finding})),{standard:'CAN/ULC-S524',applicability:'conditional',finding},{standard:'CSA C282',applicability:'unresolved',finding}]};
+  const original=structuredClone(done);
+  assert.equal(completionError(done,'codes',input),'');assert.deepEqual(done,original);
+  const brief=completionBrief(done);assert.match(brief,/^NFPA 13 \| unresolved \| Listed as "NFPA 13 – Sprinkler systems"\. /m);assert.match(brief,/^CAN\/ULC-S524 \| conditional \| /m);assert.match(brief,/^CSA C282 \| unresolved \| /m);
+  const error=completionError({...done,standards:[...done.standards,{standard:'CAN/ULC-S524 / NFPA 72',applicability:'unresolved',finding},{standard:'NFPA 13, 14 and 20',applicability:'Maybe',finding:'Short.'}]},'codes',input);
+  assert.match(error,/"CAN\/ULC-S524 \/ NFPA 72" needs one designation per row/);assert.match(error,/"NFPA 13, 14 and 20" needs one designation per row and an applicability of .* and a substantive finding/);assert.ok(!error.includes('"CSA C282"'));
+});
 test('NFPA prompts apply to code and verification stages while signed legacy continuations keep their prefix',t=>{
   const {store:s}=fixture(t),p=s.create({...input,occupancy:'Data center'});
   for(const id of ['codes','verification']){const payload=researchPayload(s,p,s.stage(p.id,id));assert.ok(payload.tools.find(t=>t.name==='finish_research').input_schema.properties.standards);assert.match(payload.messages[0].content,/NFPA 855/);}
