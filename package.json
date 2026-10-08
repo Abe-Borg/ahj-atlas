@@ -3,7 +3,7 @@
   "productName": "AHJ Atlas",
   "author": "Abraham Borg",
   "license": "SEE LICENSE IN LICENSE",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
