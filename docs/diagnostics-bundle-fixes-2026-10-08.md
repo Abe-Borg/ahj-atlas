@@ -6,7 +6,9 @@ A 1.12.0 diagnostics bundle (one fire protection project, a hyperscale data cent
 
 The Canadian country note tells fire protection research to screen CAN/ULC-S524, S536, S537, S1001 and CSA C282, and the checklist prompt asks for "one check per target, plus relevant discoveries". `fireCompletionError` rejected the whole `finish_research` call when any row was not a bare NFPA designation, with a message that did not say which row. The code stage and the Opus verification stage each spent their last two requests on rejected completions (about $1.27, 29% of the run), so both were kept only as unverified leads and the review had no verified edition evidence.
 
-A row now names one standard. A single designation from another publisher (CAN/ULC, CSA, UL, FM) is kept as an additional row. A labelled NFPA row such as "NFPA 13 – Sprinkler systems" counts as NFPA 13, and the brief keeps the label. Grouped rows (`NFPA 13, 14 and 20`, `CAN/ULC-S524 / NFPA 72`) are still rejected, and the error names each row to fix and why. Required NFPA targets are still checked individually, and the review's edition checks are unchanged.
+A row now names one standard. A single designation from another publisher (CAN/ULC, CSA, UL, FM) is kept as an additional row; it must start with a publisher and contain a document number, so prose such as "Ontario Building Code" is refused. A labelled NFPA row such as "NFPA 13 – Sprinkler systems" counts as NFPA 13, and the brief keeps the label. Grouped and mixed rows are rejected: after the leading publisher (CAN/ULC keeps its slash), a separator followed by another publisher or document number starts a second designation, so `NFPA 72 / CAN/ULC-S524`, `CAN/ULC-S536/S537` and `ASME A17.1/CSA B44` fail while `CAN/ULC-S524, 2019 edition` passes. The error names each row to fix and why. Required NFPA targets are still checked individually, and the review's edition checks are unchanged.
+
+A non-NFPA row has no `fireStandards` row in the report. When the final report has no code row, NFPA row or gap that mentions its designation (an edition suffix such as `-19` may be omitted), report validation adds `Confirm <designation>: applicability and adopted edition.`, the same follow-up an omitted NFPA target gets, unless a saved answer already covers it.
 
 ## One inexact quotation discarded a progress save
 
@@ -26,7 +28,7 @@ On three research requests that ran several native searches, `usage.cache_creati
 
 ## Validation
 
-- `tests/fire-protection.test.mjs`: Canadian and labelled rows pass, grouped and mixed rows are named, and the brief keeps labels.
+- `tests/fire-protection.test.mjs`: Canadian and labelled rows pass, grouped, mixed and prose rows are rejected and named, the brief keeps labels, and an omitted Canadian row becomes a gap unless the report or a saved answer covers it.
 - `tests/evidence-recovery.test.mjs`: partial progress saves at unit and engine level; refused URLs are not refetched while 404s retry; a 1,000-page PDF is searched in 400-page windows with a continue-from note, cached page text, and an exact read past page 500.
 - `tests/core.test.mjs`: the recorded four-search usage is priced with the unitemized remainder, plus 1-hour and oversized-breakdown cases.
 - `tests/trust.test.mjs`: the Trust dialog's PDF limits and refusal window are pinned to the source constants.
