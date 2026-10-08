@@ -19,9 +19,18 @@ async function settle(engine){for(let i=0;i<150;i++){await wait(5);if(!engine.ru
 async function runToReport(engine,store,id){for(let i=0;i<40;i++){await engine.tick();await settle(engine);const p=store.project(id);if(p.report)return p;if(['attention','budget','failed'].includes(p.status))throw new Error(p.note);}throw new Error('Report did not finish');}
 
 test('cache-aware billing applies batch discount only to tokens',()=>{
-  const u={input_tokens:100000,output_tokens:20000,cache_read_input_tokens:100000,cache_creation_input_tokens:999999,cache_creation:{ephemeral_5m_input_tokens:50000,ephemeral_1h_input_tokens:10000},server_tool_use:{web_search_requests:10}};
+  const u={input_tokens:100000,output_tokens:20000,cache_read_input_tokens:100000,cache_creation_input_tokens:60000,cache_creation:{ephemeral_5m_input_tokens:50000,ephemeral_1h_input_tokens:10000},server_tool_use:{web_search_requests:10}};
   assert.equal(costMicros(u,'research','realtime'),675000);assert.equal(costMicros(u,'research','batch'),387500);
   assert.equal(costMicros({cache_read_input_tokens:100000},'review'),20000);
+});
+test('cache writes missing from the TTL breakdown are priced as 5-minute writes',()=>{
+  // Usage recorded for a four-search research request: 41,129 tokens written, 8,853 itemized.
+  const u={input_tokens:8,output_tokens:1338,cache_read_input_tokens:34412,cache_creation_input_tokens:41129,cache_creation:{ephemeral_5m_input_tokens:8853,ephemeral_1h_input_tokens:0},server_tool_use:{web_search_requests:4}};
+  assert.equal(costMicros(u,'research','realtime'),Math.ceil(8*2+1338*10+34412*.1+41129*2*1.25+4*10000));
+  // A 1-hour write keeps its own multiplier; only the remainder uses the 5-minute rate.
+  assert.equal(costMicros({cache_creation_input_tokens:30000,cache_creation:{ephemeral_5m_input_tokens:5000,ephemeral_1h_input_tokens:10000}},'research'),20000*2*1.25+10000*2*2);
+  // A breakdown larger than the aggregate is never reduced.
+  assert.equal(costMicros({cache_creation_input_tokens:100,cache_creation:{ephemeral_5m_input_tokens:5000,ephemeral_1h_input_tokens:0}},'research'),5000*2*1.25);
 });
 test('continuing a completed report only reopens research for a substantive follow-up',async t=>{
   const s=setup(t),p=s.create(input),engine=new Engine(s,new FakeProvider(),()=>null,{autoStart:false});

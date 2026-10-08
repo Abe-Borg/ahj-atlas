@@ -4,7 +4,7 @@ import { mkdtempSync,rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import ExcelJS from 'exceljs';
-import { fireProfile,isFireProtection,nfpaIds,completionBrief } from '../lib/fire-protection.mjs';
+import { fireProfile,isFireProtection,nfpaIds,completionBrief,checklistStandard } from '../lib/fire-protection.mjs';
 import { CLOSURE_REASON, questionId } from '../lib/questions.mjs';
 import { researchPayload,reviewPayload,validateReport,completionError } from '../lib/prompts.mjs';
 import { encodeReport,decodeReport,REPORT_WIRE_SCHEMA } from '../lib/report-format.mjs';
@@ -33,6 +33,32 @@ test('completion rejects broad coverage, omitted standards and unsupported compl
   assert.match(completionError(done,'codes',input),/coverage to unresolved/);done.coverage.codes='unresolved';assert.equal(completionError(done,'codes',input),'');assert.match(completionBrief(done),/NFPA 72/);
   done.standards=done.standards.filter(t=>t.standard!=='NFPA 13');assert.match(completionError(done,'codes',input),/missing NFPA 13/);
   assert.equal(completionError(done,'codes',{discipline:'Mechanical'}),'');
+});
+test('completion accepts Canadian and labelled single-standard rows but names grouped rows',()=>{
+  const finding='Referenced-documents table not yet read; obtain the edition from the AHJ.';
+  const done={brief:'The provincial code references these standards; editions remain unresolved.',coverage:{jurisdiction:'supported',contacts:'unresolved',codes:'unresolved',process:'unresolved'},standards:[...fireProfile(input).map(t=>({standard:t.standard==='NFPA 13'?'NFPA 13 – Sprinkler systems':t.standard,applicability:'unresolved',finding})),{standard:'CAN/ULC-S524',applicability:'conditional',finding},{standard:'CSA C282',applicability:'unresolved',finding}]};
+  const original=structuredClone(done);
+  assert.equal(completionError(done,'codes',input),'');assert.deepEqual(done,original);
+  const brief=completionBrief(done);assert.match(brief,/^NFPA 13 \| unresolved \| Listed as "NFPA 13 – Sprinkler systems"\. /m);assert.match(brief,/^CAN\/ULC-S524 \| conditional \| /m);assert.match(brief,/^CSA C282 \| unresolved \| /m);
+  const error=completionError({...done,standards:[...done.standards,{standard:'CAN/ULC-S524 / NFPA 72',applicability:'unresolved',finding},{standard:'NFPA 13, 14 and 20',applicability:'Maybe',finding:'Short.'}]},'codes',input);
+  assert.match(error,/"CAN\/ULC-S524 \/ NFPA 72" needs one designation per row/);assert.match(error,/"NFPA 13, 14 and 20" needs one designation per row and an applicability of .* and a substantive finding/);assert.ok(!error.includes('"CSA C282"'));
+});
+test('a checklist row is one designation: mixed, grouped and prose rows are rejected, titles and editions are not',()=>{
+  for(const value of ['NFPA 13 / CAN/ULC-S524','NFPA 72 / CAN/ULC-S524','CAN/ULC-S524 / CSA C282','CAN/ULC-S536/S537','CAN/ULC-S536 and S537','ASME A17.1/CSA B44','FM Global Data Sheet 5-32 & 4-9','UL 300 per NFPA 96'])assert.equal(checklistStandard(value).error,'one designation per row',value);
+  for(const value of ['Ontario Building Code','OBC','','x'.repeat(161)])assert.match(checklistStandard(value).error,/designation such as/,value);
+  for(const value of ['CAN/ULC-S524-19','CAN/ULC-S524, 2019 edition','CSA C282, Emergency electrical power supply for buildings','CSA C22.1 (Canadian Electrical Code, Part I)','FM Global Data Sheet 5-32','UL 9540A','CAN/CSA-B64.10'])assert.equal(checklistStandard(value).standard,value,value);
+  assert.equal(checklistStandard('NFPA 72 (National Fire Alarm and Signaling Code)').standard,'NFPA 72');
+});
+test('a non-NFPA checklist row the final report omits becomes a confirmation gap',()=>{
+  const finding='Referenced by the provincial code; edition and scope still to confirm.';
+  const brief=completionBrief({brief:'Provincial code references these standards.',standards:[{standard:'NFPA 13',applicability:'unresolved',finding},{standard:'CAN/ULC-S524-19, Standard for Installation of Fire Alarm Systems',applicability:'conditional',finding},{standard:'CSA C282',applicability:'unresolved',finding}]});
+  const stages=[{id:'codes',output:brief},{id:'verification',output:'UNVERIFIED COMPLETION BRIEF (rejected by the coverage check; leads, not evidence)\n'+brief}];
+  const withAlarm=()=>{const r=report();r.codes.push({...r.codes[0],name:'CAN/ULC-S524 Installation of Fire Alarm Systems'});return r;};
+  const out=validateReport(withAlarm(),[source],stages,[],input);
+  assert.equal(out.gaps.filter(g=>g.question==='Confirm CSA C282: applicability and adopted edition.').length,1);assert.ok(!out.gaps.some(g=>g.question.includes('CAN/ULC-S524')));
+  const answered=[{id:questionId('Which emergency power standard applies?'),question:'Which emergency power standard applies?',status:'answered',answer:'CSA C282 does not apply; there is no emergency generator.'}];
+  assert.ok(!validateReport(withAlarm(),[source],stages,[],input,answered).gaps.some(g=>g.question.includes('CSA C282')));
+  assert.ok(!validateReport(withAlarm(),[source],stages,[],{...input,discipline:'Mechanical'}).gaps.some(g=>g.question.includes('CSA C282')));
 });
 test('NFPA prompts apply to code and verification stages while signed legacy continuations keep their prefix',t=>{
   const {store:s}=fixture(t),p=s.create({...input,occupancy:'Data center'});

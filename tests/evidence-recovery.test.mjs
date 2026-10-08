@@ -9,7 +9,7 @@ import {Store} from '../lib/store.mjs';
 import {Engine} from '../lib/engine.mjs';
 import {LIMITS,FETCH_HISTORY_CHARS} from '../lib/config.mjs';
 import {ResearchTools,sourceLinks} from '../lib/research-tools.mjs';
-import {selectPassages,allocateEvidence,mergeEvidence,validateProgress} from '../lib/evidence.mjs';
+import {selectPassages,allocateEvidence,mergeEvidence,validateProgress,progressMessage} from '../lib/evidence.mjs';
 import {researchPayload,reviewPayload,evidencePackage,validateReport} from '../lib/prompts.mjs';
 import {encodeReport} from '../lib/report-format.mjs';
 import {input,FakeProvider,fakeTools,report,nfpaReport,evidenceText,fetchBlocks,pdfFetchBlocks} from './fixtures.mjs';
@@ -93,10 +93,14 @@ test('overlapping reads merge once and search snippets do not become source evid
   s.source(p.id,{url:'https://example.com/pdf',text:a,readFull:true});s.source(p.id,{url:'https://example.com/pdf',text:b,readFull:true});s.source(p.id,{url:'https://example.com/pdf',text:'unread search snippet'});
   assert.equal(s.sources(p.id)[0].text,'First. '+shared+' Last.');
 });
-test('progress claims require exact readable evidence, but unresolved questions remain allowed',()=>{
+test('progress claims require exact readable evidence; inexact claims stay as questions without discarding the save',()=>{
   const sources=[{id:'S1',read_full:true,text:evidenceText}],progress={brief:'The synthetic district was located. Contact assignment remains unresolved.',claims:[{claim:'District authority',sourceId:'S1',quote:'The Example District is the authority for 100 Test Avenue.',pageOrSection:'fixture'}],questions:['Who is assigned to this project?']};
-  assert.equal(validateProgress(progress,sources).claims.length,1);assert.throws(()=>validateProgress({...progress,claims:[{...progress.claims[0],quote:'A fabricated passage.'}]},sources),/exact quotation/);
-  assert.throws(()=>validateProgress(progress,[{...sources[0],read_full:false}]),/exact quotation/);
+  assert.equal(validateProgress(progress,sources).claims.length,1);assert.equal(progressMessage(progress,validateProgress(progress,sources)),'Working progress saved. Continue the outstanding research or finish_research.');
+  const mixed={...progress,claims:[...progress.claims,{claim:'Fabricated permit fee',sourceId:'S1',quote:'A fabricated passage.',pageOrSection:'fixture'}]},saved=validateProgress(mixed,sources);
+  assert.deepEqual(saved.claims.map(c=>c.claim),['District authority']);assert.equal(saved.brief,progress.brief);
+  assert.deepEqual(saved.questions,['Who is assigned to this project?','Unverified lead (no exact quotation from S1): Fabricated permit fee']);assert.match(progressMessage(mixed,saved),/1 claim was kept as unresolved questions, not evidence/);
+  const unread=validateProgress(progress,[{...sources[0],read_full:false}]);assert.equal(unread.claims.length,0);assert.match(unread.questions[1],/^Unverified lead \(no exact quotation from a fully read source\): District authority/);
+  assert.throws(()=>validateProgress({...progress,brief:'Too short.'},sources),/substantive brief/);
 });
 test('input exhaustion starts a fresh bounded request with saved evidence and no replayed opaque blocks',async t=>{
   const {store:s,project:p,provider,engine:e}=fixture(t);await e.dispatch(p.id,'jurisdiction');
@@ -133,6 +137,14 @@ test('progress checkpoint survives a store reopen and does not mark research com
   provider.response=()=>({id:'progress',usage,stop_reason:'tool_use',content:[{type:'tool_use',id:'progress',name:'save_progress',input:{brief:'The district is located; current permit contact is unresolved.',claims:[{claim:'District located',sourceId:'S1',quote:'The Example District is the authority for 100 Test Avenue.',pageOrSection:'fixture'}],questions:['Confirm assigned contact.']}}]});
   await e.dispatch(p.id,'jurisdiction');assert.equal(s.stage(p.id,'jurisdiction').status,'queued');
   const reopened=new Store(s.dir);try{assert.equal(reopened.stage(p.id,'jurisdiction').checkpoint.claims[0].sourceId,'S1');assert.match(evidencePackage(reopened,reopened.project(p.id)).stages[0].findings,/Confirm assigned contact/);}finally{reopened.close();}
+});
+test('a progress save with one inexact quotation keeps the brief and exact claims',async t=>{
+  const {store:s,project:p,provider,engine:e}=fixture(t);s.source(p.id,{url:'https://example.com/adoption',text:evidenceText,readFull:true});
+  provider.response=()=>({id:'progress',usage,stop_reason:'tool_use',content:[{type:'tool_use',id:'progress',name:'save_progress',input:{brief:'The district is located; current permit contact is unresolved.',claims:[{claim:'District located',sourceId:'S1',quote:'The Example District is the authority for 100 Test Avenue.',pageOrSection:'fixture'},{claim:'Paraphrased review time',sourceId:'S1',quote:'Reviews take ten business days.',pageOrSection:'fixture'}],questions:['Confirm assigned contact.']}}]});
+  await e.dispatch(p.id,'jurisdiction');const checkpoint=s.stage(p.id,'jurisdiction').checkpoint;
+  assert.equal(checkpoint.brief,'The district is located; current permit contact is unresolved.');assert.deepEqual(checkpoint.claims.map(c=>c.claim),['District located']);assert.ok(checkpoint.questions.some(q=>/^Unverified lead .*Paraphrased review time/.test(q)));
+  const result=s.tool(s.attempts(p.id).at(-1).id,'progress').result;assert.ok(!result.is_error);assert.match(result.content,/1 claim was kept as unresolved questions/);
+  assert.ok(!s.diagnostics(p.id).some(d=>d.event==='tool.failed'&&d.details.tool==='save_progress'));
 });
 test('last research request is reserved for a completion brief rather than more source reads',async t=>{
   const {store:s,project:p,provider,engine:e}=fixture(t);s.updateStage(p.id,'jurisdiction',{rounds:LIMITS.rounds-1});provider.response=finished;
@@ -206,7 +218,7 @@ test('a completion rejected on the last allowed request is kept as unverified le
   const {store:s,provider,engine:e}=fixture(t),p=s.create(input),q=s.create(input);s.updateStage(p.id,'codes',{rounds:LIMITS.rounds-1,output:'Earlier text-only turn. '.repeat(12000)});
   provider.response=()=>{const r=finished();r.content[0].input.standards=[{standard:'NFPA 13 and NFPA 14',applicability:'unresolved',finding:'Grouped finding without a separate edition for each standard.'}];return r;};
   await e.dispatch(p.id,'codes');const stage=s.stage(p.id,'codes');
-  assert.deepEqual(provider.calls[0].tools.map(t=>t.name),['finish_research']);assert.equal(stage.status,'partial');assert.match(stage.note,/did not pass the coverage check \(Each standards check/);
+  assert.deepEqual(provider.calls[0].tools.map(t=>t.name),['finish_research']);assert.equal(stage.status,'partial');assert.match(stage.note,/did not pass the coverage check \(Standards checks to fix: "NFPA 13 and NFPA 14" needs one designation per row/);
   assert.match(stage.output,/^UNVERIFIED COMPLETION BRIEF[\s\S]*Saved source S1 establishes[\s\S]*NFPA 13 and NFPA 14 \| unresolved[\s\S]*Earlier text-only turn/);assert.ok(stage.output.length<=240000);
   assert.match(evidencePackage(s,s.project(p.id)).stages.find(x=>x.stage==='codes').findings,/UNVERIFIED COMPLETION BRIEF[\s\S]*NFPA 13 and NFPA 14 \| unresolved/);
   await e.dispatch(q.id,'codes');assert.equal(s.stage(q.id,'codes').status,'queued');assert.equal(s.stage(q.id,'codes').output,'');
@@ -222,6 +234,26 @@ test('document query locates a late PDF page and exact page reads avoid overlapp
   const found=JSON.parse((await tools.read(p.id,{url:'https://example.com/list.pdf',query:'Hartland'})).text);assert.match(found.text,/PDF page 3/);assert.match(found.text,/Hartland/);assert.ok(!found.text.includes('First page'));
   const exact=JSON.parse((await tools.read(p.id,{url:'https://example.com/list.pdf',page:2})).text);assert.match(exact.text,/Second page/);assert.ok(!exact.text.includes('Hartland'));assert.equal(fetches,1);
   const saved=JSON.parse((await tools.saved(p.id,{sourceId:found.sourceId,query:'Hartland'})).text);assert.match(saved.text,/Hartland/);assert.equal(fetches,1);
+});
+test('a long code PDF is searched in wide windows that name the next page, reuse extracted text and reach past page 500',async t=>{
+  const {store:s,project:p}=fixture(t);let fetches=0,extracted=0,opened=0;const url='https://example.com/building-code.pdf';
+  const tools=new ResearchTools(s,{fetchImpl:async()=>{fetches++;return {url,type:'application/pdf',buffer:Buffer.from('%PDF-fake')};}});
+  tools.pdf=async()=>{opened++;return {numPages:1000,getPage:async n=>({getTextContent:async()=>{extracted++;return {items:[{str:n===900?'Table 1.3.1.2. Documents referenced: NFPA 13 sprinkler installation.':`Division B page ${n}.`,hasEOL:true}]};}}),loadingTask:{destroy:async()=>{}}};};
+  const search=async page=>JSON.parse((await tools.read(p.id,{url,query:'Documents referenced',...(page?{page}:{})})).text);
+  const first=await search();assert.equal(first.text,'');assert.match(first.note,/Searched PDF pages 1–400 of 1000\. No exact match .* read_source again with page 401 and the same query/);
+  const second=await search(401);assert.match(second.note,/pages 401–800 of 1000.*page 801/);
+  const found=await search(801);assert.match(found.text,/PDF page 900/);assert.match(found.note,/pages 801–1000 of 1000\. Query matches are excerpts/);assert.ok(!found.note.includes('read_source again'));
+  assert.equal(extracted,1000);const openedBefore=opened;
+  const again=await search();assert.match(again.note,/page 401/);assert.equal(extracted,1000);assert.equal(opened,openedBefore);
+  const exact=JSON.parse((await tools.read(p.id,{url,page:900})).text);assert.match(exact.text,/Table 1\.3\.1\.2/);assert.equal(fetches,1);
+});
+test('a refused page points to render_page and is not requested again, while other HTTP errors retry',async t=>{
+  const {store:s,project:p}=fixture(t);let fetches=0;
+  const tools=new ResearchTools(s,{fetchImpl:async url=>{fetches++;throw Object.assign(new Error(`Source returned HTTP ${url.includes('missing')?404:403} for ${url}.`),{httpStatus:url.includes('missing')?404:403});}});
+  const blocked='https://example.com/blocked';
+  await assert.rejects(tools.read(p.id,{url:blocked}),/HTTP 403 for https:\/\/example\.com\/blocked\. This site refuses the built-in reader\. Open the same URL with render_page/);
+  await assert.rejects(tools.read(p.id,{url:blocked}),/render_page/);assert.equal(fetches,1);
+  await assert.rejects(tools.read(p.id,{url:'https://example.com/missing'}),error=>!error.message.includes('render_page'));await assert.rejects(tools.read(p.id,{url:'https://example.com/missing'}),/HTTP 404/);assert.equal(fetches,3);
 });
 test('NFPA titled edition is accepted without mistaking neighboring standards or ordinance dates',()=>{
   const make=quote=>{const r=report();r.fireStandards=[{...nfpaReport().fireStandards[0],name:'NFPA 1 Fire Code',edition:'2012',evidence:[{sourceId:'S1',quote,pageOrSection:'adoption'}]}];return validateReport(r,[{id:'S1',read_full:true,url:'https://example.com/adoption',text:evidenceText+' '+quote}],[],[],input).fireStandards[0];};
