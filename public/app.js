@@ -411,6 +411,9 @@ function chatRetry(t,modes,busy){
 }
 const proposalTitles={answer_question:'Answer a question',dismiss_question:'Dismiss a question',report_note:'Save a note to the report',research:'Start a research round',nfpa_research:'Start focused NFPA research',correct_location:'Correct the project location'};
 const paidProposal=x=>['research','nfpa_research','correct_location'].includes(x.action);
+// Applying a free proposal from an Ask Atlas reply also dismisses the asked question while it
+// is open, unless the reply has its own card for that question. The server applies the same rule.
+const dismissesAsked=(t,x,p)=>Boolean(t?.askedQuestionId)&&!paidProposal(x)&&!t.proposals.some(y=>y.questionId===t.askedQuestionId)&&(p.questions||[]).some(q=>q.id===t.askedQuestionId&&q.status==='open');
 // Why a proposal cannot be applied now, or '' when it can. The server checks again on Apply.
 function proposalBlocked(x,detail){
   const p=detail.project;
@@ -441,8 +444,9 @@ function chatProposal(t,x,detail){
   else body=`${x.address?`${text('Proposed address',x.address)}${applied?'':`<p class="field-help">Currently: ${esc(p.address)}</p>`}`:''}${x.country?`${text('Proposed country',x.country)}${applied?'':`<p class="field-help">Currently: ${esc(p.input?.country||'United States')}</p>`}`:''}${x.siteDescription?`${text('Proposed parcel number or site description',x.siteDescription)}${applied?'':`<p class="field-help">Currently: ${esc(p.input?.siteDescription||'none')}</p>`}`:''}`;
   const mode=proposalModes.get(key)||p.mode;
   const cost=paid&&!applied?`<p class="field-help">Applying starts a paid research round that rebuilds the report${x.action==='correct_location'?', reopening jurisdiction research for the new location':''}. ${money(p.cost)} estimated for this project so far.${p.questionResponses?.length?' Saved answers and dismissals are included automatically.':''}</p><div class="chat-proposal-mode"><label for="proposal-mode-${dom}">Processing mode</label><select id="proposal-mode-${dom}" data-proposal-mode ${busy?'disabled':''}>${[['realtime','Research now'],['batch','Research later (batch)']].map(([v,l])=>`<option value="${v}" ${mode===v?'selected':''}>${l}</option>`).join('')}</select></div>`:'';
+  const asked=!applied&&!blocked&&dismissesAsked(t,x,p)?'<p class="field-help">Applying also dismisses the question you asked Atlas about. You can reopen it on Overview.</p>':'';
   const action=applied?`<span class="status-pill green">Applied ${esc(date(x.applied))}</span>`:`<button type="button" class="button primary" id="proposal-apply-${dom}" data-proposal-apply ${busy||blocked||otherBusy?'disabled':''}>${busy?'Applying…':paid?'Apply and start research':'Apply'}</button>${blocked?`<span class="field-help">${esc(blocked)}</span>`:''}`;
-  return `<article class="chat-proposal" data-proposal="${esc(x.id)}" data-proposal-turn="${esc(t.id)}"><span class="eyebrow">PROPOSED ACTION</span><h3>${esc(proposalTitles[x.action]||'Proposed change')}</h3>${body}${x.reason?`<p class="field-help">Reason: ${esc(x.reason)}</p>`:''}${cost}<div class="chat-proposal-actions">${action}</div><div class="inline-error" role="alert">${esc(proposalErrors.get(key)||'')}</div></article>`;
+  return `<article class="chat-proposal" data-proposal="${esc(x.id)}" data-proposal-turn="${esc(t.id)}"><span class="eyebrow">PROPOSED ACTION</span><h3>${esc(proposalTitles[x.action]||'Proposed change')}</h3>${body}${x.reason?`<p class="field-help">Reason: ${esc(x.reason)}</p>`:''}${asked}${cost}<div class="chat-proposal-actions">${action}</div><div class="inline-error" role="alert">${esc(proposalErrors.get(key)||'')}</div></article>`;
 }
 function chatProposals(t,detail){return detail&&t.status!=='running'&&t.proposals?.length?`<div class="chat-proposals" aria-label="Proposed actions">${t.proposals.map(x=>chatProposal(t,x,detail)).join('')}</div>`:'';}
 function chatTurn(t,modes,busy,turns=[],detail=null){
@@ -486,17 +490,18 @@ async function askAtlas(card){
 // Apply is the user's approval. The server applies the saved proposal, identified by turn and id.
 async function applyProposal(id,card){
   const turnId=card.dataset.proposalTurn,proposalId=card.dataset.proposal,key=`${id}:${turnId}:${proposalId}`;
-  const proposal=chatTurns(state.detail).find(t=>t.id===turnId)?.proposals?.find(x=>x.id===proposalId);
+  const turn=chatTurns(state.detail).find(t=>t.id===turnId),proposal=turn?.proposals?.find(x=>x.id===proposalId);
   if(!proposal||proposalBusy.has(key))return;
-  const mode=proposalModes.get(key)||state.detail.project.mode;
+  const mode=proposalModes.get(key)||state.detail.project.mode,dismisses=dismissesAsked(turn,proposal,state.detail.project);
   proposalBusy.add(key);proposalErrors.delete(key);renderProject();
   try{
     const chat=await api(`/api/projects/${id}/chat/apply`,{method:'POST',body:{turnId,proposalId,...(paidProposal(proposal)?{mode}:{})}});
     // Turns shown through "Show earlier messages" are outside the latest view the server returns.
     const older=chatOlder.get(id);if(older)older.turns=older.turns.map(t=>t.id===turnId?{...t,proposals:t.proposals.map(x=>x.id===proposalId?{...x,status:'applied',applied:new Date().toISOString()}:x)}:t);
     if(proposal.questionId)questionDrafts.delete(id+':'+proposal.questionId);
+    if(dismisses)questionDrafts.delete(id+':'+turn.askedQuestionId);
     if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;await refreshSelected();}
-    toast({answer_question:'Answer saved.',dismiss_question:'Question dismissed. You can reopen it on Overview.',report_note:'Note saved to the report. It is on Overview.',research:'Research started.',nfpa_research:'Focused NFPA research started.',correct_location:'Location corrected. Research started.'}[proposal.action]||'Project updated.');
+    toast(({answer_question:'Answer saved.',dismiss_question:'Question dismissed. You can reopen it on Overview.',report_note:'Note saved to the report. It is on Overview.',research:'Research started.',nfpa_research:'Focused NFPA research started.',correct_location:'Location corrected. Research started.'}[proposal.action]||'Project updated.')+(dismisses?' The question you asked Atlas about is dismissed.':''));
   }catch(error){proposalErrors.set(key,error.message);}
   finally{proposalBusy.delete(key);if(state.selected===id&&state.detail?.project.id===id)renderProject();}
 }

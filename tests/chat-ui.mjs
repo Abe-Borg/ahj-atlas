@@ -147,10 +147,29 @@ try{
   await click('[data-proposal-apply]');
   await page.waitForFunction(()=>document.querySelectorAll('.chat-proposal .status-pill.green').length===4,{timeout:10000});
   assert.match(app.store.project(cp.id).questions.find(q=>q.id===questionId).answer,/NFPA 13, 2022 edition/);
+  // Applying a note from an Ask Atlas reply also dismisses the open question it asked about.
+  phase='ask atlas note dismisses the question';
+  custom=payload=>payload.messages.at(-1).content.some(x=>x.type==='tool_result')?chatResponse('A note card is ready.'):chatResponse('',{stop_reason:'tool_use',content:[{type:'tool_use',id:'toolu_ask_note',name:'propose_report_note',input:{title:'Enforced NFPA 13 edition',note:'The fire marshal enforces NFPA 13, 2022 edition [S1].',reason:'The saved source settles the question.'}}]});
+  await click('[data-tab=overview]');await page.waitForSelector('#saved-questions');await page.$eval('#saved-questions',d=>{d.open=true;});
+  await click(`[data-question="${questionId}"] [data-question-action="open"]`);
+  await page.waitForSelector(`#project-questions>[data-question="${questionId}"]`,{timeout:10000});
+  await click(`#project-questions>[data-question="${questionId}"] [data-ask-atlas]`);
+  await page.waitForSelector('[data-proposal-apply]',{timeout:10000});
+  assert.match(await page.$eval('[data-proposal-apply]',b=>b.closest('.chat-proposal').textContent),/Applying also dismisses the question you asked Atlas about\. You can reopen it on Overview\./);
+  await click('[data-proposal-apply]');
+  await page.waitForFunction(()=>document.querySelector('#toast')?.textContent.includes('The question you asked Atlas about is dismissed.'),{timeout:10000});
+  assert.equal(await page.$eval('#toast',e=>e.textContent),'Note saved to the report. It is on Overview. The question you asked Atlas about is dismissed.');
+  const dismissed=app.store.project(cp.id).questions.find(q=>q.id===questionId);
+  assert.equal(dismissed.status,'dismissed');assert.match(dismissed.reason,/^Resolved with Ask Atlas/);assert.deepEqual(app.store.notes(cp.id).map(n=>n.title),['Enforced NFPA 13 edition']);
+  await click('[data-tab=overview]');await page.waitForSelector('#project-questions');
+  assert.equal(await page.$(`#project-questions>[data-question="${questionId}"]`),null);
+  assert.equal(await page.$eval('#project-questions .finding-top .status-pill',e=>e.getAttribute('aria-label')),'0 open questions');
+  assert.match(await page.$eval(`#saved-questions [data-question="${questionId}"]`,e=>e.textContent),/Dismissed.*Reason: Resolved with Ask Atlas: you applied its proposal to save a note to the report\./s);
+  await click('[data-tab=chat]');await page.waitForSelector('.chat-heading');
   custom=null;
   await click(`[data-project="${b.id}"]`);await page.waitForFunction(()=>document.querySelector('.chat-heading h2')?.textContent.includes('BRAVO'));
   phase='desktop/mobile layout';await click('#chat-limits>summary');await page.type('#chat-message','Which missing details should I confirm with the owner?');await click('#chat-history .chat-citation summary');assert.equal(await page.$eval('#chat-history .chat-citation',e=>e.open),true);
   mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/project-chat-desktop.png',fullPage:true});await page.setViewport({width:390,height:844});await page.screenshot({path:'test-results/project-chat-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
-  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, three reply depths including Economy payload and history reload, Economy decline retry on Standard, stop, stale-response protection, estimated costs without budgets, Markdown tables and lists, live draft and step, declined reply with retry on the other model, proposal cards applied only on Apply, a report note saved, shown on Overview and removed, Ask Atlas on a question card using the selected reply depth and Apply, Chat with Atlas label, and desktop/mobile layout. No paid API calls.');
+  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, three reply depths including Economy payload and history reload, Economy decline retry on Standard, stop, stale-response protection, estimated costs without budgets, Markdown tables and lists, live draft and step, declined reply with retry on the other model, proposal cards applied only on Apply, a report note saved, shown on Overview and removed, Ask Atlas on a question card using the selected reply depth and Apply, a note applied from Ask Atlas dismissing the asked question, Chat with Atlas label, and desktop/mobile layout. No paid API calls.');
 }catch(e){console.error('Failed during: '+phase);if(page){console.error(await page.evaluate(()=>document.body.innerText).catch(()=>''));await page.screenshot({path:'test-results/project-chat-failure.png',fullPage:true}).catch(()=>{});}throw e;}
 finally{for(const release of releases)release();await browser?.close();await app?.close();assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-chat-ui-')));rmSync(dir,{recursive:true,force:true});}

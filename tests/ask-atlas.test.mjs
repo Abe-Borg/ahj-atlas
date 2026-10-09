@@ -64,6 +64,67 @@ test('a proposed answer still waits for Apply',async t=>{
   assert.equal(record.status,'answered');assert.equal(record.answer,'Wet-pipe sprinklers, from the saved project record.');
 });
 
+const tool=(name,input)=>({type:'tool_use',id:'toolu_'+randomUUID().replaceAll('-',''),name,input});
+const note=(title='Proposed systems')=>tool('propose_report_note',{title,note:`${title}: the district adopts NFPA 13, 2022 edition [S1].`,reason:'The saved source settles the question.'});
+const answerFor=(questionId,answer)=>tool('propose_question_update',{questionId,status:'answered',answer,reason:'The saved source settles the question.'});
+// Each reply proposes the given cards in its first request, then answers.
+const proposing=(provider,cards)=>{provider.fn=payload=>payload.messages.at(-1).content.some(x=>x.type==='tool_result')?chatResponse('Apply the card below.'):chatResponse('',{stop_reason:'tool_use',content:cards()});};
+async function asked(c,id,body){c.start(id,body);await settled(c);return c.view(id).turns.at(-1);}
+const applyCard=(c,id,turn,action)=>c.apply(id,{turnId:turn.id,proposalId:turn.proposals.find(x=>x.action===action).id});
+
+test('applying a note from an Ask Atlas reply dismisses the question it asked about',async t=>{
+  const provider=new ChatProvider();
+  const {app,id,question}=await setup(t,provider),c=app.services.chat,s=app.store;
+  proposing(provider,()=>[note()]);
+  let turn=await asked(c,id,ask(question.id));
+  assert.equal(turn.askedQuestionId,question.id);assert.deepEqual(turn.proposals.map(x=>x.action),['report_note']);
+  assert.equal(s.project(id).questions[0].status,'open');
+  await applyCard(c,id,turn,'report_note');
+  const saved=s.project(id).questions[0];
+  assert.equal(saved.status,'dismissed');assert.equal(saved.answer,'');
+  assert.equal(saved.reason,'Resolved with Ask Atlas: you applied its proposal to save a note to the report.');
+  assert.deepEqual(s.notes(id).map(n=>n.title),['Proposed systems']);
+  assert.match(s.events(id)[0].message,/^Question dismissed: .*Resolved with Ask Atlas/);
+  // A note from a typed message leaves the questions alone.
+  s.saveQuestion(id,{questionId:question.id,status:'open'});
+  proposing(provider,()=>[note('Typed note')]);
+  turn=await asked(c,id,{clientId:randomUUID(),message:'Save the systems finding to the report.',mode:'standard'});
+  assert.equal(Object.hasOwn(turn,'askedQuestionId'),false);
+  await applyCard(c,id,turn,'report_note');
+  assert.equal(s.project(id).questions[0].status,'open');assert.equal(s.notes(id).length,2);
+});
+
+test('Ask Atlas leaves the question to its own card, a resolved status, or the rebuilt report',async t=>{
+  const provider=new ChatProvider();
+  const {app,id,question}=await setup(t,provider),c=app.services.chat,s=app.store;
+  const gaps=[...s.project(id).report.gaps,{question:'What is the available water supply?',why:'It sets the sprinkler design.',contact:'Water utility',nextStep:'Request a flow test.'}];
+  s.updateProject(id,{report:{...s.project(id).report,gaps}});
+  const other=s.project(id).questions.find(q=>q.id!==question.id),status=qid=>s.project(id).questions.find(q=>q.id===qid);
+  // The reply has its own card for the asked question, so the note does not dismiss it.
+  proposing(provider,()=>[note(),answerFor(question.id,'Wet-pipe sprinklers [S1].')]);
+  let turn=await asked(c,id,ask(question.id));
+  await applyCard(c,id,turn,'report_note');assert.equal(status(question.id).status,'open');
+  await applyCard(c,id,turn,'answer_question');assert.equal(status(question.id).status,'answered');
+  // An answer to another question resolves that one and dismisses the asked one.
+  s.saveQuestion(id,{questionId:question.id,status:'open'});
+  proposing(provider,()=>[answerFor(other.id,'A 2025 flow test is on file [S1].')]);
+  turn=await asked(c,id,ask(question.id));
+  await applyCard(c,id,turn,'answer_question');
+  assert.equal(status(other.id).status,'answered');
+  assert.equal(status(question.id).status,'dismissed');assert.equal(status(question.id).reason,'Resolved with Ask Atlas: you applied its proposal to answer a question.');
+  // An answered question stays answered.
+  proposing(provider,()=>[note('Water supply')]);
+  turn=await asked(c,id,ask(other.id));
+  await applyCard(c,id,turn,'report_note');
+  assert.equal(status(other.id).status,'answered');assert.equal(status(other.id).answer,'A 2025 flow test is on file [S1].');
+  // A research round leaves the question open; the rebuilt report closes it if it is gone.
+  s.saveQuestion(id,{questionId:question.id,status:'open'});
+  proposing(provider,()=>[tool('propose_research_round',{focus:'clarification',clarification:'The owner plans wet-pipe sprinklers.',reason:'The report needs the system type.'})]);
+  turn=await asked(c,id,ask(question.id));
+  await applyCard(c,id,turn,'research');
+  assert.equal(s.project(id).status,'queued');assert.equal(status(question.id).status,'open');
+});
+
 test('Ask Atlas keeps report question fields out of the privileged user message and the page-read allowlist',async t=>{
   const planted='https://evil.example/planted-by-the-report';
   const provider=new ChatProvider();
