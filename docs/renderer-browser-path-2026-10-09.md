@@ -1,0 +1,31 @@
+# The page renderer loads the requested host as a browser
+
+A 1.12.1 diagnostics bundle (one fire protection project, a hyperscale data center in Wichita Falls, Texas) finished with all 25 NFPA checklist rows unresolved. Every `read_source` call to wichitafallstx.gov returned HTTP 403, each refusal told the model to open the URL with `render_page`, and every `render_page` call failed with `net::ERR_FAILED`. The same pattern applies to codes.iccsafe.org. The 403 handler's comment said such sites "often open in the browser", but nothing in the renderer behaved like a browser.
+
+## Why the renderer failed identically
+
+`ResearchTools.render` intercepted every request the page made, including the main document, and served each one by calling `fetchPublic`. That function sends `User-Agent: AHJAtlas/1.0 (public jurisdiction research)` and rejects any non-2xx status, so a site whose bot protection filters on the User-Agent refused the renderer exactly as it refused the reader. The interceptor then aborted the request, which Chrome reports as `net::ERR_FAILED`, so the model never saw the real status either. `inspect_pdf` called `fetchPublic` directly and failed the same way.
+
+## What changed
+
+**The requested host loads through Chrome's own network stack.** The renderer now launches the browser with `--host-resolver-rules=MAP <host> <address>, MAP * ~NOTFOUND`, where the address is the one `validatePublicUrl` resolved and checked. The main document and any resource on that host (same hostname and port) are passed through with `request.continue()`, so the site sees Chrome's own request headers. The pinned rule keeps the DNS-rebinding protection the fetch path provides: Chrome connects only to the checked address, and the second rule makes every other name unresolvable inside that browser. Resources on other hosts, including a redirect to another host, are still served through the interceptor by the DNS-pinned fetch path, and the sub-frame, non-GET, media, font and WebSocket rules are unchanged.
+
+**The browser does not announce automation.** Headless Chrome names itself `HeadlessChrome` in its User-Agent; the renderer overrides it with the same string minus that mark, and `--disable-blink-features=AutomationControlled` clears `navigator.webdriver`. Nothing else about the browser's identity is changed, and the profile is still created fresh for each read and deleted afterwards, so a cookie the site sets lasts one read.
+
+**The model sees the page's real status.** When a fetch in the interceptor fails with an HTTP status, the interceptor answers the request with that status instead of aborting. After navigation, a main response outside 2xx is reported as `Source returned HTTP <status> for <url>.` with `httpStatus` set, the same shape the reader uses.
+
+**A host that refuses the browser is remembered.** When the main response is 401, 403, 406 or 429, the renderer records the host for 15 minutes. `read_source`, `render_page` and `inspect_pdf` then fail at once for any URL on that host, without a request or a browser launch, with a message that names the status and the host and points only at `web_fetch` or recording an access gap. The reader is strictly less browser-like than the renderer, so nothing local can open such a host.
+
+**`inspect_pdf` uses the reader's cache and refusal memory.** It now downloads through `ResearchTools.document`, so a PDF just read with `read_source` is not downloaded again, and a URL the reader was refused costs it no request.
+
+**Guidance follows the new path.** The reader's refusal error says to open a web page with `render_page`, which loads it as a browser, or to retrieve a page or PDF with `web_fetch`, instead of retrying `read_source` or `inspect_pdf`. The research and chat prompts describe `render_page` as the reader for pages that need JavaScript or refuse `read_source`, and `web_fetch` as the next step when the browser is refused too, a PDF is refused, or a page times out; when nothing can open a source, the prompt says to record the access gap. The `render_page` tool description says the same and that it is not for PDFs.
+
+## Trust ledger
+
+Row N4 of `docs/TRUST_CLAIMS.md` now records that the renderer sends Chrome's own headers for the requested host and pins that host's DNS with the launch flag, and row C10 names the new test. The dossier's `render_page` row says the same.
+
+## Validation
+
+`tests/render-refusal.test.mjs` runs the real renderer against a local HTTP server. The server answers the reader's User-Agent with HTTP 403 and a browser with a page whose script fills in text, an image on another host and a link. The test replaces the URL check so the test host resolves to the local server and replaces the fetch path with a fake that refuses like the reader. It asserts that `read_source` is refused with the new guidance; that `render_page` returns the title, the script-rendered text and the link; that the server saw a `Chrome/` User-Agent without `HeadlessChrome` or `AHJAtlas` for the document and its script; that the other host's image went through the fetch path; that a host which refuses every visitor makes `render_page` fail with the real status and the web-fetch-only message, after which `read_source`, `render_page` and `inspect_pdf` fail for that host without a request; that another host is unaffected; and that a redirect to another host is served through the fetch path, with no request for that host reaching the server directly. The existing refusal test in `tests/evidence-recovery.test.mjs` checks the reader's new wording and that `inspect_pdf` shares the refusal memory. The trust test's source-pinned constants follow the renderer's new launch arguments and fetch call.
+
+On Linux with Node 22.22.0 and a bundled Chromium (`ATLAS_BROWSER`), `npm test`, `npm run check` and `git diff --check` pass, apart from the known Node 22 cancellation of the short-deadline stream test in `tests/resource-exhaustion.test.mjs`. The browser test launched Chromium with `--no-sandbox` through the new `browserArgs` test option, as the other browser suites do; production launch flags gain only the resolver rule and the automation-feature flag. No dependencies changed and no paid requests were made.

@@ -247,12 +247,14 @@ test('a long code PDF is searched in wide windows that name the next page, reuse
   const again=await search();assert.match(again.note,/page 401/);assert.equal(extracted,1000);assert.equal(opened,openedBefore);
   const exact=JSON.parse((await tools.read(p.id,{url,page:900})).text);assert.match(exact.text,/Table 1\.3\.1\.2/);assert.equal(fetches,1);
 });
-test('a refused page points to render_page and is not requested again, while other HTTP errors retry',async t=>{
+test('a refused page points to render_page and web_fetch and is not requested again, while other HTTP errors retry',async t=>{
   const {store:s,project:p}=fixture(t);let fetches=0;
   const tools=new ResearchTools(s,{fetchImpl:async url=>{fetches++;throw Object.assign(new Error(`Source returned HTTP ${url.includes('missing')?404:403} for ${url}.`),{httpStatus:url.includes('missing')?404:403});}});
   const blocked='https://example.com/blocked';
-  await assert.rejects(tools.read(p.id,{url:blocked}),/HTTP 403 for https:\/\/example\.com\/blocked\. This site refuses the built-in reader\. Open the same URL with render_page/);
+  await assert.rejects(tools.read(p.id,{url:blocked}),/Source returned HTTP 403 for https:\/\/example\.com\/blocked\. This site refuses the built-in reader\. Open a web page with render_page, which loads it as a browser, or retrieve a page or PDF with web_fetch, instead of retrying read_source or inspect_pdf\.$/);
   await assert.rejects(tools.read(p.id,{url:blocked}),/render_page/);assert.equal(fetches,1);
+  // inspect_pdf shares the reader and its memory, so the refused URL costs it no request either.
+  await assert.rejects(tools.inspectPdf(p.id,{url:blocked,page:1}),/refuses the built-in reader/);assert.equal(fetches,1);
   await assert.rejects(tools.read(p.id,{url:'https://example.com/missing'}),error=>!error.message.includes('render_page'));await assert.rejects(tools.read(p.id,{url:'https://example.com/missing'}),/HTTP 404/);assert.equal(fetches,3);
 });
 test('NFPA titled edition is accepted without mistaking neighboring standards or ordinance dates',()=>{
