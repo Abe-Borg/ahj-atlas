@@ -18,14 +18,16 @@ try {
   phase="launch browser";console.log(phase);
   browser=await puppeteer.launch({executablePath:browserPath(),headless:true});phase="open page";page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.setViewport({width:1440,height:1080});
   phase="new project labels";console.log(phase);await page.goto(app.url);await page.waitForSelector('#project-form');await page.click('details.extra>summary');
-  for(const id of ['scope','occupancy','permit-date','site-description','notes'])assert.match(await page.$eval(`label[for="${id}"]`,e=>e.textContent),/optional/);
+  for(const id of ['scope','permit-date','site-description','notes'])assert.match(await page.$eval(`label[for="${id}"]`,e=>e.textContent),/optional/);
+  // Building use always has a value, so it is not labeled optional.
+  assert.doesNotMatch(await page.$eval('label[for="occupancy"]',e=>e.textContent),/optional/);
   // The country is required and sits beside the address, outside the optional context.
   assert.deepEqual(await page.$eval('#country',e=>[e.required,Boolean(e.closest('details')),[...e.options].map(o=>o.value),e.value,document.querySelector('label[for="country"]').textContent]),[true,false,['United States','Canada'],'United States','Country']);
   assert.match(await page.$eval('details.extra>summary',e=>e.textContent),/optional/);
   phase="building use dropdown";console.log(phase);
-  assert.equal(await page.$eval('#occupancy',e=>e.value),'');assert.equal(await page.$eval('#occupancy option:checked',e=>e.textContent),'Not yet specified');assert.equal(await page.$eval('#custom-occupancy-field',e=>e.hidden),true);assert.equal(await page.$eval('#custom-occupancy',e=>e.disabled),true);
+  assert.equal(await page.$eval('#occupancy',e=>e.value),'Hyperscale data center');assert.deepEqual(await page.$$eval('#occupancy option',o=>o.map(x=>x.value)),['Hyperscale data center','Other']);assert.equal(await page.$eval('#custom-occupancy-field',e=>e.hidden),true);assert.equal(await page.$eval('#custom-occupancy',e=>e.disabled),true);
   await page.select('#occupancy','Other');assert.equal(await page.$eval('#custom-occupancy-field',e=>e.hidden),false);assert.deepEqual(await page.$eval('#custom-occupancy',e=>[e.disabled,e.required,document.activeElement===e]),[false,true,true]);
-  await page.select('#occupancy','');assert.equal(await page.$eval('#custom-occupancy-field',e=>e.hidden),true);assert.equal(await page.$eval('#custom-occupancy',e=>e.disabled),true);
+  await page.select('#occupancy','Hyperscale data center');assert.equal(await page.$eval('#custom-occupancy-field',e=>e.hidden),true);assert.equal(await page.$eval('#custom-occupancy',e=>e.disabled),true);
   phase="question forms";console.log(phase);await page.click(`[data-project="${p.id}"]`);await page.waitForSelector('[data-question-form]');
   assert.deepEqual(await page.$$eval('[data-ask-atlas]',els=>els.map(e=>e.textContent)),['Ask Atlas','Ask Atlas']);
   assert.match(await page.$eval('.tabs',e=>e.textContent),/Chat with Atlas/);

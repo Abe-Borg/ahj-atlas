@@ -11,7 +11,7 @@ import {FakeProvider,input} from './fixtures.mjs';
 const ADDRESS='500 Draft Street, Example City, Test State 00000';
 const NAME='Draft electrical room';
 
-test('a new project shows Not yet specified, keeps that use visible, and restores the draft',async t=>{
+test('a new project defaults to Hyperscale data center, offers only Other besides, keeps the use visible, and restores the draft',async t=>{
   const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-new-project-form-'));
   const app=await createApp({dataDir:dir,port:0,provider:new FakeProvider(),worker:false});
   app.services.engine.tick=async()=>{};
@@ -39,23 +39,30 @@ test('a new project shows Not yet specified, keeps that use visible, and restore
     };
   });
 
-  assert.equal(await page.$eval('#occupancy',e=>e.value),'');
-  assert.equal(await page.$eval('#occupancy option:checked',e=>e.textContent),'Not yet specified');
+  assert.equal(await page.$eval('#occupancy',e=>e.value),'Hyperscale data center');
   assert.equal(await page.$eval('details.extra',e=>e.open),false);
-  assert.ok((await page.$$eval('#occupancy option',o=>o.map(x=>x.textContent))).includes('Hyperscale data center'));
+  assert.deepEqual(await page.$$eval('#occupancy option',o=>o.map(x=>[x.value,x.textContent])),[['Hyperscale data center','Hyperscale data center'],['Other','Other — enter building use']]);
+  assert.equal(await page.$eval('#occupancy',e=>e.required),false);
   let visible=await selectedUse();
-  assert.equal(visible.text,'Not yet specified');
+  assert.equal(visible.text,'Hyperscale data center');
   assert.equal(visible.outside,true);
   assert.equal(visible.shown,true);
   assert.equal(visible.afterName,true);
   assert.equal(visible.beforeOptional,true);
   assert.equal(await page.$eval('#occupancy',e=>Boolean(e.closest('details.extra'))),true);
 
+  // The default use alone is not a draft, so New research does not ask to clear it.
+  await page.click('#new-project');
+  await page.waitForSelector('#project-form');
+  assert.deepEqual(dialogs,[]);
+
   await page.select('#discipline','Electrical');
-  assert.equal(await page.$eval('#occupancy',e=>e.value),'');
-  assert.equal((await selectedUse()).text,'Not yet specified');
+  assert.equal(await page.$eval('#occupancy',e=>e.value),'Hyperscale data center');
+  assert.equal((await selectedUse()).text,'Hyperscale data center');
 
   await page.click('details.extra>summary');
+  await page.select('#occupancy','Other');
+  assert.equal((await selectedUse()).text,'Other — enter building use');
   await page.select('#occupancy','Hyperscale data center');
   assert.equal((await selectedUse()).text,'Hyperscale data center');
   await page.click('details.extra>summary');
@@ -68,14 +75,13 @@ test('a new project shows Not yet specified, keeps that use visible, and restore
   await page.type('#name',NAME);
   await page.click('details.extra>summary');
   await page.select('#scope','New construction');
-  await page.select('#occupancy','Office');
   await page.$eval('#permit-date',el=>{el.value='2026-11-02';el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});
   await page.select('#country','Canada');
   await page.type('#site-description','APN 42');
   await page.type('#notes','Two generators');
   await page.click('input[name=mode][value=batch]');
   await page.click('details.extra>summary');
-  assert.equal((await selectedUse()).text,'Office');
+  assert.equal((await selectedUse()).text,'Hyperscale data center');
   assert.equal(await page.$eval('details.extra',e=>e.open),false);
   assert.deepEqual(dialogs,[]);
 
@@ -89,7 +95,7 @@ test('a new project shows Not yet specified, keeps that use visible, and restore
   assert.equal(await page.$eval('#address',e=>e.value),ADDRESS);
   assert.equal(await page.$eval('#name',e=>e.value),NAME);
   assert.equal(await page.$eval('#discipline',e=>e.value),'Electrical');
-  assert.equal(await page.$eval('#occupancy',e=>e.value),'Office');
+  assert.equal(await page.$eval('#occupancy',e=>e.value),'Hyperscale data center');
   assert.equal(await page.$eval('#scope',e=>e.value),'New construction');
   assert.equal(await page.$eval('#permit-date',e=>e.value),'2026-11-02');
   assert.equal(await page.$eval('#country',e=>e.value),'Canada');
@@ -98,7 +104,7 @@ test('a new project shows Not yet specified, keeps that use visible, and restore
   assert.equal(await page.$eval('input[name=mode]:checked',e=>e.value),'batch');
   assert.equal(await page.$eval('details.extra',e=>e.open),false);
   visible=await selectedUse();
-  assert.equal(visible.text,'Office');
+  assert.equal(visible.text,'Hyperscale data center');
   assert.equal(visible.shown,true);
 
   await page.click('details.extra>summary');
@@ -128,29 +134,29 @@ test('a new project shows Not yet specified, keeps that use visible, and restore
 
   decision='accept';
   await page.click('#new-project');
-  await page.waitForFunction(()=>document.querySelector('#address')?.value===''&&document.querySelector('#occupancy')?.value==='');
+  await page.waitForFunction(()=>document.querySelector('#address')?.value===''&&document.querySelector('#occupancy')?.value==='Hyperscale data center');
   assert.match(dialogs.at(-1),/Discard this new project draft/);
-  assert.equal((await selectedUse()).text,'Not yet specified');
+  assert.equal((await selectedUse()).text,'Hyperscale data center');
   assert.equal(await page.$eval('#name',e=>e.value),'');
   assert.equal(await page.$eval('details.extra',e=>e.open),false);
 
   const before=dialogs.length;
-  await page.type('#address','100 Blank Use Road, Example City, Test State 00000');
-  await page.type('#name','Blank use electrical');
+  await page.type('#address','100 Default Use Road, Example City, Test State 00000');
+  await page.type('#name','Default use electrical');
   await page.select('#discipline','Electrical');
-  assert.equal(await page.$eval('#occupancy',e=>e.value),'');
+  assert.equal(await page.$eval('#occupancy',e=>e.value),'Hyperscale data center');
   await page.click('#start-research');
-  await page.waitForFunction(()=>[...document.querySelectorAll('[data-project] strong')].some(el=>el.textContent==='Blank use electrical'),{timeout:15000});
-  const created=app.store.list().find(p=>p.name==='Blank use electrical');
+  await page.waitForFunction(()=>[...document.querySelectorAll('[data-project] strong')].some(el=>el.textContent==='Default use electrical'),{timeout:15000});
+  const created=app.store.list().find(p=>p.name==='Default use electrical');
   assert.equal(created.discipline,'Electrical');
-  assert.equal(created.input.occupancy,'');
+  assert.equal(created.input.occupancy,'Hyperscale data center');
   assert.equal(dialogs.length,before);
   await page.click('#new-project');
   await page.waitForSelector('#project-form');
   assert.equal(dialogs.length,before);
   assert.equal(await page.$eval('#address',e=>e.value),'');
   assert.equal(await page.$eval('#name',e=>e.value),'');
-  assert.equal((await selectedUse()).text,'Not yet specified');
+  assert.equal((await selectedUse()).text,'Hyperscale data center');
 
   await page.type('#address','999 Reload Lane, Example City, Test State 00000');
   await page.reload();
