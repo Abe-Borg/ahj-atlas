@@ -16,7 +16,8 @@ test('the renderer opens a site that refuses the reader, and a site that refuses
   const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-render-')),store=new Store(dir),project=store.create({...input,discipline:'Architecture'});
   const hits=[],server=http.createServer((req,res)=>{
     hits.push({host:req.headers.host,url:req.url,agent:req.headers['user-agent']||''});
-    if(req.headers.host.startsWith('wall.test')||/^AHJAtlas\//.test(req.headers['user-agent']||'')){res.writeHead(403,{'content-type':'text/html'});res.end('<title>Access Denied</title><p>Request blocked.</p>');return;}
+    if(req.headers.host.startsWith('wall.test')||(req.headers.host.startsWith('gate.test')&&req.url==='/private')||/^AHJAtlas\//.test(req.headers['user-agent']||'')){res.writeHead(403,{'content-type':'text/html'});res.end('<title>Access Denied</title><p>Request blocked.</p>');return;}
+    if(req.url==='/big'){res.writeHead(200,{'content-type':'text/html'});res.end('<title>Big</title><p>'+'x'.repeat(6*1024*1024)+'</p>');return;}
     if(req.url==='/go'){res.writeHead(302,{location:`http://other.test:${port}/landing`});res.end();return;}
     if(req.url==='/go-blocked'){res.writeHead(302,{location:`http://blocked.test:${port}/landing`});res.end();return;}
     if(req.url==='/app.js'){res.writeHead(200,{'content-type':'text/javascript'});res.end("document.getElementById('live').textContent='Rendered by script.';");return;}
@@ -45,8 +46,21 @@ test('the renderer opens a site that refuses the reader, and a site that refuses
   assert.ok(document,JSON.stringify(hits));assert.ok(!/HeadlessChrome|AHJAtlas/.test(document.agent),document.agent);
   assert.ok(hits.some(h=>h.url==='/app.js'&&h.agent===document.agent));
   assert.deepEqual(fetched,[open,'http://cdn.test/logo.png']);
-  // A host that refuses the browser is remembered: the reader, the renderer and inspect_pdf fail
-  // at once, with the real status and without a request, and point only at web_fetch or an access gap.
+  // A page refused on its own, while the site's home page opens, is remembered by URL: the host stays open.
+  const gate=`http://gate.test:${port}/private`;
+  await assert.rejects(tools.render(project.id,{url:gate}),error=>{
+    assert.equal(error.message,`Source returned HTTP 403 for ${gate}. This page refuses the research browser as well as the built-in reader, while the site's home page opens. Retrieve this URL with web_fetch, or record an access gap; other pages on gate.test may still open with read_source or render_page.`);
+    return true;});
+  assert.ok(hits.some(h=>h.host===`gate.test:${port}`&&h.url==='/'),'the home page was probed');
+  assert.equal(tools.hostRefusal(gate),null);
+  const gateHits=hits.length,gateFetches=fetched.length;
+  await assert.rejects(tools.render(project.id,{url:gate}),/refuses the research browser as well as the built-in reader, while the site's home page opens/);
+  await assert.rejects(tools.read(project.id,{url:gate}),/while the site's home page opens/);
+  assert.equal(hits.length,gateHits);assert.equal(fetched.length,gateFetches);
+  assert.equal(JSON.parse((await tools.render(project.id,{url:`http://gate.test:${port}/`})).text).title,'City Fire Marshal');
+  // A host that refuses the browser on the page and on its home page is remembered: the reader, the
+  // renderer and inspect_pdf fail at once, with the real status and without a request, and point
+  // only at web_fetch or an access gap.
   const wall=`http://wall.test:${port}/codes`;
   await assert.rejects(tools.render(project.id,{url:wall}),error=>{
     assert.equal(error.httpStatus,403);
@@ -59,6 +73,8 @@ test('the renderer opens a site that refuses the reader, and a site that refuses
     await assert.rejects(tools.inspectPdf(project.id,{url,page:1}),/refuses the research browser/);
   }
   assert.equal(hits.length,requests);assert.equal(fetched.length,fetches);
+  // A response over the per-resource cap ends the read, whichever path served it.
+  await assert.rejects(tools.render(project.id,{url:`http://open.test:${port}/big`}),/exceeds the 5 MB reading limit/);
   // Another host is not affected.
   assert.equal(JSON.parse((await tools.render(project.id,{url:`http://open.test:${port}/`})).text).title,'City Fire Marshal');
   // A redirect to another host leaves the pinned host: Chrome cannot resolve it, so the fetch path serves it.

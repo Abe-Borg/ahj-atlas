@@ -57,7 +57,7 @@ const inlineFacts=[
   ['exportCharacters','lib/exports.mjs',/excerpt:text.slice\(0,(\d+)\)/],
   ['sourceViewCharacters','server.mjs',/text:s.text.slice\(0,(\d+)\)/],
   ['renderRequests','lib/research-tools.mjs',/\+\+requests>(\d+)/],
-  ['renderBytes','lib/research-tools.mjs',/this.fetch\(request.url\(\),\{maxBytes:([\d*]+)\}/],
+  ['renderBytes','lib/research-tools.mjs',/RENDER_BYTES=([\d*]+)/],
   ['renderStartMs','lib/research-tools.mjs',/\.\.\.this.browserArgs\],timeout:(\d+)/],
   ['renderNavigationMs','lib/research-tools.mjs',/waitUntil:'domcontentloaded',timeout:(\d+)/],
   ['renderIdleMs','lib/research-tools.mjs',/idleTime:(\d+)/],
