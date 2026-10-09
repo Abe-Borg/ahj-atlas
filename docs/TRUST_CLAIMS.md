@@ -24,7 +24,7 @@ The runtime inventory has **30 user action groups and 7 automatic behavior group
 | U14 | Chat with Atlas; Reply depth; compose; Send message; Ask Atlas; Show earlier messages | ProjectChat.start,view,run,chatPayload; public/app.js:askAtlas | tests/chat.test.mjs; tests/ask-atlas.test.mjs |
 | U15 | Retry a declined reply at suggested depth | public/app.js:chatRetries; ProjectChat.start | tests/chat.test.mjs |
 | U16 | Stop reply | ProjectChat.stop,run | tests/chat.test.mjs |
-| U17 | Apply; Apply and start research; processing mode on proposal | applyAction; Engine.resume; Store.saveQuestion; Store.addNote | tests/chat-actions.test.mjs |
+| U17 | Apply; Apply and start research; processing mode on proposal | applyAction; Engine.resume; Store.saveQuestion; Store.addNote | tests/chat-actions.test.mjs; tests/ask-atlas.test.mjs |
 | U18 | Export PDF / Excel / Excel essentials / JSON | exportData,pdfReport,excelReport; createServices.route | tests/http-exports.test.mjs; tests/essentials-export.test.mjs |
 | U19 | Native export Save / Cancel; choose filename | handleDesktopDownloads | tests/desktop-downloads.test.mjs |
 | U20 | Diagnostics; Show records for; Refresh; Download diagnostics | diagnosticReport; createServices.route; public/app.js:loadDiagnostics | tests/diagnostics.test.mjs |
