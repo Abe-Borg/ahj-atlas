@@ -48,3 +48,64 @@ test('export responses carry the cleaned Unicode attachment name',async t=>{
   const encoded=response.headers.get('content-disposition').match(/filename\*=UTF-8''([^;]+)/)?.[1];
   assert.equal(decodeURIComponent(encoded),'Café 東京 site - AHJ research.json');
 });
+
+async function pdfText(buffer){
+  const {getDocument}=await import('pdfjs-dist/legacy/build/pdf.mjs'),doc=await getDocument({data:new Uint8Array(buffer),isEvalSupported:false,useSystemFonts:true}).promise;
+  let all='';for(let i=1;i<=doc.numPages;i++)all+=(await(await doc.getPage(i)).getTextContent()).items.map(x=>x.str).join(' ')+'\n';await doc.loadingTask.destroy();return all;
+}
+test('a source keeps its retrieval date when a search only finds it again, and moves when its text is read',async t=>{
+  const {app}=await setup(t),s=app.store,p=s.create(input),url='https://example.com/adoption',old='2020-01-01T00:00:00.000Z';
+  s.source(p.id,{url,title:'Adoption record',text:evidenceText,readFull:true});
+  s.db.prepare('UPDATE sources SET retrieved=? WHERE project_id=?').run(old,p.id);
+  // The outside review's case: a discovery-only search hit used to stamp old text with a new date.
+  s.source(p.id,{url,title:'Adoption record (search title)',readFull:false});
+  let saved=s.sources(p.id)[0];
+  assert.equal(saved.retrieved,old);assert.equal(saved.text,evidenceText);assert.equal(saved.read_full,true);assert.equal(saved.title,'Adoption record (search title)');
+  s.source(p.id,{url,text:evidenceText,readFull:true});
+  saved=s.sources(p.id)[0];assert.ok(saved.retrieved>old);
+  // A lead keeps the date it was first found until its text is read.
+  s.source(p.id,{url:'https://example.com/lead',title:'Lead',readFull:false});
+  s.db.prepare("UPDATE sources SET retrieved=? WHERE url='https://example.com/lead'").run(old);
+  s.source(p.id,{url:'https://example.com/lead',title:'Lead again',readFull:false});
+  assert.equal(s.sources(p.id).find(x=>x.url==='https://example.com/lead').retrieved,old);
+  // Inspecting that lead as a scanned page records the inspection time; inspecting a page
+  // whose text was read keeps its text-retrieval date and kind.
+  s.source(p.id,{url:'https://example.com/lead',text:'[PDF page 1 inspected visually. No machine-readable quotation verified.]',readFull:false,kind:'pdf-visual'});
+  const inspected=s.sources(p.id).find(x=>x.url==='https://example.com/lead');
+  assert.equal(inspected.kind,'pdf-visual');assert.ok(inspected.retrieved>old);
+  s.db.prepare('UPDATE sources SET retrieved=? WHERE url=?').run(old,url);
+  s.source(p.id,{url,text:'[PDF page 1 inspected visually. No machine-readable quotation verified.]',readFull:false,kind:'pdf-visual'});
+  const read=s.sources(p.id).find(x=>x.url===url);
+  assert.equal(read.retrieved,old);assert.equal(read.read_full,true);assert.equal(read.kind,'web');
+});
+test('PDF and Excel keep each finding’s evidence status, flag unmatched quotations, and label report, export and source dates',async t=>{
+  const {app}=await setup(t),s=app.store,p=s.create(input);
+  s.source(p.id,{url:'https://example.com/adoption',title:'Synthetic record',text:evidenceText,readFull:true});
+  s.source(p.id,{url:'https://example.com/lead',title:'Search lead',readFull:false});
+  const draft=report();
+  draft.contacts[0].status='conflicting';draft.requirements[0].status='unverified';
+  draft.authorities[0].evidence=[{sourceId:'S1',quote:'This sentence does not appear in the retrieved source text.',pageOrSection:'Fixture'}];
+  const validated=validateReport(draft,s.sources(p.id));
+  assert.equal(validated.authorities[0].status,'unverified');assert.equal(validated.authorities[0].evidence[0].supported,false);
+  s.updateProject(p.id,{report:validated});
+  const data=exportData(s,p.id),text=await pdfText(await pdfReport(data));
+  assert.match(text,/Source-supported means a quoted passage was matched to retrieved source text/);
+  const section=(from,to)=>text.slice(text.indexOf(from),text.indexOf(to,text.indexOf(from)));
+  assert.match(section('Authorities','Contacts'),/Example District\s+Evidence status: Unconfirmed/);
+  assert.match(section('Authorities','Contacts'),/S1 · Fixture · Supporting passage needs confirmation — This sentence does not appear/);
+  assert.match(section('Contacts','Codes and standards'),/Evidence status: Conflicting/);
+  assert.match(section('Submission requirements','Questions to resolve'),/Confirm actual authority\s+Evidence status: Unconfirmed/);
+  assert.match(section('Codes and standards','Submission requirements'),/Evidence status: Source-supported · direct · Example District/);
+  assert.ok(!/Supporting passage needs confirmation/.test(section('Contacts','Codes and standards')));
+  assert.match(text,/Report generated .+ · Exported /);
+  assert.match(section('Source register','Research limitations'),/S1 · Synthetic record\s+Retrieved .+Read as evidence[\s\S]*S2 · Search lead\s+Discovered .+Discovery \/ visual only/);
+  const book=new ExcelJS.Workbook();await book.xlsx.load(await excelReport(data));
+  const rows=[];book.getWorksheet('Project').eachRow((row,n)=>{if(n>1)rows.push([row.getCell(1).value,row.getCell(2).value]);});
+  assert.equal(rows.find(r=>r[0]==='Report generated')[1],validated.generatedAt);
+  assert.equal(rows.find(r=>r[0]==='Exported')[1],data.exportedAt);
+  assert.ok(!rows.some(r=>r[0]==='Research date'));
+  assert.match(book.getWorksheet('Authorities').getCell('H2').value,/Supporting passage needs confirmation/);
+  assert.ok(!/Supporting passage needs confirmation/.test(book.getWorksheet('Contacts').getCell('K2').value));
+  const sources=book.getWorksheet('Sources');
+  assert.equal(sources.getCell('E1').value,'Date type');assert.equal(sources.getCell('E2').value,'Retrieved');assert.equal(sources.getCell('E3').value,'Discovered');
+});

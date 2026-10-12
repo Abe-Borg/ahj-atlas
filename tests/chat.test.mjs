@@ -134,7 +134,9 @@ test('chat searches, a read crossing the excerpt budget and an upload leave the 
   assert.equal(provider.calls.length,2);assert.equal(c.view(a.id).turns[0].status,'complete');
   const read=s.sources(a.id).find(x=>x.url===readUrl),lead=s.sources(a.id).find(x=>x.url===leadUrl);
   assert.ok(read.read_full);assert.equal(lead.read_full,false);assert.equal(lead.text,'');
-  assert.notEqual(s.sources(a.id)[0].retrieved,'2000-01-01T00:00:00.000Z');
+  // The search hit re-finds the saved ALPHA_PRIVATE page without reading it, so its old text keeps its retrieval date.
+  assert.equal(s.sources(a.id)[0].url,'https://example.com/ALPHA_PRIVATE');assert.equal(s.sources(a.id)[0].retrieved,'2000-01-01T00:00:00.000Z');
+  assert.notEqual(read.retrieved,'2000-01-01T00:00:00.000Z');
   assert.ok(s.sources(a.id).reduce((n,x)=>n+x.text.length,0)>CHAT_LIMITS.excerptChars);
   const firstOpening=opening(provider.calls[0].payload);
   assert.notDeepEqual(initialChatEvidence(s,a.id).find(b=>b.title.startsWith('S2:')).content,firstOpening.find(b=>b.title?.startsWith('S2:')).content);
