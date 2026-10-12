@@ -8,7 +8,7 @@ Two findings from an outside review of the prompts and evidence handling: old ev
 
 **Now.**
 
-- `retrieved` moves only when text is actually read (`readFull` with text). A search hit, a citation capture or a visual page inspection that only finds the URL again updates the title and kind as before but keeps the earlier date. A reread that returns unchanged text still moves it, because the text was confirmed current.
+- `retrieved` moves only when text is actually read (`readFull` with text). A search hit or citation capture that only finds the URL again updates the title and kind as before but keeps the earlier date. A reread that returns unchanged text still moves it, because the text was confirmed current. For a source with no read text, a visual page inspection records the inspection time, so a lead later inspected as a scanned page is labeled **Inspected** with the right date (found by the Codex review on the pull request). A visual look at a page whose text was already read keeps the text-retrieval date.
 - The app's Sources tab, the PDF source register and the Excel **Sources** sheet label the date by how the record was made: **Retrieved** (text read), **Discovered** (a lead never read), **Inspected** (a scanned page viewed visually) or **Added** (a document the user added). Excel gains a **Date type** column beside **Date recorded**.
 - The Excel **Project** sheet replaces **Research date** with **Report generated** (the report's `generatedAt`, when a report exists) and **Exported**. The PDF header line now starts with **Report generated** before **Exported**.
 

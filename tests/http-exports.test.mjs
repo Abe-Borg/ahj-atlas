@@ -68,6 +68,15 @@ test('a source keeps its retrieval date when a search only finds it again, and m
   s.db.prepare("UPDATE sources SET retrieved=? WHERE url='https://example.com/lead'").run(old);
   s.source(p.id,{url:'https://example.com/lead',title:'Lead again',readFull:false});
   assert.equal(s.sources(p.id).find(x=>x.url==='https://example.com/lead').retrieved,old);
+  // Inspecting that lead as a scanned page records the inspection time; inspecting a page
+  // whose text was read keeps its text-retrieval date and kind.
+  s.source(p.id,{url:'https://example.com/lead',text:'[PDF page 1 inspected visually. No machine-readable quotation verified.]',readFull:false,kind:'pdf-visual'});
+  const inspected=s.sources(p.id).find(x=>x.url==='https://example.com/lead');
+  assert.equal(inspected.kind,'pdf-visual');assert.ok(inspected.retrieved>old);
+  s.db.prepare('UPDATE sources SET retrieved=? WHERE url=?').run(old,url);
+  s.source(p.id,{url,text:'[PDF page 1 inspected visually. No machine-readable quotation verified.]',readFull:false,kind:'pdf-visual'});
+  const read=s.sources(p.id).find(x=>x.url===url);
+  assert.equal(read.retrieved,old);assert.equal(read.read_full,true);assert.equal(read.kind,'web');
 });
 test('PDF and Excel keep each finding’s evidence status, flag unmatched quotations, and label report, export and source dates',async t=>{
   const {app}=await setup(t),s=app.store,p=s.create(input);
