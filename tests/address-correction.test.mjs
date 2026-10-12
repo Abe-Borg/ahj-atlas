@@ -33,6 +33,7 @@ test('an address correction updates the saved address, reopens jurisdiction and 
   await e.resume(p.id,{address:`  ${corrected}  `});
   const next=s.project(p.id);
   assert.equal(next.address,corrected);assert.equal(next.input.address,corrected);
+  assert.equal(next.research_round,1);
   assert.equal(s.db.prepare('SELECT address FROM projects WHERE id=?').get(p.id).address,corrected);
   assert.deepEqual(next.input.previousAddresses,[input.address]);
   assert.ok(s.stages(p.id).every(stage=>stage.status==='queued'&&stage.rounds===0&&stage.messages.length===0));

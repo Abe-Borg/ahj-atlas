@@ -39,9 +39,11 @@ test('continuing a completed report only reopens research for a substantive foll
   await engine.resume(p.id,{clarification:'   \n  '});
   assert.ok(s.stages(p.id).filter(stage=>stage.id!=='review').every(stage=>stage.status==='complete'));
   assert.equal(s.stages(p.id).find(stage=>stage.id==='review').status,'queued');
+  assert.equal(s.project(p.id).research_round,0);
   await engine.resume(p.id,{clarification:'Please investigate the unresolved fire district boundary.'});
   assert.ok(s.stages(p.id).every(stage=>stage.status==='queued'));
   assert.match(s.project(p.id).input.notes,/unresolved fire district boundary/);
+  assert.equal(s.project(p.id).research_round,1);
 });
 test('pending estimates are recorded without limiting new requests',t=>{
   const s=setup(t),p=s.create({...input,budget:1});

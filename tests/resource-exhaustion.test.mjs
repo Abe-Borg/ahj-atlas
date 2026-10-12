@@ -9,6 +9,7 @@ import {LIMITS,MODELS} from '../lib/config.mjs';
 import {Anthropic,providerError,validateCapabilities} from '../lib/provider.mjs';
 import {ResearchTools,oversizedDocument,captureSearchSources} from '../lib/research-tools.mjs';
 import {addDocument} from '../lib/documents.mjs';
+import {remainingSearches,remainingReads} from '../lib/prompts.mjs';
 import {input,FakeProvider,fakeTools} from './fixtures.mjs';
 
 const usage={input_tokens:100,output_tokens:100,server_tool_use:{web_search_requests:0}};
@@ -467,6 +468,70 @@ test('provider output ceiling, spend, stream deadline, and batch retention stop 
   await e.importBatch(imported.id,'msgbatch_import',[{custom_id:errored.id,result:{type:'errored',error:{type:'error',error:{type:'invalid_request_error',message:'You have reached your specified API usage limits'}}}}]);
   assert.equal(rows(s,imported.id,'provider_spend','codes')[0].details.outcome,'stopped');
   assert.ok(s.diagnostics(imported.id).some(d=>d.event==='batch.result_failed'));
+});
+
+test('a continuation that changes the context starts a research round with a fresh allowance',async t=>{
+  const {store:s,provider,engine:e,project:p}=fixture(t);e.tick=async()=>{};
+  // The first round spends the whole allowance, including the evidence check's own share.
+  const spent=s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:1});
+  s.updateAttempt(spent.id,{state:'settled',applied:1,usage:{server_tool_use:{web_search_requests:LIMITS.searches-LIMITS.verificationSearches,web_fetch_requests:LIMITS.reads-LIMITS.verificationReads}}});
+  const checked=s.reserve(p.id,'verification',{mode:'realtime',modelKey:'review',payload:{},reserve:1});
+  s.updateAttempt(checked.id,{state:'settled',applied:1,usage:{server_tool_use:{web_search_requests:LIMITS.verificationSearches,web_fetch_requests:LIMITS.verificationReads}}});
+  for(const stage of s.stages(p.id))s.updateStage(p.id,stage.id,{status:'complete',output:'Saved '+stage.id});
+  const first=s.project(p.id);
+  assert.equal(first.research_round,0);
+  assert.equal(first.searches,LIMITS.searches);assert.equal(first.reads,LIMITS.reads);
+  assert.equal(first.roundSearches,LIMITS.searches);assert.equal(first.roundReads,LIMITS.reads);
+  assert.equal(remainingSearches(s,first,'jurisdiction'),0);assert.equal(remainingReads(s,first,'jurisdiction'),0);
+  assert.equal(remainingSearches(s,first,'verification'),0);assert.equal(remainingReads(s,first,'verification'),0);
+  assert.deepEqual(s.stageUsage(p.id,'verification'),{searches:LIMITS.verificationSearches,reservedSearches:0,reads:LIMITS.verificationReads});
+  // Continuing without new context keeps the round and its spent allowance.
+  await e.resume(p.id,{});
+  assert.equal(s.project(p.id).research_round,0);
+  assert.ok(!s.events(p.id).some(event=>/new research round/.test(event.message)));
+  // New context starts the next round. Lifetime totals stay for the spending record.
+  await e.resume(p.id,{clarification:'The parcel is outside the city limits; confirm the county fire authority.'});
+  const next=s.project(p.id);
+  assert.equal(next.research_round,1);
+  assert.equal(next.searches,LIMITS.searches);assert.equal(next.reads,LIMITS.reads);
+  assert.equal(next.roundSearches,0);assert.equal(next.roundReads,0);
+  assert.equal(remainingSearches(s,next,'jurisdiction'),LIMITS.searches);assert.equal(remainingReads(s,next,'jurisdiction'),LIMITS.reads);
+  assert.equal(remainingSearches(s,next,'verification'),LIMITS.verificationSearches);assert.equal(remainingReads(s,next,'verification'),LIMITS.verificationReads);
+  assert.deepEqual(s.stageUsage(p.id,'verification'),{searches:0,reservedSearches:0,reads:0});
+  assert.ok(s.events(p.id).some(event=>/new research round started with a fresh search and read allowance/.test(event.message)));
+  assert.ok(s.diagnostics(p.id).some(d=>d.event==='project.resumed'&&d.details.newRound===true&&d.details.researchRound===1));
+  // The next requests carry the search and fetch tools again, and no allowance row is degraded.
+  await e.dispatch(p.id,'jurisdiction');
+  const tools=provider.calls.at(-1).tools;
+  assert.equal(tools.find(tool=>tool.name==='web_search').max_uses,LIMITS.searchesPerRequest);
+  assert.equal(tools.find(tool=>tool.name==='web_fetch').max_uses,LIMITS.fetchesPerRequest);
+  assert.equal(rows(s,p.id,'searches','jurisdiction').length,0);
+  assert.equal(rows(s,p.id,'fetches','jurisdiction').length,0);
+  assert.ok(s.attemptSummaries(p.id).some(a=>a.stage_id==='jurisdiction'&&a.research_round===1));
+  // The evidence check gets its own allowance back and is told what remains, not a fixed figure.
+  ready(s,p.id,'verification');
+  s.updateStage(p.id,'verification',{status:'queued'});s.updateProject(p.id,{status:'queued'});
+  const beforeCheck=s.project(p.id);
+  await e.dispatch(p.id,'verification');
+  const verification=provider.calls.at(-1);
+  assert.equal(verification.tools.find(tool=>tool.name==='web_search').max_uses,LIMITS.searchesPerRequest);
+  assert.equal(verification.tools.find(tool=>tool.name==='web_fetch').max_uses,LIMITS.fetchesPerRequest);
+  assert.match(verification.messages[0].content,new RegExp(`${LIMITS.verificationSearches} of its ${LIMITS.verificationSearches} searches and ${LIMITS.verificationReads} of its ${LIMITS.verificationReads} source reads remain in this research round`));
+  assert.match(verification.messages[0].content,new RegExp(`${LIMITS.searches-beforeCheck.roundSearches} searches and ${LIMITS.reads-beforeCheck.roundReads} document reads remain in this research round`));
+  assert.ok(!/remain across the project/.test(verification.messages[0].content));
+});
+
+test('a partial report and a location-free continuation keep the research round; a corrected location and the focused NFPA update start one',async t=>{
+  const {store:s,engine:e,project:p}=fixture(t);e.tick=async()=>{};
+  for(const stage of s.stages(p.id))s.updateStage(p.id,stage.id,{status:'complete',output:'Saved '+stage.id});
+  await e.resume(p.id,{finishPartial:true,clarification:'A note for the partial report.'});
+  assert.equal(s.project(p.id).research_round,0);
+  await e.resume(p.id,{siteDescription:'Lot 7, Riverbend Tract'});
+  assert.equal(s.project(p.id).research_round,1);
+  for(const stage of s.stages(p.id))s.updateStage(p.id,stage.id,{status:'complete',output:'Saved '+stage.id});
+  await e.resume(p.id,{focus:'fire_protection'});
+  assert.equal(s.project(p.id).research_round,2);
+  assert.match(s.events(p.id)[0].message,/Focused NFPA research started.*new research round/);
 });
 
 test('a started stream that hits the deadline records elapsed time and an estimate before retrying',async t=>{
