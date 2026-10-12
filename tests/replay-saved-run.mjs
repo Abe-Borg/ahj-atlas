@@ -24,7 +24,7 @@ try{
   let validation=null;if(last){
     const response=JSON.parse(last.response),wire=JSON.parse(response.content.filter(c=>c.type==='text').map(c=>c.text).join(''));
     const original=wire.items?decodeReport(wire):wire,updated=validateReport(structuredClone(original),sources,stages,[],project.input),saved=JSON.parse(project.report||'null');
-    validation={changedFindings:['codes','fireStandards'].flatMap(section=>(updated[section]||[]).flatMap(row=>{
+    validation={changedFindings:['codes','fireStandards','standards'].flatMap(section=>(updated[section]||[]).flatMap(row=>{
       const before=saved?.[section]?.find(x=>x.name===row.name);return before&&before.status!==row.status?[{name:row.name,previousStatus:before.status,currentStatus:row.status}]:[];
     })),researchHealth:updated.researchHealth};
   }

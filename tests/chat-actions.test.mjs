@@ -36,7 +36,7 @@ const call=(name,input)=>({type:'tool_use',id:'toolu_'+randomUUID().replaceAll('
 const answer=(questionId,text,reason='The user confirmed it.')=>call('propose_question_update',{questionId,status:'answered',answer:text,reason});
 const dismiss=(questionId)=>call('propose_question_update',{questionId,status:'dismissed',answer:'',reason:'Not a priority for this phase.'});
 const research=(clarification,reason='The report predates this context.')=>call('propose_research_round',{focus:'clarification',clarification,reason});
-const nfpa=()=>call('propose_research_round',{focus:'nfpa_standards',clarification:'',reason:'Check the adopted NFPA editions.'});
+const nfpa=()=>call('propose_research_round',{focus:'standards',clarification:'',reason:'Check the adopted NFPA editions.'});
 const locate=(address,siteDescription='',country='')=>call('propose_address_correction',{address,country,siteDescription,reason:'The user gave the assigned address.'});
 // The first request proposes; the next one answers.
 const proposing=(calls,final='Apply the cards below if they look right.',text='Here is what I propose.')=>new ChatProvider((payload,n)=>n===1?chatResponse('',{stop_reason:'tool_use',content:[{type:'text',text},...calls]}):chatResponse(final));
@@ -93,7 +93,7 @@ test('invalid proposals return tool errors and record nothing',async t=>{
   const {app,a,create}=await setup(t,provider),s=app.store,c=app.services.chat,q=a.questions[0];
   provider.fn=(payload,n)=>n===1?chatResponse('',{stop_reason:'tool_use',content:[
     answer('0'.repeat(32),'An answer.'),answer(q.id,'x'.repeat(4001)),answer(q.id,''),answer(q.id,'Per [S9], the edition is 2025.'),
-    call('propose_research_round',{focus:'nfpa_standards',clarification:'Also check NFPA 20.',reason:'Pumps.'}),locate(a.address),locate('short'),locate('',''),
+    call('propose_research_round',{focus:'standards',clarification:'Also check NFPA 20.',reason:'Pumps.'}),locate(a.address),locate('short'),locate('',''),
   ]}):chatResponse('Nothing was proposed.');
   const turn=await reply(c,a.id);assert.equal(turn.status,'complete');assert.deepEqual(turn.proposals,[]);
   const errors=results(provider).map(r=>{assert.equal(r.is_error,true);return r.content;});
@@ -111,10 +111,10 @@ test('invalid proposals return tool errors and record nothing',async t=>{
   provider.calls.length=0;provider.fn=(payload,n)=>n===1?chatResponse('',{stop_reason:'tool_use',content:Array.from({length:CHAT_LIMITS.proposalCalls+1},()=>answer('0'.repeat(32),'x'))}):chatResponse('Done.');
   await reply(c,a.id);assert.match(results(provider).at(-1).content,/No more proposals/);
 
-  // A focused NFPA update needs a fire protection project; no round is proposed while research runs.
-  const arch=create('ARCH_PRIVATE',{discipline:'Architecture'});
+  // A focused standards update needs a discipline with a checklist; no round is proposed while research runs.
+  const arch=create('ARCH_PRIVATE',{discipline:'Acoustics'});
   provider.calls.length=0;provider.fn=(payload,n)=>n===1?chatResponse('',{stop_reason:'tool_use',content:[nfpa()]}):chatResponse('Done.');
-  await reply(c,arch.id);assert.match(results(provider)[0].content,/requires a fire protection project/);
+  await reply(c,arch.id);assert.match(results(provider)[0].content,/requires a discipline with a standards checklist/);
   s.updateProject(arch.id,{status:'researching'});provider.calls.length=0;provider.fn=(payload,n)=>n===1?chatResponse('',{stop_reason:'tool_use',content:[research('New scope.')]}):chatResponse('Done.');
   await reply(c,arch.id);assert.match(results(provider)[0].content,/Research is running/);
 });
@@ -135,6 +135,12 @@ test('research, NFPA and location proposals start research through engine.resume
   const f=create('NFPA_PRIVATE');turn=await propose(f,[nfpa()]);
   assert.equal((await post(f.id,{turnId:turn.id,proposalId:turn.proposals[0].id})).status,200);
   assert.deepEqual(s.stages(f.id).map(x=>[x.id,x.status]),[['jurisdiction','complete'],['contacts','complete'],['codes','queued'],['verification','queued'],['review','queued']]);
+  assert.equal(turn.proposals[0].action,'nfpa_research');assert.ok(s.events(f.id).some(e=>e.message.startsWith('Focused NFPA research started.')));
+  // Another discipline's focused update re-runs its referenced standards checklist.
+  const m=create('MECHANICAL_PRIVATE',{discipline:'Mechanical'});turn=await propose(m,[nfpa()]);assert.equal(turn.proposals[0].action,'standards_research');
+  assert.equal((await post(m.id,{turnId:turn.id,proposalId:turn.proposals[0].id})).status,200);
+  assert.deepEqual(s.stages(m.id).map(x=>[x.id,x.status]),[['jurisdiction','complete'],['contacts','complete'],['codes','queued'],['verification','queued'],['review','queued']]);
+  assert.ok(s.events(m.id).some(e=>e.message.startsWith('Focused standards research started.')));
 
   // An address-only correction keeps the saved site description.
   const l=create('LOCATION_PRIVATE',{siteDescription:'APN 123-456-789'});turn=await propose(l,[locate(CORRECTED)]);
