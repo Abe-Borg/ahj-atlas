@@ -112,6 +112,11 @@ test('a verified code row needs its edition year in a supported quotation, and l
   const formatted=report();formatted.contacts[0].phone='555.0100';formatted.authorities[0].phone='1-555-010-2000 ext. 4';
   const kept=validateReport(formatted,structuredClone(sources));
   assert.equal(kept.contacts[0].phone,'555.0100');assert.equal(kept.contacts[0].status,'verified');assert.equal(kept.authorities[0].phone,'1-555-010-2000 ext. 4');assert.equal(kept.authorities[0].status,'verified');
+  // A search citation's snippet is a discovery lead: a number or email found only there is not listed.
+  const lead={id:'S2',url:'https://example.com/search-lead',text:'Call the plans office at 555-0177 or leads@example.com.',read_full:false},cited=report();
+  cited.contacts[0].phone='555-0177';cited.contacts[0].email='leads@example.com';cited.contacts[0].evidence.push({sourceId:'S2',quote:'Call the plans office at 555-0177 or leads@example.com.',pageOrSection:'Search result'});
+  const snippet=validateReport(cited,[...structuredClone(sources),lead]).contacts[0];
+  assert.equal(snippet.phone,'');assert.equal(snippet.email,'');assert.equal(snippet.status,'unverified');
 });
 test('unknown code edition cannot yield a complete report without questions',()=>{
   const r=report();r.codes[0].edition='';r.codes[0].status='unverified';const out=validateReport(r,[{id:'S1',url:'https://example.com/adoption',text:evidenceText,read_full:true}]);assert.ok(out.gaps.some(g=>g.question.includes('Fixture Building Code')));
