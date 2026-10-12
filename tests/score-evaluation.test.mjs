@@ -40,6 +40,21 @@ test('each key item gets one outcome, and a verified disagreement outranks an ag
   assert.deepEqual(run.unchecked,['Connecticut State Building Code · 2022']);
   assert.equal(run.cost,2.5);assert.equal(run.questions,2);assert.equal(run.mode,'batch');
 });
+// Codex review: a description naming the right body while another authority governs, and a
+// conditional row with the right edition, must not count as correct.
+test('the named authority decides the jurisdiction, and a conditional standard is not established',()=>{
+  const wrong=exported(),blank=exported();
+  wrong.report.jurisdiction={authority:'Town of Other',description:'Example County does not govern this parcel.',status:'verified'};
+  blank.report.jurisdiction={authority:'',description:'Unincorporated Example County.',status:'verified'};
+  assert.equal(scoreRun(key.cases[0],wrong).results.find(r=>r.kind==='Jurisdiction').outcome,'incorrect');
+  assert.equal(scoreRun(key.cases[0],blank).results.find(r=>r.kind==='Jurisdiction').outcome,'correct');
+  const conditional=exported();conditional.report.fireStandards[0]={...conditional.report.fireStandards[0],applicabilityStatus:'conditional'};
+  assert.equal(scoreRun(key.cases[0],conditional).results.find(r=>r.item==='NFPA 13').outcome,'underconfident');
+  const excluded=exported();excluded.report.fireStandards[0]={...excluded.report.fireStandards[0],edition:'',applicabilityStatus:'not_applicable'};
+  assert.equal(scoreRun(key.cases[0],excluded).results.find(r=>r.item==='NFPA 13').outcome,'incorrect');
+  const undecided=exported();undecided.report.fireStandards[3]={...undecided.report.fireStandards[3],applicabilityStatus:'conditional'};
+  assert.equal(scoreRun(key.cases[0],undecided).results.find(r=>r.item==='NFPA 2001').outcome,'omission');
+});
 test('a not-applicable standard the report calls applicable is an incorrect verified finding',()=>{
   const data=exported();data.report.fireStandards[3]={...data.report.fireStandards[3],edition:'2018',applicabilityStatus:'applicable'};
   assert.equal(scoreRun(key.cases[0],data).results.find(r=>r.item==='NFPA 2001').outcome,'incorrect');

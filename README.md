@@ -198,7 +198,7 @@ The test suite proves the application behaves as designed, using synthetic sourc
 
 - incorrect verified;
 - correct;
-- correct but not verified;
+- correct but not established (unverified, or a standard whose applicability was left conditional);
 - material omission;
 - legitimate gap, where the answer is not publicly established.
 

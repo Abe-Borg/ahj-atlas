@@ -58,13 +58,13 @@ Each answer-key item gets one outcome, from the report rows that name it:
 
 | Outcome | When |
 | --- | --- |
-| **Incorrect verified** | A verified row disagrees with the key: a wrong edition, a wrong authority, or an applicable finding for a standard the AHJ said does not apply. This counts even when another row agrees, because a reader cannot tell which to trust. It is the most important number. |
+| **Incorrect verified** | A verified row disagrees with the key: a wrong edition, a wrong authority, a not-applicable finding for a standard that applies, or an applicable finding for a standard the AHJ said does not apply. This counts even when another row agrees, because a reader cannot tell which to trust. It is the most important number. |
 | **Correct** | A verified row agrees with the key, and none disagrees. |
-| **Correct, not verified** | A row agrees, but none is verified. Atlas found the answer but could not support it with a quotation. |
+| **Correct, not established** | A row has the right answer but none is verified, or a standard row has the right edition while leaving applicability conditional, unresolved or unstated. Atlas found the answer but did not establish it. |
 | **Material omission** | No row agrees, and the key says the answer is publicly established. |
 | **Legitimate gap** | No row agrees, and the key marks the item `public: false`. |
 
-Editions match by year ("2019", "2019 edition" and "NFPA 13-2019" agree). An edition with no year must match as written. The summary also lists, per run:
+Editions match by year ("2019", "2019 edition" and "NFPA 13-2019" agree). An edition with no year must match as written. The jurisdiction is judged by the authority the report names; its description counts only when no authority is named, because a description may mention the right body while explaining why it does not govern. A standard the AHJ said does not apply is not established by a conditional or unresolved row. The summary also lists, per run:
 
 - the processing mode, final status and recorded cost;
 - the number of questions the report asks;

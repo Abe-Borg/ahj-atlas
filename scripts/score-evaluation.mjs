@@ -15,35 +15,43 @@ const year=value=>String(value??'').match(/\b(?:19|20)\d{2}\b/)?.[0]||'';
 // Editions match by year; an edition with no year ("Eighth Edition") must match as written.
 export function sameEdition(a,b){const ya=year(a),yb=year(b);return ya||yb?ya===yb:Boolean(normalize(a))&&normalize(a)===normalize(b);}
 export const OUTCOMES={
-  incorrect:'Incorrect verified',omission:'Material omission',gap:'Legitimate gap',correct:'Correct',underconfident:'Correct, not verified',
+  incorrect:'Incorrect verified',omission:'Material omission',gap:'Legitimate gap',correct:'Correct',underconfident:'Correct, not established',
 };
-// One key item against the report rows that name it. A verified row that disagrees with the
-// key is the worst outcome even when another row agrees: a reader cannot tell which to trust.
-function outcome(rows,{isPublic=true,agrees}){
-  const verified=rows.filter(r=>r.status==='verified');
-  if(verified.some(r=>!agrees(r)))return 'incorrect';
-  if(verified.some(agrees))return 'correct';
-  if(rows.some(agrees))return 'underconfident';
+// One key item against the report rows that name it. Each row agrees, disagrees, is partial
+// (the right edition, but applicability left conditional or unresolved) or says nothing. A
+// verified row that disagrees is the worst outcome even when another row agrees: a reader
+// cannot tell which to trust. A partial row is never correct, verified or not.
+function outcome(rows,{isPublic=true,classify}){
+  const verified=rows.filter(r=>r.status==='verified').map(classify),all=rows.map(classify);
+  if(verified.includes('disagree'))return 'incorrect';
+  if(verified.includes('agree'))return 'correct';
+  if(all.includes('agree')||all.includes('partial'))return 'underconfident';
   return isPublic?'omission':'gap';
 }
 const describe=rows=>rows.length?rows.map(r=>[r.name||r.authority||r.description,r.edition&&`edition ${r.edition}`,r.applicabilityStatus,r.status].filter(Boolean).join(' · ')).join('; '):'No finding';
 export function scoreRun(item,data){
   const report=data.report||{},results=[],codes=report.codes||[],screened=[...(report.fireStandards||[]),...(report.standards||[])];
   if(item.jurisdiction){
+    // The named authority decides; the description may mention the right body while explaining
+    // why it does not govern. The description is read only when no authority is named.
     const terms=list(item.jurisdiction.authority),j=report.jurisdiction?[report.jurisdiction]:[];
-    const agrees=r=>terms.some(t=>mentions(`${r.authority} ${r.description}`,t));
-    results.push({kind:'Jurisdiction',item:[item.jurisdiction.authority].flat()[0],expected:[item.jurisdiction.authority].flat().join(' / '),found:describe(j),outcome:outcome(j,{isPublic:item.jurisdiction.public!==false,agrees})});
+    const classify=r=>terms.some(t=>mentions(String(r.authority||'').trim()?r.authority:r.description,t))?'agree':'disagree';
+    results.push({kind:'Jurisdiction',item:[item.jurisdiction.authority].flat()[0],expected:[item.jurisdiction.authority].flat().join(' / '),found:describe(j),outcome:outcome(j,{isPublic:item.jurisdiction.public!==false,classify})});
   }
   const matched=new Set();
   for(const code of item.codes||[]){
     const terms=list(code.name),rows=codes.filter(r=>terms.some(t=>mentions(r.name,t)));rows.forEach(r=>matched.add(r));
-    results.push({kind:'Code',item:[code.name].flat()[0],expected:code.edition,found:describe(rows),outcome:outcome(rows,{isPublic:code.public!==false,agrees:r=>sameEdition(r.edition,code.edition)})});
+    results.push({kind:'Code',item:[code.name].flat()[0],expected:code.edition,found:describe(rows),outcome:outcome(rows,{isPublic:code.public!==false,classify:r=>sameEdition(r.edition,code.edition)?'agree':'disagree'})});
   }
   for(const standard of item.standards||[]){
     const id=standardIds(standard.standard)[0]||standard.standard,rows=[...screened,...codes].filter(r=>standardIds(r.name)[0]===id);rows.forEach(r=>matched.add(r));
-    // A standard the AHJ confirmed does not apply agrees only with a not_applicable row.
-    const agrees=standard.applicable===false?r=>r.applicabilityStatus==='not_applicable':r=>r.applicabilityStatus!=='not_applicable'&&sameEdition(r.edition,standard.edition);
-    results.push({kind:'Standard',item:id,expected:standard.applicable===false?'Not applicable':standard.edition,found:describe(rows),outcome:outcome(rows,{isPublic:standard.public!==false,agrees})});
+    // A standard that applies agrees only with an applicable row of its edition; the right
+    // edition with applicability conditional, unresolved or unstated is partial. A standard the
+    // AHJ confirmed does not apply agrees with a not_applicable row and disagrees with an
+    // applicable one; a conditional or unresolved row did not establish either.
+    const classify=standard.applicable===false?r=>r.applicabilityStatus==='not_applicable'?'agree':r.applicabilityStatus==='applicable'?'disagree':'none'
+      :r=>r.applicabilityStatus==='not_applicable'||!sameEdition(r.edition,standard.edition)?'disagree':r.applicabilityStatus==='applicable'?'agree':'partial';
+    results.push({kind:'Standard',item:id,expected:standard.applicable===false?'Not applicable':standard.edition,found:describe(rows),outcome:outcome(rows,{isPublic:standard.public!==false,classify})});
   }
   // Verified rows the key does not cover cannot be scored; list them for a manual check.
   const unchecked=[...codes,...screened].filter(r=>r.status==='verified'&&!matched.has(r)).map(r=>[r.name,r.edition].filter(Boolean).join(' · '));
@@ -64,7 +72,7 @@ const money=value=>`$${value.toFixed(2)}`,cell=value=>String(value??'').replace(
 export function markdown({cases,unmatched},keyFile=''){
   const runs=cases.flatMap(c=>c.runs.map((run,i)=>({id:c.id,n:i+1,...run}))),sum=key=>runs.reduce((n,r)=>n+r.totals[key],0);
   const lines=['# Accuracy evaluation','',`Answer key: ${keyFile||'(inline)'} · ${runs.length} export${runs.length===1?'':'s'} scored · ${new Date().toISOString().slice(0,10)}`,'',
-    '## Summary','','| Case | Run | Mode | Status | Cost | Incorrect verified | Material omissions | Legitimate gaps | Correct | Correct, not verified | Unchecked verified | Questions |','|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '## Summary','','| Case | Run | Mode | Status | Cost | Incorrect verified | Material omissions | Legitimate gaps | Correct | Correct, not established | Unchecked verified | Questions |','|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...runs.map(r=>`| ${cell(r.id)} | ${r.n} | ${r.mode} | ${r.status} | ${money(r.cost)} | ${r.totals.incorrect} | ${r.totals.omission} | ${r.totals.gap} | ${r.totals.correct} | ${r.totals.underconfident} | ${r.unchecked.length} | ${r.questions} |`),
     `| **Total** | | | | **${money(runs.reduce((n,r)=>n+r.cost,0))}** | **${sum('incorrect')}** | **${sum('omission')}** | **${sum('gap')}** | **${sum('correct')}** | **${sum('underconfident')}** | **${runs.reduce((n,r)=>n+r.unchecked.length,0)}** | |`,''];
   const missing=cases.filter(c=>!c.runs.length).map(c=>c.id);
