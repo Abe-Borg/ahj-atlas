@@ -232,9 +232,12 @@ test('a final review too large to keep is rebuilt with each looked-up passage pi
 test('pinned lookups are recorded for the final review only, found again after saved text grows, and funded first',()=>{
   const result=JSON.stringify({sourceId:'S1',readFull:true,spans:[{start:0,end:10},{start:50,end:60}],text:'aaaaaaaaaa'+EXCERPT_SEPARATOR+'bbbbbbbbbb'});
   const messages=[{role:'user',content:[{type:'tool_result',tool_use_id:'x',content:result}]}],sources=[{id:'S1'}];
-  assert.deepEqual(checkpointFromMessages({id:'review'},messages,sources).pinned,[{sourceId:'S1',start:0,end:10,anchor:'aaaaaaaaaa'},{sourceId:'S1',start:50,end:60,anchor:'bbbbbbbbbb'}]);
+  const recorded=checkpointFromMessages({id:'review'},messages,sources).pinned;
+  assert.deepEqual(recorded.map(({hash,...pin})=>pin),[{sourceId:'S1',start:0,end:10,anchor:'aaaaaaaaaa'},{sourceId:'S1',start:50,end:60,anchor:'bbbbbbbbbb'}]);
+  assert.ok(recorded.every(pin=>/^[0-9a-f]{24}$/.test(pin.hash)));
   assert.equal(checkpointFromMessages({id:'codes'},messages,sources).pinned,undefined);
-  const text='a'.repeat(1000)+'PINNED_START'+'b'.repeat(3000)+'PINNED_END'+'c'.repeat(5000),start=1000,end=start+3022,pin={sourceId:'S1',start,end,anchor:text.slice(start,start+80)};
+  const pinOf=(source,start,end)=>checkpointFromMessages({id:'review'},[{role:'user',content:[{type:'tool_result',tool_use_id:'p',content:JSON.stringify({sourceId:'S1',readFull:true,spans:[{start,end}],text:source.slice(start,end)})}]}],sources).pinned[0];
+  const text='a'.repeat(1000)+'PINNED_START'+'b'.repeat(3000)+'PINNED_END'+'c'.repeat(5000),start=1000,end=start+3022,pin=pinOf(text,start,end);
   assert.deepEqual(locatePins(text,[pin]),[{start,end}]);
   const grown='z'.repeat(700)+text;
   assert.deepEqual(locatePins(grown,[pin]),[{start:start+700,end:end+700}]);
@@ -242,6 +245,34 @@ test('pinned lookups are recorded for the final review only, found again after s
   assert.match(selectPassages(grown,{limit:4000,fill:true,pinned:locatePins(grown,[pin])}).text,/PINNED_STARTb{3000}PINNED_END/);
   assert.deepEqual(allocateEvidence([{text:'x'.repeat(50000)},{text:'y'.repeat(50000)}],20000,5000,[0,12000]),[5000,12000]);
   assert.deepEqual(allocateEvidence([{text:'x'.repeat(50000)},{text:'y'.repeat(50000)}],20000,5000),[5000,5000]);
+  // Pinned passages are funded whole even past the budget; the input check decides if they fit.
+  assert.deepEqual(allocateEvidence([{text:'x'.repeat(50000)},{text:'y'.repeat(50000)}],10000,5000,[8000,8000]),[8000,8000]);
+});
+test('a pinned passage whose opening repeats is found again only where its whole text matches',()=>{
+  const header='CITY OF EXAMPLE CODE OF ORDINANCES - CHAPTER 9 FIRE PREVENTION - SUPPLEMENT 42 -- ';
+  const page=body=>header+body+' '.repeat(20);
+  const first=page('Section 9-1 applies to all occupancies. '.repeat(20)),second=page('Exception: Privately owned data centers are excluded from this paragraph. '.repeat(5));
+  const original=first+second,start=first.length,end=start+second.length;
+  const pin=checkpointFromMessages({id:'review'},[{role:'user',content:[{type:'tool_result',tool_use_id:'p',content:JSON.stringify({sourceId:'S1',readFull:true,spans:[{start,end}],text:original.slice(start,end)})}]}],[{id:'S1'}]).pinned[0];
+  assert.equal(pin.anchor,header.slice(0,80));
+  // A later read prepends a page, so the old offset now holds the second header copy and the
+  // first copy of the opening is earlier still; only the matching passage is accepted.
+  const grown=first+original;
+  assert.ok(grown.startsWith(header,start));
+  assert.deepEqual(locatePins(grown,[pin]),[{start:start+first.length,end:end+first.length}]);
+  assert.match(grown.slice(start+first.length,end+first.length),/^CITY OF EXAMPLE.*Exception: Privately owned/s);
+  // A passage whose text no longer occurs anywhere is dropped rather than replaced by a lookalike.
+  assert.deepEqual(locatePins(first+first,[pin]),[]);
+});
+test('a rebuilt review package carries every pinned passage whole when they exceed its budget',t=>{
+  const {store:s,project:p}=fixture(t),text=filler(60000)+EXCEPTION+filler(60000)+'SECOND_PINNED_PASSAGE'+filler(60000);
+  s.source(p.id,{url:'https://example.com/long-ordinance',text,readFull:true});
+  const spans=[{start:55000,end:70000},{start:115000,end:130000}];
+  const result=JSON.stringify({sourceId:'S1',readFull:true,spans,text:spans.map(span=>text.slice(span.start,span.end)).join(EXCERPT_SEPARATOR)});
+  s.updateStage(p.id,'review',{checkpoint:checkpointFromMessages({id:'review'},[{role:'user',content:[{type:'tool_result',tool_use_id:'q',content:result}]}],s.sources(p.id))});
+  const source=evidencePackage(s,s.project(p.id),10000,{fill:true,pinLookups:true}).sources.find(x=>x.id==='S1');
+  for(const span of spans)assert.ok(source.text.includes(text.slice(span.start,span.end)));
+  assert.ok(source.text.includes(EXCEPTION)&&source.text.includes('SECOND_PINNED_PASSAGE'));
 });
 const reviewText=(sections=[])=>{const wire=encodeReport(report());wire.items=wire.items.filter(row=>!sections.includes(row.section));return JSON.stringify(wire);};
 test('a final review that omits its jurisdiction and coverage rows is kept with both rebuilt as unconfirmed',async t=>{
