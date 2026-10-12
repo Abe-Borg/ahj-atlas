@@ -192,6 +192,18 @@ Saving a response does not start a worker request, change a source-supported fin
 
 All fields inside **Add project context**, including **Additional context**, are labeled optional. `node --test tests/questions.test.mjs` verifies persistence, validation, spending isolation, report regeneration, context handoff and exports. `node tests/questions-ui.mjs` checks the browser interactions, saved drafts during polling, error recovery, and desktop/mobile layouts with synthetic data and no paid calls; it requires installed Edge or Chrome.
 
+### Accuracy evaluation
+
+The test suite proves the application behaves as designed, using synthetic sources and fake model responses; it cannot show that research reaches the right answer. `scripts/score-evaluation.mjs` scores real runs against an answer key you checked independently, such as editions an AHJ confirmed in writing. Run it as `node scripts/score-evaluation.mjs <answer-key.json> <export.json | folder>... [--json]`. It reads project JSON exports and sends no requests. Copy `docs/accuracy-evaluation-answer-key.example.json` into the git-ignored `evaluation/` folder, because keys and exports hold real project details. Each answer-key item is scored as one of five outcomes:
+
+- incorrect verified;
+- correct;
+- correct but not verified;
+- material omission;
+- legitimate gap, where the answer is not publicly established.
+
+Each run's cost, status and question count are listed too, along with verified findings the key does not cover, which you check by hand. The planned evaluation is four AHJ-confirmed data center cases with two batch runs each, about $20–40 in total. The research runs are made in the app with your own key. See [Accuracy evaluation](docs/accuracy-evaluation-2026-10-12.md) for the case types, the answer-key fields and the Windows steps. `node --test tests/score-evaluation.test.mjs` covers the scoring offline.
+
 ### Diagnostics
 
 Open **API & spending → Diagnostics**. Choose a project or the entire workspace, inspect progress and request history, and download a JSON troubleshooting file. The panel is kept inside settings, away from the new-project form.
