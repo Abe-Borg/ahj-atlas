@@ -89,6 +89,24 @@ test('edition evidence must match this standard and adoption chain, not parent-c
   const other=checked([row()],{...input,discipline:'Acoustics'});assert.ok(!other.fireStandards);assert.ok(!other.fireProtection);assert.ok(other.codes.some(c=>c.name.startsWith('NFPA 13')));
 });
 
+// The feedback's probe: a real catalog quotation names the standard and edition but adopts
+// nothing, and the row's adoption instrument was invented.
+test('an adoption-chain quotation must say the standard or its parent code is adopted or in force',()=>{
+  const catalog='NFPA 13, 2019 edition, is available from our catalog.';
+  const adopting=['The 2021 International Fire Code is incorporated by reference.','Le Code national du bâtiment est incorporé par renvoi.','This Regulation comes into force on January 1, 2020.','Le Code national de prévention des incendies est en vigueur.','The fire code takes effect on July 1, 2020.','These codes are effective January 1, 2020.','The Fire Marshal enforces the 2021 International Fire Code.','Chapter 9 is hereby repealed and the 2021 International Fire Code is adopted.','The 2021 International Fire Code, not the 2018 edition, is adopted.'];
+  const other=['This edition of NFPA 13 was issued with an effective date of August 21, 2018.','NFPA 13 is the most widely used sprinkler standard.','This edition incorporates Tentative Interim Amendments to NFPA 13.','The district does not adopt NFPA 13.','The 2018 fire code is no longer in force.','Ordinance 2015-3 is hereby repealed.','Le Code de 1995 n’est plus en vigueur.'];
+  const s={...source,text:[source.text,catalog,...adopting,...other].join(' ')};
+  const run=evidence=>{const r=report();r.fireStandards=[row({adoptionInstrument:'Ordinance 2019-14',evidence})];return validateReport(r,[structuredClone(s)],[],[],input);};
+  const probe=run([{sourceId:'S1',quote:catalog,pageOrSection:'Publications'}]),demoted=probe.fireStandards[0];
+  assert.equal(demoted.status,'unverified');assert.match(demoted.notes,/the adoption-chain quotation does not say the standard or its parent code is adopted or in force/);assert.doesNotMatch(demoted.notes,/matching quotation for this standard and edition is missing/);
+  assert.ok(probe.gaps.some(g=>g.question==='Confirm NFPA 13: applicability and adopted edition.'));
+  for(const clause of adopting)assert.equal(run([{sourceId:'S1',quote:clause,pageOrSection:'Adoption'},{sourceId:'S1',quote:catalog,pageOrSection:'Publications'}]).fireStandards[0].status,'verified',clause);
+  for(const clause of other)assert.equal(run([{sourceId:'S1',quote:clause,pageOrSection:'Adoption'},{sourceId:'S1',quote:catalog,pageOrSection:'Publications'}]).fireStandards[0].status,'unverified',clause);
+  // The wording must be in a quotation from the adoption source, not only elsewhere in the row.
+  const elsewhere={id:'S2',url:'https://example.com/ordinance',text:'The district adopts the 2021 International Fire Code.',read_full:true},r=report();
+  r.fireStandards=[row({evidence:[{sourceId:'S1',quote:catalog,pageOrSection:'Publications'},{sourceId:'S2',quote:'The district adopts the 2021 International Fire Code.',pageOrSection:'Ordinance'}]})];
+  assert.equal(validateReport(r,[structuredClone(s),elsewhere],[],[],input).fireStandards[0].status,'unverified');
+});
 test('capitalized completion values and applicability retain conservative evidence requirements',()=>{
   const finish={brief:'The saved evidence leaves individual NFPA adoption questions unresolved.',coverage:{jurisdiction:'SUPPORTED',contacts:'Unresolved',codes:'UNRESOLVED',process:'NOT_APPLICABLE'},standards:fireProfile(input).map(t=>({standard:t.standard,applicability:'Unresolved',finding:'Obtain the official adoption chain and edition from the responsible AHJ.'}))};
   const original=structuredClone(finish);
@@ -133,7 +151,9 @@ test('additional standards discovered by researchers cannot disappear from the f
 test('table cells, Canadian referenced-documents rows and French editions verify, and Canadian parent-code years do not',()=>{
   const lines=['NFPA | 13-2019 | Installation of Sprinkler Systems | 3.2.4.8.(4)','NFPA | 13R-2016 | Residential Sprinklers | 3.2.5.12.(2)','NFPA 13 | 2019 | Sprinkler systems','La norme NFPA 13, édition 2019, s’applique.','NFPA 13, National Building Code of Canada, 2020','NFPA 13 as referenced in the 2024 OBC'];
   const s={...source,text:source.text+' '+lines.join(' ')};
-  const status=(edition,quote,pageOrSection='Division B, Table 1.3.1.2')=>{const r=report();r.fireStandards=[row({edition,evidence:[{sourceId:'S1',quote,pageOrSection}]})];return validateReport(r,[structuredClone(s)],[],[],input).fireStandards[0].status;};
+  // The adoption chain is quoted separately and names no NFPA edition, so only the table row can verify it.
+  const adopted={sourceId:'S1',quote:'The district adopts the Fixture Building Code, 2021 edition, effective January 1, 2022.',pageOrSection:'Adoption ordinance'};
+  const status=(edition,quote,pageOrSection='Division B, Table 1.3.1.2')=>{const r=report();r.fireStandards=[row({edition,evidence:[adopted,{sourceId:'S1',quote,pageOrSection}]})];return validateReport(r,[structuredClone(s)],[],[],input).fireStandards[0].status;};
   assert.equal(status('2019',lines[0]),'verified');
   assert.equal(status('2016',lines[1]),'unverified');
   assert.equal(status('2019',lines[2],'Adoption table'),'verified');

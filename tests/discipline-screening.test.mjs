@@ -108,6 +108,10 @@ test('report validation: matching editions verify, omitted targets become questi
   assert.deepEqual({...out.screening,targets:out.screening.targets.length},{profile:'mechanical',label:'Mechanical',profileVersion:1,targets:screeningProfile(mechanical).targets.length,unresolved:out.standards.length-1,scopeConditional:0,applicabilityUnresolved:out.standards.length-1,evidenceUnresolved:out.standards.length-1});
   assert.match(out.coverage.codes,/^Mechanical: \d+ individual standard findings; \d+ need confirmation\./);
   for(const changes of [{edition:'2022'},{adoptionSourceId:'Missing'},{adoptionInstrument:''},{adoptionType:'guidance'},{name:'ASHRAE 15',edition:'2021',evidence:[{sourceId:'S1',quote:'Refrigeration systems comply with ASHRAE 15 as referenced by the 2021 International Mechanical Code.',pageOrSection:'test'}]}])assert.equal(checked([row(changes)]).standards.find(r=>r.name.startsWith(changes.name||'ASHRAE 90.1')).status,'unverified',JSON.stringify(changes));
+  // A bookstore listing names the standard and its edition but adopts nothing.
+  const listing='ANSI/ASHRAE/IES Standard 90.1-2019 is sold in the ASHRAE bookstore.',bookstore={...source,text:source.text+' '+listing};
+  const sold=checked([row({evidence:[{sourceId:'S1',quote:listing,pageOrSection:'Bookstore'}]})],mechanical,bookstore).standards.find(r=>r.name.startsWith('ASHRAE 90.1'));
+  assert.equal(sold.status,'unverified');assert.match(sold.notes,/does not say the standard or its parent code is adopted or in force/);
   // A code row naming one designation joins the section; a grouped one becomes a question.
   const moved=report();moved.codes.push(row({name:'ANSI/ASHRAE/IES Standard 90.1-2019',applicabilityStatus:undefined,adoptionSourceId:undefined,editionSourceId:undefined}),row({name:'ASHRAE 62.1 and 90.1'}));
   const v=validateReport(moved,[source],[],[],mechanical);assert.ok(v.standards.some(r=>r.name==='ANSI/ASHRAE/IES Standard 90.1-2019'));assert.ok(!v.codes.some(c=>/ASHRAE/.test(c.name)));assert.ok(v.gaps.some(g=>g.question==='Separate the grouped standards finding: ASHRAE 62.1 and 90.1'));
