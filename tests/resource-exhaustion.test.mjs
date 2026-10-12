@@ -324,6 +324,14 @@ test('project and evidence-check read caps refuse the call and leave the stage o
   assert.equal(geo.details.scope,'project');
   assert.equal(geo.details.outcome,'refused');
   assert.equal(geo.details.limit,LIMITS.reads);
+  // A new research round admits the tools that run through ResearchTools.run again: the
+  // address lookup, browser rendering and scanned-page inspection, not only read_source.
+  e.tick=async()=>{};
+  await e.resume(located.id,{clarification:'Confirm the county boundary for the parcel.'});
+  e.tools=new ResearchTools(s,{fetchImpl:async()=>({buffer:Buffer.from(JSON.stringify({result:{addressMatches:[]}}))})});
+  await e.dispatch(located.id,'jurisdiction');
+  assert.equal(rows(s,located.id,'reads').filter(d=>d.details.tool==='locate_address').length,1);
+  assert.ok(s.sources(located.id).some(source=>source.kind==='geography'));
 });
 
 test('a document over 50 MB is refused with the byte cap',async t=>{
