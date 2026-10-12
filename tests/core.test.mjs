@@ -94,6 +94,25 @@ test('validation downgrades fabricated citations, conditional jurisdiction, unkn
   const out=validateReport(r,sources);
   assert.equal(out.jurisdiction.status,'unverified');assert.equal(out.codes[0].status,'unverified');assert.equal(out.contacts[0].email,'');assert.equal(out.authorities[0].website,'');assert.ok(out.gaps.length>=2);
 });
+// The feedback's probes: a code edition the quotation does not state, and an invented phone.
+test('a verified code row needs its edition year in a supported quotation, and listed phone numbers must appear in a cited source',()=>{
+  const sources=[{id:'S1',url:'https://example.com/adoption',text:evidenceText+' The Fixture Fire Code, Eighth Edition, applies. The district office line is (555) 010-2000.',read_full:true}];
+  const base=validateReport(report(),structuredClone(sources));
+  assert.equal(base.codes[0].status,'verified');assert.equal(base.contacts[0].phone,'555-0100');assert.equal(base.contacts[0].status,'verified');assert.equal(base.authorities[0].status,'verified');
+  // The quotation states 2021, so a 2024 edition is unsupported; a year elsewhere in the source does not count.
+  const edition=report();edition.codes[0].edition='2024';
+  const unquoted=report();unquoted.codes[0].evidence[0].quote='The district adopts the Fixture Building Code';
+  for(const r of [edition,unquoted]){const out=validateReport(r,structuredClone(sources));assert.equal(out.codes[0].status,'unverified');assert.match(out.codes[0].notes,/Edition check: no supported quotation contains the edition year\./);assert.ok(out.gaps.some(g=>g.question==='Confirm Fixture Building Code and its applicable edition.'));}
+  const yearless=report();yearless.codes.push({...yearless.codes[0],name:'Fixture Fire Code',edition:'Eighth Edition',notes:'',evidence:[{sourceId:'S1',quote:'The Fixture Fire Code, Eighth Edition, applies.',pageOrSection:'Test fixture'}]});
+  assert.equal(validateReport(yearless,structuredClone(sources)).codes[1].status,'verified');
+  // An invented number is cleared and demotes its row; the same number in other punctuation is kept.
+  const phones=report();phones.contacts[0].phone='555-0199';phones.authorities[0].phone='+1 (555) 010-2001';
+  const invented=validateReport(phones,structuredClone(sources));
+  assert.equal(invented.contacts[0].phone,'');assert.equal(invented.contacts[0].status,'unverified');assert.equal(invented.authorities[0].phone,'');assert.equal(invented.authorities[0].status,'unverified');
+  const formatted=report();formatted.contacts[0].phone='555.0100';formatted.authorities[0].phone='1-555-010-2000 ext. 4';
+  const kept=validateReport(formatted,structuredClone(sources));
+  assert.equal(kept.contacts[0].phone,'555.0100');assert.equal(kept.contacts[0].status,'verified');assert.equal(kept.authorities[0].phone,'1-555-010-2000 ext. 4');assert.equal(kept.authorities[0].status,'verified');
+});
 test('unknown code edition cannot yield a complete report without questions',()=>{
   const r=report();r.codes[0].edition='';r.codes[0].status='unverified';const out=validateReport(r,[{id:'S1',url:'https://example.com/adoption',text:evidenceText,read_full:true}]);assert.ok(out.gaps.some(g=>g.question.includes('Fixture Building Code')));
 });
