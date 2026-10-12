@@ -142,14 +142,14 @@ test('compact reference-table notation works without confusing NFPA 13 and 13R',
   assert.equal(validateReport(r,[s],[],[],input).fireStandards[0].status,'verified');
   r.fireStandards=[row({edition:'2016',evidence:[{sourceId:'S1',quote:'13R—16 Residential Sprinklers.',pageOrSection:'NFPA referenced standards table'}]})];assert.equal(validateReport(r,[s],[],[],input).fireStandards[0].status,'unverified');
 });
-test('focused refresh resets only code, verification and review while retaining evidence, costs and cumulative limits',async t=>{
+test('focused refresh resets only code, verification and review, retains evidence and costs, and starts a research round with a fresh allowance',async t=>{
   const {store:s,engine:e}=fixture(t),p=s.create(input);e.tick=async()=>{};
   for(const st of s.stages(p.id))s.updateStage(p.id,st.id,{status:'complete',output:'Saved '+st.id,messages:[{role:'user',content:'Saved signed history'}],rounds:7});
   s.source(p.id,{url:source.url,text:source.text,readFull:true});s.updateProject(p.id,{report:report(),status:'partial',searches:8,reads:41});const a=s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:500});s.updateAttempt(a.id,{state:'settled',actual:500,applied:1,usage:{server_tool_use:{web_search_requests:8}}});for(let n=0;n<41;n++)s.beginTool(a.id,'saved_read_'+n,'read_source');const before=s.project(p.id);
   await e.resume(p.id,{focus:'fire_protection',mode:'batch'});
   for(const id of ['jurisdiction','contacts']){assert.equal(s.stage(p.id,id).status,'complete');assert.equal(s.stage(p.id,id).rounds,7);}
   for(const id of ['codes','verification','review']){assert.equal(s.stage(p.id,id).status,'queued');assert.deepEqual(s.stage(p.id,id).messages,[]);assert.equal(s.stage(p.id,id).rounds,0);assert.equal(s.stage(p.id,id).output,'Saved '+id);}
-  const after=s.project(p.id);assert.equal(after.cost,before.cost);assert.equal(after.searches,8);assert.equal(after.reads,41);assert.equal(after.mode,'batch');assert.deepEqual(after.report,before.report);assert.equal(s.sources(p.id).length,1);
+  const after=s.project(p.id);assert.equal(after.cost,before.cost);assert.equal(after.searches,8);assert.equal(after.reads,41);assert.equal(before.research_round,0);assert.equal(before.roundSearches,8);assert.equal(before.roundReads,41);assert.equal(after.research_round,1);assert.equal(after.roundSearches,0);assert.equal(after.roundReads,0);assert.equal(after.mode,'batch');assert.deepEqual(after.report,before.report);assert.equal(s.sources(p.id).length,1);
   await assert.rejects(e.resume(p.id,{focus:'fire_protection',clarification:'A new occupancy'}),/scope change/);
   const b=s.reserve(p.id,'codes',{mode:'batch',modelKey:'research',payload:{},reserve:500});s.updateAttempt(b.id,{state:'unknown'});await assert.rejects(e.resume(p.id,{focus:'fire_protection'}),/outstanding/);
 });
