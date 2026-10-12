@@ -136,6 +136,11 @@ test('research, NFPA and location proposals start research through engine.resume
   assert.equal((await post(f.id,{turnId:turn.id,proposalId:turn.proposals[0].id})).status,200);
   assert.deepEqual(s.stages(f.id).map(x=>[x.id,x.status]),[['jurisdiction','complete'],['contacts','complete'],['codes','queued'],['verification','queued'],['review','queued']]);
   assert.equal(turn.proposals[0].action,'nfpa_research');assert.ok(s.events(f.id).some(e=>e.message.startsWith('Focused NFPA research started.')));
+  // Saved answers that research has not used must go through a full round first.
+  const pending=create('PENDING_PRIVATE');s.saveQuestion(pending.id,{questionId:pending.questions[0].id,status:'answered',answer:'The parcel is outside city limits.'});
+  provider.fn=(payload,n)=>n===1?chatResponse('',{stop_reason:'tool_use',content:[nfpa()]}):chatResponse('Choose Research with saved answers.');provider.calls.length=0;
+  const refused=await reply(c,pending.id);assert.deepEqual(refused.proposals,[]);
+  const [error]=results(provider);assert.equal(error.is_error,true);assert.match(error.content,/saved answers or dismissals have not been used in research yet[\s\S]*Research with saved answers/);
   // Another discipline's focused update re-runs its referenced standards checklist.
   const m=create('MECHANICAL_PRIVATE',{discipline:'Mechanical'});turn=await propose(m,[nfpa()]);assert.equal(turn.proposals[0].action,'standards_research');
   assert.equal((await post(m.id,{turnId:turn.id,proposalId:turn.proposals[0].id})).status,200);
