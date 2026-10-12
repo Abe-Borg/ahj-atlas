@@ -120,9 +120,12 @@ test('report validation: matching editions verify, omitted targets become questi
   }
   // A discipline without a checklist keeps a standards row in its code table.
   const plain=checked([row()],{...input,discipline:'Acoustics'});assert.ok(!plain.standards);assert.ok(!plain.screening);assert.ok(plain.codes.some(c=>c.name.startsWith('ASHRAE 90.1')));
-  // A saved answer naming the standard suppresses its confirmation question.
+  // An answer naming the standard is user context and leaves its confirmation question open;
+  // a resolved question that names the standard covers it.
   const answered=[{id:questionId('Which ventilation standard applies?'),question:'Which ventilation standard applies?',status:'answered',answer:'The county uses ASHRAE 62.1-2019.'}];
-  assert.ok(!validateReport(report(),[source],[],[],mechanical,answered).gaps.some(g=>g.question.startsWith('Confirm ASHRAE 62.1')));
+  assert.ok(validateReport(report(),[source],[],[],mechanical,answered).gaps.some(g=>g.question.startsWith('Confirm ASHRAE 62.1')));
+  const named=[{id:questionId('Which edition of ASHRAE 62.1 does the county use?'),question:'Which edition of ASHRAE 62.1 does the county use?',status:'answered',answer:'2019.'}];
+  assert.ok(!validateReport(report(),[source],[],[],mechanical,named).gaps.some(g=>g.question.startsWith('Confirm ASHRAE 62.1')));
   // Standards that research checked stay in the report: designated rows become targets, others questions.
   const stages=[{id:'codes',status:'complete',output:'Brief.\n\nSTANDARDS CHECKLIST\nASHRAE 241 | conditional | Owner criteria may require it; confirm.\nSMACNA HVAC Duct Construction Standards 2005 | unresolved | Edition not found.'}];
   const kept=validateReport(report(),[source],stages,[],mechanical);assert.ok(kept.standards.some(r=>r.name.startsWith('ASHRAE 241')));assert.ok(kept.gaps.some(g=>g.question==='Confirm SMACNA HVAC Duct Construction Standards 2005: applicability and adopted edition.'));

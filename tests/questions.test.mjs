@@ -160,29 +160,37 @@ test('closing a question the last round still lists as open does not offer anoth
   s.saveQuestion(id,{questionId:two.id,status:'answered',answer:'October 2026.'});
   assert.equal(s.project(id).questionUpdatesPending,true);
 });
-test('a saved answer keeps the same confirm question from returning, and the report save closes it',async t=>{
+test('an answer to another question does not keep a confirm question from returning; answering it does, and the report save keeps that answer',async t=>{
   const {app,id}=await setup(t),s=app.store,engine=app.services.engine;
-  const confirm='Confirm NFPA 13: applicability and adopted edition.',other='Confirm NFPA 72: applicability and adopted edition.';
+  const confirm='Confirm NFPA 13: applicability and adopted edition.',other='Confirm NFPA 72: applicability and adopted edition.',sources=[{id:'S1',url:'https://example.com/adoption',text:evidenceText,read_full:true}];
   s.updateProject(id,{report:{...report(),gaps:[...gaps,{question:confirm,why:'Edition',contact:'AHJ',nextStep:'Confirm.'},{question:other,why:'Edition',contact:'AHJ',nextStep:'Confirm.'}]}});
   const systems=s.project(id).questions.find(q=>q.question===gaps[0].question);
-  s.saveQuestion(id,{questionId:systems.id,status:'answered',answer:'The project uses NFPA 13, 2019 edition.'});
-  const reviewed=validateReport({...report()},[{id:'S1',url:'https://example.com/adoption',text:evidenceText,read_full:true}],[],[],s.project(id).input,s.project(id).questionResponses);
+  // The outside review's case: the answer names NFPA 13 and says the edition is unknown.
+  s.saveQuestion(id,{questionId:systems.id,status:'answered',answer:'Wet-pipe sprinklers designed to NFPA 13 are proposed. The adopted edition is unknown.'});
+  let reviewed=validateReport({...report()},sources,[],[],s.project(id).input,s.project(id).questionResponses);
+  assert.ok(reviewed.gaps.some(g=>g.question===confirm));assert.ok(reviewed.gaps.some(g=>g.question===other));
+  // Answering the confirm question itself settles it for the next report.
+  const edition=s.project(id).questions.find(q=>q.question===confirm);
+  s.saveQuestion(id,{questionId:edition.id,status:'answered',answer:'The AHJ letter adopts NFPA 13, 2022 edition.'});
+  reviewed=validateReport({...report()},sources,[],[],s.project(id).input,s.project(id).questionResponses);
   assert.ok(!reviewed.gaps.some(g=>g.question===confirm));assert.ok(reviewed.gaps.some(g=>g.question===other));
   const attempt=s.reserve(id,'review',{mode:'realtime',modelKey:'review',payload:{},reserve:1});
   engine.saveReport(s.project(id),s.attempt(attempt.id),reviewed,'{}');
   const questions=s.project(id).questions;
-  assert.equal(questions.find(q=>q.question===confirm).status,'closed');assert.equal(questions.find(q=>q.question===confirm).reason,CLOSURE_REASON);
+  assert.equal(questions.find(q=>q.question===confirm).status,'answered');
   assert.equal(questions.find(q=>q.question===other).status,'open');
   assert.equal(questions.find(q=>q.id===systems.id).status,'answered');
-  assert.ok(s.events(id).some(e=>e.message.includes(confirm)&&e.message.includes(CLOSURE_REASON)));
 });
-test('confirm questions honor saved answers and closures and do not treat a rewording as the same question',()=>{
+test('confirm questions honor resolved questions that name the finding and closures, not answers, and do not treat a rewording as the same question',()=>{
   const source={id:'S1',url:'https://example.com/adoption',text:evidenceText,read_full:true};
   const base=report();base.jurisdiction.status='unverified';base.codes[0].status='unverified';
   const jurisdiction='Confirm the governing jurisdiction.',code='Confirm Fixture Building Code and its applicable edition.';
   const added=validateReport(structuredClone(base),[source]);
   assert.ok(added.gaps.some(g=>g.question===jurisdiction));assert.ok(added.gaps.some(g=>g.question===code));
-  const answered=[{id:questionId('Which authority governs this site?'),question:'Which authority governs this site?',status:'answered',answer:'Example District is the jurisdiction.'}];
+  // An answer naming the jurisdiction is user context, not a confirmed jurisdiction.
+  const told=[{id:questionId('Which authority governs this site?'),question:'Which authority governs this site?',status:'answered',answer:'Example District is the jurisdiction.'}];
+  assert.ok(validateReport(structuredClone(base),[source],[],[],input,told).gaps.some(g=>g.question===jurisdiction));
+  const answered=[{id:questionId('Which jurisdiction governs this site?'),question:'Which jurisdiction governs this site?',status:'answered',answer:'Example District.'}];
   const honored=validateReport(structuredClone(base),[source],[],[],input,answered);
   assert.ok(!honored.gaps.some(g=>g.question===jurisdiction));assert.ok(honored.gaps.some(g=>g.question===code));
   const closed=[{id:questionId(code),question:code,status:'closed',answer:'',reason:CLOSURE_REASON}];
@@ -193,6 +201,23 @@ test('confirm questions honor saved answers and closures and do not treat a rewo
   assert.ok(separate.gaps.some(g=>g.question===code));assert.ok(separate.gaps.some(g=>g.question===jurisdiction));
   const reopened=[{id:questionId(jurisdiction),question:jurisdiction,status:'open',answer:'',reason:''}];
   assert.ok(validateReport(structuredClone(base),[source],[],[],input,reopened).gaps.some(g=>g.question===jurisdiction));
+});
+test('saved answers that research has not used refuse a focused update until a full round uses them',async t=>{
+  const {app,id}=await setup(t),s=app.store,engine=app.services.engine;engine.tick=async()=>{};
+  const [systems]=s.project(id).questions;
+  // The outside review's case: the answer changes the jurisdiction the focused update would keep.
+  s.saveQuestion(id,{questionId:systems.id,status:'answered',answer:'The parcel is outside city limits; the county fire marshal reviews sprinklers.'});
+  assert.equal(s.project(id).questionUpdatesPending,true);
+  const before=s.stages(id).map(x=>[x.id,x.status]);
+  await assert.rejects(engine.resume(id,{focus:'fire_protection'}),/saved answers and dismissals have not been used in research yet[\s\S]*Research with saved answers/);
+  assert.equal(s.project(id).questionUpdatesPending,true);assert.deepEqual(s.stages(id).map(x=>[x.id,x.status]),before);
+  // Research with saved answers reopens every stage and uses them.
+  await engine.resume(id,{});
+  assert.ok(s.stages(id).every(x=>x.status==='queued'));assert.equal(s.project(id).questionUpdatesPending,false);
+  // Once a full round has used them, a focused update is accepted again.
+  for(const stage of s.stages(id))s.updateStage(id,stage.id,{status:'complete'});
+  await engine.resume(id,{focus:'fire_protection'});
+  assert.deepEqual(s.stages(id).map(x=>[x.id,x.status]),[['jurisdiction','complete'],['contacts','complete'],['codes','queued'],['verification','queued'],['review','queued']]);
 });
 test('an older question table gains a reason and can record a closure',t=>{
   const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-atlas-questions-migrate-'));

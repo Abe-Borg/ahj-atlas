@@ -56,8 +56,14 @@ test('a non-NFPA checklist row the final report omits becomes a confirmation gap
   const withAlarm=()=>{const r=report();r.codes.push({...r.codes[0],name:'CAN/ULC-S524 Installation of Fire Alarm Systems'});return r;};
   const out=validateReport(withAlarm(),[source],stages,[],input);
   assert.equal(out.gaps.filter(g=>g.question==='Confirm CSA C282: applicability and adopted edition.').length,1);assert.ok(!out.gaps.some(g=>g.question.includes('CAN/ULC-S524')));
+  // An answer is user context: naming the standard, even to say it does not apply, leaves the
+  // question open. Dismissing the question itself, or one that names the standard, settles it.
   const answered=[{id:questionId('Which emergency power standard applies?'),question:'Which emergency power standard applies?',status:'answered',answer:'CSA C282 does not apply; there is no emergency generator.'}];
-  assert.ok(!validateReport(withAlarm(),[source],stages,[],input,answered).gaps.some(g=>g.question.includes('CSA C282')));
+  assert.ok(validateReport(withAlarm(),[source],stages,[],input,answered).gaps.some(g=>g.question==='Confirm CSA C282: applicability and adopted edition.'));
+  const dismissed=[{id:questionId('Confirm CSA C282: applicability and adopted edition.'),question:'Confirm CSA C282: applicability and adopted edition.',status:'dismissed',answer:'',reason:'There is no emergency generator.'}];
+  assert.ok(!validateReport(withAlarm(),[source],stages,[],input,dismissed).gaps.some(g=>g.question.includes('CSA C282')));
+  const named=[{id:questionId('Does CSA C282 apply to this building?'),question:'Does CSA C282 apply to this building?',status:'answered',answer:'No.'}];
+  assert.ok(!validateReport(withAlarm(),[source],stages,[],input,named).gaps.some(g=>g.question.includes('CSA C282')));
   assert.ok(!validateReport(withAlarm(),[source],stages,[],{...input,discipline:'Acoustics'}).gaps.some(g=>g.question.includes('CSA C282')));
 });
 test('NFPA prompts apply to code and verification stages while signed legacy continuations keep their prefix',t=>{
@@ -100,9 +106,14 @@ test('capitalized completion values and applicability retain conservative eviden
   assert.equal(exclusion.applicabilityStatus,'not_applicable');assert.equal(exclusion.status,'verified');
   const wrongId=checked([row({status:'VERIFIED',adoptionSourceId:'s1'})]).fireStandards[0];assert.equal(wrongId.status,'unverified');
 });
-test('saved answers and closures suppress the same NFPA confirm question without matching a different designation',()=>{
+test('resolved questions and closures suppress the same NFPA confirm question by their own text, never by an answer or a different designation',()=>{
   const confirm=id=>`Confirm ${id}: applicability and adopted edition.`;
-  const answered=[{id:questionId('Which sprinkler standard applies?'),question:'Which sprinkler standard applies?',status:'answered',answer:'Use NFPA 13, 2019 edition.'}];
+  // The outside review's case: a system-scope answer names NFPA 13 but leaves its edition unknown.
+  const scope=[{id:questionId('What systems are proposed?'),question:'What systems are proposed?',status:'answered',answer:'Wet-pipe sprinklers designed to NFPA 13 are proposed. The adopted edition is unknown.'}];
+  assert.ok(validateReport(report(),[source],[],[],input,scope).gaps.some(g=>g.question===confirm('NFPA 13')));
+  const edition=[{id:questionId('Which sprinkler standard applies?'),question:'Which sprinkler standard applies?',status:'answered',answer:'Use NFPA 13, 2019 edition.'}];
+  assert.ok(validateReport(report(),[source],[],[],input,edition).gaps.some(g=>g.question===confirm('NFPA 13')));
+  const answered=[{id:questionId('Which edition of NFPA 13 applies?'),question:'Which edition of NFPA 13 applies?',status:'answered',answer:'2019, per the AHJ letter.'}];
   const honored=validateReport(report(),[source],[],[],input,answered);
   assert.ok(!honored.gaps.some(g=>g.question===confirm('NFPA 13')));
   assert.ok(honored.gaps.some(g=>g.question===confirm('NFPA 72')));
