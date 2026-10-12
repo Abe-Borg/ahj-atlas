@@ -113,6 +113,11 @@ test('report validation: matching editions verify, omitted targets become questi
   const v=validateReport(moved,[source],[],[],mechanical);assert.ok(v.standards.some(r=>r.name==='ANSI/ASHRAE/IES Standard 90.1-2019'));assert.ok(!v.codes.some(c=>/ASHRAE/.test(c.name)));assert.ok(v.gaps.some(g=>g.question==='Separate the grouped standards finding: ASHRAE 62.1 and 90.1'));
   // Rows the model put in the NFPA section of a mechanical report are not lost.
   const misplaced=report();misplaced.fireStandards=[row()];assert.ok(validateReport(misplaced,[source],[],[],mechanical).standards.some(r=>r.name.startsWith('ASHRAE 90.1')));
+  // A row naming a publisher the parser does not know is kept as a code row, not reported as grouped.
+  for(const [i,key,name] of [[mechanical,'standards','SMACNA HVAC Duct Construction Standards'],[input,'fireStandards','CAN/ULC-S524 Installation of Fire Alarm Systems']]){
+    const unknown=report();unknown[key]=[row({name})];const out=validateReport(unknown,[source],[],[],i);
+    assert.ok(out.codes.some(c=>c.name===name),name);assert.ok(!out[key].some(r=>r.name===name),name);assert.ok(!out.gaps.some(g=>g.question.startsWith('Separate the grouped')),name);
+  }
   // A discipline without a checklist keeps a standards row in its code table.
   const plain=checked([row()],{...input,discipline:'Acoustics'});assert.ok(!plain.standards);assert.ok(!plain.screening);assert.ok(plain.codes.some(c=>c.name.startsWith('ASHRAE 90.1')));
   // A saved answer naming the standard suppresses its confirmation question.
