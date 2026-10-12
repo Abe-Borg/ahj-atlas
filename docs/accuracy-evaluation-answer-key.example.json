@@ -1,0 +1,21 @@
+{
+  "about": "Template. Copy it to evaluation/answer-key.json (ignored by git) and replace every value with what the AHJ confirmed for your own project. See docs/accuracy-evaluation-2026-10-12.md.",
+  "cases": [
+    {
+      "id": "case-a",
+      "match": "Case A",
+      "source": "Where this key came from, for example: AHJ plan review letter dated 2026-03-04 and the county's adopting ordinance.",
+      "jurisdiction": { "authority": ["Example County", "County of Example"] },
+      "codes": [
+        { "name": ["Example Building Code", "International Building Code", "IBC"], "edition": "2021" },
+        { "name": ["Example Fire Code", "International Fire Code", "IFC"], "edition": "2021" }
+      ],
+      "standards": [
+        { "standard": "NFPA 13", "edition": "2019" },
+        { "standard": "NFPA 72", "edition": "2019" },
+        { "standard": "NFPA 20", "edition": "2019", "public": false },
+        { "standard": "NFPA 2001", "applicable": false }
+      ]
+    }
+  ]
+}
