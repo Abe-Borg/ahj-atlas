@@ -9,8 +9,8 @@ import {Store} from '../lib/store.mjs';
 import {Engine} from '../lib/engine.mjs';
 import {LIMITS,FETCH_HISTORY_CHARS} from '../lib/config.mjs';
 import {ResearchTools,sourceLinks} from '../lib/research-tools.mjs';
-import {selectPassages,allocateEvidence,mergeEvidence,validateProgress,progressMessage} from '../lib/evidence.mjs';
-import {researchPayload,reviewPayload,evidencePackage,validateReport} from '../lib/prompts.mjs';
+import {selectPassages,allocateEvidence,mergeEvidence,validateProgress,progressMessage,checkpointFromMessages,locatePins,EXCERPT_SEPARATOR} from '../lib/evidence.mjs';
+import {researchPayload,reviewPayload,evidencePackage,validateReport,REVIEW_FINAL} from '../lib/prompts.mjs';
 import {encodeReport} from '../lib/report-format.mjs';
 import {input,FakeProvider,fakeTools,report,nfpaReport,evidenceText,fetchBlocks,pdfFetchBlocks} from './fixtures.mjs';
 
@@ -180,6 +180,68 @@ test('final reviewer can recover an omitted passage from saved evidence, then re
   await e.dispatch(p.id,'review');assert.equal(s.stage(p.id,'review').status,'queued');assert.equal(s.project(p.id).reads,0);
   await e.dispatch(p.id,'review');assert.equal(s.stage(p.id,'review').status,'complete');assert.equal(s.project(p.id).report.codes[0].edition,'2021');assert.equal(s.project(p.id).reserved,0);
   assert.ok(provider.calls[0].tools.every(t=>t.name==='read_saved_source'));
+});
+// The outside review's reproduction: a long source whose decisive exception sits past the
+// first 2,400 characters of the reviewer's lookup and outside the initial evidence package.
+const EXCEPTION='Exception: Privately owned data centers are excluded from this paragraph.';
+const filler=n=>'Records of the archive are kept in order. '.repeat(Math.ceil(n/42)).slice(0,n);
+function lookupReview(t){
+  const fx=fixture(t),{store:s,provider,engine:e,project:p}=fx;
+  s.source(p.id,{url:'https://example.com/adoption',text:evidenceText,readFull:true});
+  s.source(p.id,{url:'https://example.com/long-ordinance',text:filler(123000)+EXCEPTION+' '+filler(30000),readFull:true});
+  e.tools=new ResearchTools(s,{fetchImpl:()=>{throw new Error('No network is allowed');}});
+  const base=provider.response.bind(provider),lookups=[{offset:118000,length:8000},{offset:0,length:500},{offset:2000,length:500}];
+  provider.response=payload=>{
+    if(payload.tool_choice?.type==='none'||!payload.tools)return base(payload);
+    const round=payload.messages.filter(m=>m.role==='assistant').length;
+    return {id:'msg_lookup'+round,stop_reason:'tool_use',usage,content:[{type:'redacted_thinking',data:'opaque-review-signature-'+round},{type:'tool_use',id:'saved'+round,name:'read_saved_source',input:{sourceId:'S2',...lookups[round]}}]};
+  };
+  return fx;
+}
+test('the final review keeps its conversation on its last request, so a looked-up exception reaches the report request',async t=>{
+  const {store:s,provider,engine:e,project:p}=lookupReview(t);
+  for(let round=0;round<3;round++){await e.dispatch(p.id,'review');assert.equal(s.stage(p.id,'review').status,'queued');}
+  assert.ok(!JSON.stringify(provider.calls[0].messages).includes(EXCEPTION));
+  await e.dispatch(p.id,'review');
+  const [first,,third,last]=provider.calls;
+  assert.equal(provider.calls.length,4);
+  assert.deepEqual(last.tool_choice,{type:'none'});
+  assert.deepEqual(last.tools,first.tools);assert.deepEqual(last.system,first.system);
+  // Append-only: the earlier conversation, its signed thinking and tool results are unchanged.
+  assert.deepEqual(last.messages.slice(0,third.messages.length),third.messages);
+  assert.deepEqual(last.messages.at(-1),{role:'system',content:REVIEW_FINAL});
+  assert.ok(JSON.stringify(last.messages).includes(EXCEPTION));
+  assert.equal(s.stage(p.id,'review').status,'complete');assert.ok(s.project(p.id).report);
+  assert.ok(s.diagnostics(p.id).some(d=>d.event==='review.final_live'&&d.stage_id==='review'));
+  assert.ok(!s.diagnostics(p.id).some(d=>d.event==='context.checkpoint'&&d.stage_id==='review'));
+  assert.ok(s.events(p.id).some(event=>/same review conversation/.test(event.message)));
+});
+test('a final review too large to keep is rebuilt with each looked-up passage pinned whole, and a new run clears the pins',async t=>{
+  const {store:s,provider,engine:e,project:p}=lookupReview(t);
+  provider.count=async payload=>payload.tool_choice?LIMITS.input+1:1500;
+  for(let round=0;round<4;round++)await e.dispatch(p.id,'review');
+  const last=provider.calls.at(-1);
+  assert.equal(provider.calls.length,4);assert.ok(!last.tools);assert.ok(!last.tool_choice);assert.equal(last.messages.length,1);
+  assert.ok(last.messages[0].content[0].text.includes(EXCEPTION));
+  assert.ok(s.diagnostics(p.id).some(d=>d.event==='context.checkpoint'&&d.stage_id==='review'&&d.details.reason==='input_context'));
+  assert.equal(s.stage(p.id,'review').status,'complete');
+  assert.ok(s.stage(p.id,'review').checkpoint.pinned.some(pin=>pin.sourceId==='S2'&&pin.start===118000));
+  e.tick=async()=>{};await e.resume(p.id,{clarification:'The owner confirmed the building is privately owned.'});
+  assert.deepEqual(s.stage(p.id,'review').checkpoint.pinned,[]);
+});
+test('pinned lookups are recorded for the final review only, found again after saved text grows, and funded first',()=>{
+  const result=JSON.stringify({sourceId:'S1',readFull:true,spans:[{start:0,end:10},{start:50,end:60}],text:'aaaaaaaaaa'+EXCERPT_SEPARATOR+'bbbbbbbbbb'});
+  const messages=[{role:'user',content:[{type:'tool_result',tool_use_id:'x',content:result}]}],sources=[{id:'S1'}];
+  assert.deepEqual(checkpointFromMessages({id:'review'},messages,sources).pinned,[{sourceId:'S1',start:0,end:10,anchor:'aaaaaaaaaa'},{sourceId:'S1',start:50,end:60,anchor:'bbbbbbbbbb'}]);
+  assert.equal(checkpointFromMessages({id:'codes'},messages,sources).pinned,undefined);
+  const text='a'.repeat(1000)+'PINNED_START'+'b'.repeat(3000)+'PINNED_END'+'c'.repeat(5000),start=1000,end=start+3022,pin={sourceId:'S1',start,end,anchor:text.slice(start,start+80)};
+  assert.deepEqual(locatePins(text,[pin]),[{start,end}]);
+  const grown='z'.repeat(700)+text;
+  assert.deepEqual(locatePins(grown,[pin]),[{start:start+700,end:end+700}]);
+  assert.deepEqual(locatePins('unrelated text',[pin]),[]);
+  assert.match(selectPassages(grown,{limit:4000,fill:true,pinned:locatePins(grown,[pin])}).text,/PINNED_STARTb{3000}PINNED_END/);
+  assert.deepEqual(allocateEvidence([{text:'x'.repeat(50000)},{text:'y'.repeat(50000)}],20000,5000,[0,12000]),[5000,12000]);
+  assert.deepEqual(allocateEvidence([{text:'x'.repeat(50000)},{text:'y'.repeat(50000)}],20000,5000),[5000,5000]);
 });
 const reviewText=(sections=[])=>{const wire=encodeReport(report());wire.items=wire.items.filter(row=>!sections.includes(row.section));return JSON.stringify(wire);};
 test('a final review that omits its jurisdiction and coverage rows is kept with both rebuilt as unconfirmed',async t=>{
