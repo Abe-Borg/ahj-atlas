@@ -29,7 +29,7 @@ const findingHeaders={
   Notes:['Title','Note','Origin','Saved'],
   'Research briefs':['Stage','Status','Findings','Limitations'],
 };
-const sourceHeaders=['Source ID','Title','URL','Retrieved','Reading method','Read as evidence','Document date'];
+const sourceHeaders=['Source ID','Title','URL','Date recorded','Date type','Reading method','Read as evidence','Document date'];
 const always=['Project','Codes','Contacts','Authorities','Submission requirements','Questions to resolve','Sources'];
 
 function grid(ws){
@@ -78,7 +78,7 @@ test('essentials keeps the finding sheets and drops the research log once a repo
   for(const name of names(full))assert.deepEqual(grid(same.getWorksheet(name)),grid(full.getWorksheet(name)),name);
 
   const fullProject=fields(full.getWorksheet('Project')),slimProject=fields(slim.getWorksheet('Project'));
-  assert.deepEqual(fullProject.map(row=>row[0]),['Project','Address','Parcel / site description','Previous addresses','Discipline','Status','Mode','Research date','Estimated API cost','Estimated pending cost','Summary','Jurisdiction','Jurisdiction status','Jurisdiction evidence','Limitations']);
+  assert.deepEqual(fullProject.map(row=>row[0]),['Project','Address','Parcel / site description','Previous addresses','Discipline','Status','Mode','Exported','Estimated API cost','Estimated pending cost','Summary','Jurisdiction','Jurisdiction status','Jurisdiction evidence','Limitations']);
   assert.deepEqual(slimProject.map(row=>row[0]),fullProject.map(row=>row[0]).filter(field=>!['Mode','Estimated API cost','Estimated pending cost'].includes(field)));
   assert.equal(fullProject.find(row=>row[0]==='Mode')[1],'realtime');
   assert.equal(fullProject.find(row=>row[0]==='Estimated API cost')[1],`$${data.project.estimatedApiCost.toFixed(4)}`);
@@ -109,9 +109,11 @@ test('essentials keeps the finding sheets and drops the research log once a repo
   const fullSources=fields(full.getWorksheet('Sources')),slimSources=fields(slim.getWorksheet('Sources'));
   assert.equal(slimSources.length,2);
   assert.deepEqual(slimSources,fullSources.map(row=>row.slice(0,-1)));
-  assert.equal(slimSources[1][4],'census');
-  assert.equal(slimSources[1][5],'Discovery / visual only');
-  assert.equal(slimSources[1][6],'2019-06-01');
+  assert.equal(slimSources[0][4],'Retrieved');
+  assert.equal(slimSources[1][4],'Discovered');
+  assert.equal(slimSources[1][5],'census');
+  assert.equal(slimSources[1][6],'Discovery / visual only');
+  assert.equal(slimSources[1][7],'2019-06-01');
   assert.ok(fullSources[0].at(-1).includes('EXCERPT-MARKER-'));
   assert.equal(fullSources[0].at(-1).length,16000);
   assert.equal(contains(slim,'EXCERPT-MARKER-'),false);
@@ -145,7 +147,7 @@ test('essentials keeps research briefs and empty finding sheets when no report e
   assert.deepEqual(grid(slim.getWorksheet('Research briefs'))[0],findingHeaders['Research briefs']);
   const codes=fields(slim.getWorksheet('Research briefs')).find(row=>row[0]==='codes');
   assert.deepEqual(codes,['codes','partial',codesBrief,'Edition not confirmed.']);
-  assert.deepEqual(fields(slim.getWorksheet('Project')).map(row=>row[0]),['Project','Address','Discipline','Status','Research date','Summary','Jurisdiction','Jurisdiction status','Jurisdiction evidence','Limitations']);
+  assert.deepEqual(fields(slim.getWorksheet('Project')).map(row=>row[0]),['Project','Address','Discipline','Status','Exported','Summary','Jurisdiction','Jurisdiction status','Jurisdiction evidence','Limitations']);
   assert.equal(fields(slim.getWorksheet('Project')).find(row=>row[0]==='Summary')[1],'Research is incomplete.');
   assert.equal(fields(full.getWorksheet('Project')).some(row=>row[0]==='Mode'),true);
   assert.deepEqual(grid(slim.getWorksheet('Sources'))[0],sourceHeaders);
