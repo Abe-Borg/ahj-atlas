@@ -72,7 +72,7 @@ const proposing=(provider,cards)=>{provider.fn=payload=>payload.messages.at(-1).
 async function asked(c,id,body){c.start(id,body);await settled(c);return c.view(id).turns.at(-1);}
 const applyCard=(c,id,turn,action)=>c.apply(id,{turnId:turn.id,proposalId:turn.proposals.find(x=>x.action===action).id});
 
-test('applying a note from an Ask Atlas reply dismisses the question it asked about',async t=>{
+test('applying a note from an Ask Atlas reply saves the note and leaves the question it asked about open',async t=>{
   const provider=new ChatProvider();
   const {app,id,question}=await setup(t,provider),c=app.services.chat,s=app.store;
   proposing(provider,()=>[note()]);
@@ -80,13 +80,13 @@ test('applying a note from an Ask Atlas reply dismisses the question it asked ab
   assert.equal(turn.askedQuestionId,question.id);assert.deepEqual(turn.proposals.map(x=>x.action),['report_note']);
   assert.equal(s.project(id).questions[0].status,'open');
   await applyCard(c,id,turn,'report_note');
+  // The outside review's case: a note that the edition still needs written confirmation is a
+  // saved finding, not a resolution, so the question that tracks it stays open.
   const saved=s.project(id).questions[0];
-  assert.equal(saved.status,'dismissed');assert.equal(saved.answer,'');
-  assert.equal(saved.reason,'Resolved with Ask Atlas: you applied its proposal to save a note to the report.');
+  assert.equal(saved.status,'open');assert.equal(saved.answer,'');assert.equal(saved.reason,'');
   assert.deepEqual(s.notes(id).map(n=>n.title),['Proposed systems']);
-  assert.match(s.events(id)[0].message,/^Question dismissed: .*Resolved with Ask Atlas/);
-  // A note from a typed message leaves the questions alone.
-  s.saveQuestion(id,{questionId:question.id,status:'open'});
+  assert.ok(!s.events(id).some(e=>/^Question dismissed/.test(e.message)));
+  // A note from a typed message leaves the questions alone too.
   proposing(provider,()=>[note('Typed note')]);
   turn=await asked(c,id,{clientId:randomUUID(),message:'Save the systems finding to the report.',mode:'standard'});
   assert.equal(Object.hasOwn(turn,'askedQuestionId'),false);
@@ -105,13 +105,18 @@ test('Ask Atlas leaves the question to its own card, a resolved status, or the r
   let turn=await asked(c,id,ask(question.id));
   await applyCard(c,id,turn,'report_note');assert.equal(status(question.id).status,'open');
   await applyCard(c,id,turn,'answer_question');assert.equal(status(question.id).status,'answered');
-  // An answer to another question resolves that one and dismisses the asked one.
+  // An answer to another question resolves that one and leaves the asked one open.
   s.saveQuestion(id,{questionId:question.id,status:'open'});
   proposing(provider,()=>[answerFor(other.id,'A 2025 flow test is on file [S1].')]);
   turn=await asked(c,id,ask(question.id));
   await applyCard(c,id,turn,'answer_question');
   assert.equal(status(other.id).status,'answered');
-  assert.equal(status(question.id).status,'dismissed');assert.equal(status(question.id).reason,'Resolved with Ask Atlas: you applied its proposal to answer a question.');
+  assert.equal(status(question.id).status,'open');assert.equal(status(question.id).reason,'');
+  // A dismissal card for the asked question is how the reply resolves it without an answer.
+  proposing(provider,()=>[tool('propose_question_update',{questionId:question.id,status:'dismissed',answer:'',reason:'Not needed for this permit phase.'})]);
+  turn=await asked(c,id,ask(question.id));
+  await applyCard(c,id,turn,'dismiss_question');
+  assert.equal(status(question.id).status,'dismissed');assert.equal(status(question.id).reason,'Not needed for this permit phase.');
   // An answered question stays answered.
   proposing(provider,()=>[note('Water supply')]);
   turn=await asked(c,id,ask(other.id));
