@@ -6,7 +6,7 @@ A later research round could have nothing left to retrieve. The 80-search and 10
 
 | Before | Now |
 | --- | --- |
-| Searches and reads counted across the project's lifetime. | They count within the current **research round**. A round starts with the project and again at a continuation that adds context or saved answers, corrects the address, country or site description, or runs the focused NFPA update. A plain continuation and a partial report keep the current round. |
+| Searches and reads counted across the project's lifetime. | They count within the current **research round**. A round starts with the project and again at a continuation that adds context or saved answers, corrects the address, country or site description, or runs a focused NFPA or standards update. A plain continuation and a partial report keep the current round. |
 | The evidence check's 15 searches and 20 reads summed every attempt the stage ever made. | They sum the stage's attempts in the current round. |
 | The verification assignment stated the fixed stage allowance. | It states what remains: "N of its 15 searches and M of its 20 source reads remain in this research round." The project line now reads "remain in this research round" instead of "across the project". |
 | The Continue research and NFPA dialogs showed only the estimated cost. | They also show the searches and reads left in the current round, and whether the action starts a new round. |

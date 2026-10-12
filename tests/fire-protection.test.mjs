@@ -18,7 +18,7 @@ const checked=(rows=[],i=input)=>{const r=report();r.fireStandards=rows;return v
 function fixture(t){const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-atlas-test-fire-')),store=new Store(dir),provider=new FakeProvider(),engine=new Engine(store,provider,()=>true,{autoStart:false,tools:fakeTools(store)});t.after(async()=>{await engine.close();store.close();assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-atlas-test-fire-')));rmSync(dir,{recursive:true,force:true});});return {store,provider,engine};}
 
 test('fire profile recognizes custom specialties, scopes data center systems and never prescribes editions',()=>{
-  assert.ok(isFireProtection({discipline:'Fire-protection engineering'}));assert.ok(isFireProtection({discipline:'FPE'}));assert.equal(isFireProtection({discipline:'Electrical'}),false);
+  assert.ok(isFireProtection({discipline:'Fire-protection engineering'}));assert.ok(isFireProtection({discipline:'FPE'}));assert.ok(isFireProtection({discipline:'Fire alarm design'}));assert.equal(isFireProtection({discipline:'Electrical'}),false);
   const baseline=fireProfile(input),dc=fireProfile({...input,occupancy:'Hyperscale data center'});
   for(const id of ['NFPA 10','NFPA 13','NFPA 14','NFPA 20','NFPA 22','NFPA 24','NFPA 25','NFPA 72'])assert.ok(baseline.some(t=>t.standard===id));
   for(const id of ['NFPA 75','NFPA 2001','NFPA 855','NFPA 110','NFPA 111','NFPA 30','NFPA 37'])assert.ok(dc.some(t=>t.standard===id));
@@ -32,7 +32,7 @@ test('completion rejects broad coverage, omitted standards and unsupported compl
   done.standards=fireProfile(input).map(t=>({standard:t.standard,applicability:'unresolved',finding:'No adoption evidence in the synthetic source. Ask for the official reference table.'}));
   assert.match(completionError(done,'codes',input),/coverage to unresolved/);done.coverage.codes='unresolved';assert.equal(completionError(done,'codes',input),'');assert.match(completionBrief(done),/NFPA 72/);
   done.standards=done.standards.filter(t=>t.standard!=='NFPA 13');assert.match(completionError(done,'codes',input),/missing NFPA 13/);
-  assert.equal(completionError(done,'codes',{discipline:'Mechanical'}),'');
+  assert.equal(completionError(done,'codes',{discipline:'Acoustics'}),'');
 });
 test('completion accepts Canadian and labelled single-standard rows but names grouped rows',()=>{
   const finding='Referenced-documents table not yet read; obtain the edition from the AHJ.';
@@ -58,7 +58,7 @@ test('a non-NFPA checklist row the final report omits becomes a confirmation gap
   assert.equal(out.gaps.filter(g=>g.question==='Confirm CSA C282: applicability and adopted edition.').length,1);assert.ok(!out.gaps.some(g=>g.question.includes('CAN/ULC-S524')));
   const answered=[{id:questionId('Which emergency power standard applies?'),question:'Which emergency power standard applies?',status:'answered',answer:'CSA C282 does not apply; there is no emergency generator.'}];
   assert.ok(!validateReport(withAlarm(),[source],stages,[],input,answered).gaps.some(g=>g.question.includes('CSA C282')));
-  assert.ok(!validateReport(withAlarm(),[source],stages,[],{...input,discipline:'Mechanical'}).gaps.some(g=>g.question.includes('CSA C282')));
+  assert.ok(!validateReport(withAlarm(),[source],stages,[],{...input,discipline:'Acoustics'}).gaps.some(g=>g.question.includes('CSA C282')));
 });
 test('NFPA prompts apply to code and verification stages while signed legacy continuations keep their prefix',t=>{
   const {store:s}=fixture(t),p=s.create({...input,occupancy:'Data center'});
@@ -80,7 +80,7 @@ test('edition evidence must match this standard and adoption chain, not parent-c
   const parent=report();parent.fireStandards=[row({edition:'2021',evidence:[{sourceId:'S1',quote:'Use NFPA 13 as referenced by the 2021 International Building Code.',pageOrSection:'Parent code'}]})];assert.equal(validateReport(parent,[{...source,text:source.text+' Use NFPA 13 as referenced by the 2021 International Building Code.'}],[],[],input).fireStandards[0].status,'unverified');
   const conditional=checked([row({applicabilityStatus:'conditional'})]);assert.equal(conditional.fireStandards[0].status,'verified');assert.ok(conditional.gaps.some(g=>g.question.includes('NFPA 13')));
   assert.equal(checked([row({applicabilityStatus:'not_applicable',evidence:[]})]).fireStandards[0].applicabilityStatus,'unresolved');
-  const other=checked([row()],{...input,discipline:'Mechanical'});assert.ok(!other.fireStandards);assert.ok(!other.fireProtection);assert.ok(other.codes.some(c=>c.name.startsWith('NFPA 13')));
+  const other=checked([row()],{...input,discipline:'Acoustics'});assert.ok(!other.fireStandards);assert.ok(!other.fireProtection);assert.ok(other.codes.some(c=>c.name.startsWith('NFPA 13')));
 });
 
 test('capitalized completion values and applicability retain conservative evidence requirements',()=>{

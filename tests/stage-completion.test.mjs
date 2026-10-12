@@ -12,8 +12,9 @@ import {input,FakeProvider,fakeTools} from './fixtures.mjs';
 const usage={input_tokens:100,output_tokens:100,server_tool_use:{web_search_requests:0}};
 const response=(content,stop_reason='tool_use')=>({id:'msg_wrap_up',stop_reason,usage,content});
 const finished=()=>response([{type:'tool_use',id:'finish',name:'finish_research',input:{brief:'S1 establishes the synthetic jurisdiction. Other assigned findings remain unresolved; confirm them with the responsible office.',coverage:{jurisdiction:'supported',contacts:'unresolved',codes:'unresolved',process:'unresolved'}}}]);
+// A discipline without a standards checklist, so canned finish calls need no standards rows.
 function fixture(t){
-  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-completion-')),store=new Store(dir),provider=new FakeProvider(),tools=fakeTools(store),engine=new Engine(store,provider,()=>true,{autoStart:false,tools}),project=store.create({...input,discipline:'Architecture'});
+  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-completion-')),store=new Store(dir),provider=new FakeProvider(),tools=fakeTools(store),engine=new Engine(store,provider,()=>true,{autoStart:false,tools}),project=store.create({...input,discipline:'Acoustics'});
   t.after(async()=>{await engine.close();store.close();rmSync(dir,{recursive:true,force:true});});
   return {store,provider,engine,project,tools};
 }
