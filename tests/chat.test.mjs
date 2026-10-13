@@ -447,6 +447,38 @@ test('chat HTTP mutations require authorization and validate message and reply d
   assert.equal(app.store.chatTurns(a.id)[0].mode,'opus');
 });
 
+test('documents attached to a message are saved with it, named to the model in that message and its history, and validated',async t=>{
+  const {app,provider,a,b,post}=await setup(t),s=app.store,c=app.services.chat,tools=c.tools;
+  const add=(id,name,text)=>addDocument(s,tools,id,{name,type:'text/plain',buffer:Buffer.from(text)});
+  const letter=await add(a.id,'Fire Marshal letter.txt','The fire marshal enforces NFPA 13 with local amendments.');
+  for(const name of ['Other one.txt','Other two.txt'])await add(b.id,name,name+' belongs to BRAVO_PRIVATE.');
+  const web=s.sources(a.id).find(x=>x.kind!=='upload'),other=s.sources(b.id).filter(x=>x.kind==='upload').at(-1);
+  assert.ok(!s.sources(a.id).some(x=>x.id===other.id));
+  // Only this project's own documents, as a short list of distinct source IDs, and only with a typed message.
+  const question=s.project(a.id).questions[0].id;
+  for(const value of [body('Hi',{attachments:letter.id}),body('Hi',{attachments:[letter.id,letter.id]}),body('Hi',{attachments:Array.from({length:CHAT_LIMITS.attachments+1},(_,i)=>'S'+(i+1))}),body('Hi',{attachments:[web.id]}),body('Hi',{attachments:[other.id]}),body('Hi',{attachments:['S99']}),body('Hi',{attachments:[2]}),{clientId:randomUUID(),questionId:question,attachments:[letter.id]}]){
+    const response=await post(a.id,value);assert.equal(response.status,400);assert.match((await response.json()).error,/Attach/);
+  }
+  assert.equal(s.chatTurns(a.id).length,0);
+  const request=body('Summarize the letter I attached.',{attachments:[letter.id]});
+  assert.equal((await post(a.id,request)).status,202);await settled(c);
+  const attached=[{sourceId:letter.id,title:'Fire Marshal letter.txt'}];
+  assert.deepEqual(c.view(a.id).turns[0].attachments,attached);assert.deepEqual(projectSection(s,a.id,'conversation')[0].attachments,attached);
+  const text=provider.calls[0].payload.messages.at(-1).content.at(-1).text;
+  assert.ok(text.startsWith('Latest user message:\nSummarize the letter I attached.\n\nDocuments I attached to this message'));
+  assert.match(text,/read them with read_saved_source/);assert.ok(text.endsWith(JSON.stringify(attached)));
+  assert.ok(JSON.stringify(provider.calls[0].payload).includes('enforces NFPA 13 with local amendments'));
+  // A repeated send with the same identifier and documents is the same message; changed documents are refused.
+  assert.equal((await post(a.id,request)).status,202);assert.equal(s.chatTurns(a.id).length,1);
+  assert.equal((await post(a.id,{...request,attachments:[]})).status,400);
+  // A later message carries the attachment note in its history, exactly as first sent, and not in its own text.
+  const turn=s.createChatTurn(a.id,{clientId:randomUUID(),message:'What else?'}),next=chatPayload(s,turn);
+  assert.equal(next.messages.at(-1).content.at(-1).text,'Latest user message:\nWhat else?');
+  assert.ok(next.messages[0].content.some(x=>x.type==='text'&&x.text===text.slice('Latest user message:\n'.length)));
+  assert.equal(JSON.stringify(next).split('Documents I attached').length,2);
+  assert.ok(!JSON.stringify(next).includes('BRAVO_PRIVATE'));
+});
+
 // A fake public web: pages are served without network access.
 const page=(title,text)=>({url:'',buffer:Buffer.from(`<html><head><title>${title}</title></head><body><p>${text}</p><a href="https://county.example.gov/amendments">Fire code amendments</a></body></html>`),type:'text/html',modified:''});
 function fakeWeb(app,pages){

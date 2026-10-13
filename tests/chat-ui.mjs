@@ -1,6 +1,6 @@
 // Real-browser regression run by npm run test:ui, with fake responses and no paid API calls.
 import assert from 'node:assert/strict';
-import { mkdtempSync,mkdirSync,rmSync } from 'node:fs';
+import { mkdtempSync,mkdirSync,rmSync,writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import puppeteer from 'puppeteer-core';
@@ -169,8 +169,45 @@ try{
   await click('[data-tab=chat]');await page.waitForSelector('.chat-heading');
   custom=null;
   await click(`[data-project="${b.id}"]`);await page.waitForFunction(()=>document.querySelector('.chat-heading h2')?.textContent.includes('BRAVO'));
+  phase='attach documents';
+  // Each added document refreshes the project last; its Sources count shows the page has settled.
+  const settledSources=n=>page.waitForFunction(n=>document.querySelector('[data-tab=sources] .tab-count')?.textContent===String(n),{timeout:10000},n);
+  const pick=(selector,name,text,type='text/plain')=>page.$eval(selector,(e,name,text,type)=>{const files=new DataTransfer();files.items.add(new File([text],name,{type}));e.files=files.files;e.dispatchEvent(new Event('change',{bubbles:true}));},name,text,type);
+  assert.equal(await page.$eval('#chat-attach-button',e=>e.textContent),'Attach document');assert.match(await page.$eval('.chat-attach .field-help',e=>e.textContent),/Removing it here keeps it in Sources/);
+  // An unsupported file is refused with the server's explanation and attaches nothing.
+  await pick('#chat-file','notes.docx','PK\u0003\u0004word','application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  await page.waitForFunction(()=>document.querySelector('#chat-error')?.textContent.includes('Save other formats'),{timeout:10000});assert.equal(await page.$('.chat-attachments'),null);
+  // A chosen file joins Sources and is listed on the unsent message, its name escaped.
+  await pick('#chat-file','AHJ <letter>.txt','The county enforces the 2024 International Fire Code with local amendments.');
+  await page.waitForFunction(()=>document.querySelector('.chat-attachments li')?.textContent.includes('AHJ <letter>.txt'),{timeout:10000});
+  await settledSources(2);const letterSource=app.store.sources(b.id).find(x=>x.title==='AHJ <letter>.txt');assert.equal(letterSource.kind,'upload');assert.equal(await page.$('.chat-attachments letter'),null);assert.equal(await page.$eval('#chat-error',e=>e.textContent),'');
+  // A file dropped on the composer is attached the same way; removing it keeps it in Sources.
+  await page.$eval('#chat-form',form=>{const files=new DataTransfer();files.items.add(new File(['Owner criteria: in-rack sprinklers are required.'],'Owner criteria.txt',{type:'text/plain'}));form.dispatchEvent(new DragEvent('drop',{dataTransfer:files,bubbles:true,cancelable:true}));});
+  await page.waitForFunction(()=>document.querySelectorAll('.chat-attachments li').length===2,{timeout:10000});
+  await settledSources(3);const criteria=app.store.sources(b.id).find(x=>x.title==='Owner criteria.txt');
+  // Attach document opens the file chooser and keeps keyboard focus through the upload.
+  const reviewFile=path.join(dir,'Plan review comments.txt');writeFileSync(reviewFile,'Plan review: hydraulic calculations must use the 2025 edition of NFPA 13.');
+  const [chooser]=await Promise.all([page.waitForFileChooser(),click('#chat-attach-button')]);assert.equal(chooser.isMultiple(),true);await chooser.accept([reviewFile]);
+  await page.waitForFunction(()=>document.querySelectorAll('.chat-attachments li').length===3,{timeout:10000});await settledSources(4);
+  assert.equal(await page.evaluate(()=>document.activeElement?.id),'chat-attach-button');
+  const review=app.store.sources(b.id).find(x=>x.title==='Plan review comments.txt');
+  await click(`[data-chat-detach="${criteria.id}"]`);await page.waitForFunction(()=>document.querySelectorAll('.chat-attachments li').length===2);
+  assert.ok(app.store.sources(b.id).some(x=>x.id===criteria.id));assert.equal(await page.evaluate(()=>document.activeElement?.id),'chat-attach-button');
+  let attachedPayload=null;custom=payload=>{attachedPayload=payload;return chatResponse('The attached letter confirms local amendments.');};
+  await page.type('#chat-message','What does the letter I attached say?');await click('#chat-form button[type=submit]');
+  await page.waitForFunction(()=>document.querySelector('#chat-history')?.textContent.includes('The attached letter confirms local amendments.'),{timeout:10000});
+  const latestText=attachedPayload.messages.at(-1).content.at(-1).text;
+  const sentAttachments=[{sourceId:letterSource.id,title:'AHJ <letter>.txt'},{sourceId:review.id,title:'Plan review comments.txt'}];
+  assert.match(latestText,/^Latest user message:\nWhat does the letter I attached say\?\n\nDocuments I attached to this message/);assert.ok(latestText.endsWith(JSON.stringify(sentAttachments)));assert.ok(!latestText.includes(criteria.id+'"'));
+  assert.deepEqual(app.store.chatTurns(b.id).at(-1).attachments,sentAttachments);
+  // Sending clears the composer's list; the sent message shows its document, which opens in Sources.
+  assert.equal(await page.$('.chat-attachments'),null);
+  assert.deepEqual(await page.$$eval('.chat-turn-attachments button',b=>b.map(x=>x.textContent)),sentAttachments.map(a=>`${a.sourceId} · ${a.title}`));
+  await page.reload();await click('[data-tab=chat]');await page.waitForSelector('.chat-turn-attachments');
+  await click(`.chat-turn-attachments [data-source="${letterSource.id}"]`);await page.waitForSelector(`#source-${letterSource.id}`);assert.match(await page.$eval(`#source-${letterSource.id}`,e=>e.textContent),/your document/);
+  await click('[data-tab=chat]');await page.waitForSelector('#chat-message');custom=null;
   phase='desktop/mobile layout';await click('#chat-limits>summary');await page.type('#chat-message','Which missing details should I confirm with the owner?');await click('#chat-history .chat-citation summary');assert.equal(await page.$eval('#chat-history .chat-citation',e=>e.open),true);
   mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/project-chat-desktop.png',fullPage:true});await page.setViewport({width:390,height:844});await page.screenshot({path:'test-results/project-chat-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
-  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, three reply depths including Economy payload and history reload, Economy decline retry on Standard, stop, stale-response protection, estimated costs without budgets, Markdown tables and lists, live draft and step, declined reply with retry on the other model, proposal cards applied only on Apply, a report note saved, shown on Overview and removed, Ask Atlas on a question card using the selected reply depth and Apply, a note applied from Ask Atlas leaving the asked question open, Chat with Atlas label, and desktop/mobile layout. No paid API calls.');
+  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, three reply depths including Economy payload and history reload, Economy decline retry on Standard, stop, stale-response protection, estimated costs without budgets, Markdown tables and lists, live draft and step, declined reply with retry on the other model, proposal cards applied only on Apply, a report note saved, shown on Overview and removed, Ask Atlas on a question card using the selected reply depth and Apply, a note applied from Ask Atlas leaving the asked question open, documents attached by choosing or dropping files (refused, removed and sent) and shown on the sent message, Chat with Atlas label, and desktop/mobile layout. No paid API calls.');
 }catch(e){console.error('Failed during: '+phase);if(page){console.error(await page.evaluate(()=>document.body.innerText).catch(()=>''));await page.screenshot({path:'test-results/project-chat-failure.png',fullPage:true}).catch(()=>{});}throw e;}
 finally{for(const release of releases)release();await browser?.close();await app?.close();assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-chat-ui-')));rmSync(dir,{recursive:true,force:true});}

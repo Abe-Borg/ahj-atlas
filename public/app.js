@@ -16,6 +16,8 @@ let updateState=null;
 const questionDrafts=new Map(),questionBusy=new Set();
 const nameDrafts=new Map(),nameBusy=new Set(),nameErrors=new Map();
 const chatDrafts=new Map(),chatOptions=new Map(),chatPending=new Set(),chatErrors=new Map(),chatRequests=new Map(),chatOlder=new Map();
+// Documents attached to each project's unsent message, and the file names still being added.
+const chatAttachments=new Map(),chatUploading=new Map();
 // One new-project draft for this page, kept in memory like unsent chat and question
 // drafts. Opening a saved project leaves it in place. New research restores it.
 // Choosing New research again while that form is open asks before clearing it.
@@ -301,7 +303,8 @@ function codesView(r){
 }
 function codeTable(rows){return `<div class="table-wrap"><table><thead><tr><th>Code / standard</th><th>Edition</th><th>Authority & adoption</th><th>Evidence status</th><th>Applicability & evidence</th></tr></thead><tbody>${rows.map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td><strong>${esc(c.edition||'Unconfirmed')}</strong><small>${c.effectiveDate?'Effective '+esc(c.effectiveDate):'Effective date unconfirmed'}</small></td><td>${esc(c.authority)}<small>${esc(({direct:'Direct adoption',referenced:'Incorporated by reference',guidance:'Agency guidance',unconfirmed:'Adoption unconfirmed'})[c.adoptionType]||c.adoptionType)}</small><small>${esc(c.adoptionInstrument)}</small></td><td>${badge(c.status)}</td><td class="code-detail">${c.applicabilityStatus?`<strong>${esc(applicabilityLabel(c.applicabilityStatus))}</strong>`:''}<p>${esc(c.applicability)}</p><details><summary>View amendments & sources</summary><p><strong>Local amendments:</strong> ${esc(c.amendments||'Not confirmed')}</p>${c.notes?`<p>${esc(c.notes)}</p>`:''}${evidenceList(c)}</details></td></tr>`).join('')}</tbody></table></div>`;}
 // A document the user has (an AHJ letter, an emailed amendment, owner or insurer criteria) joins the register.
-const uploadForm=()=>`<form class="source-upload" id="document-upload"><div><h3>Add a document you have</h3><p class="field-help">PDF, HTML or plain text, up to 50 MB. It is saved in this project as a source you provided, which chat can quote right away. Continue research to include it in the report. Save Word files as PDF first; a scanned PDF needs text recognition.</p></div><div class="source-upload-row"><label class="visually-hidden" for="document-file">Document to add</label><input type="file" id="document-file" accept=".pdf,.txt,.text,.md,.csv,.json,.htm,.html,application/pdf,text/plain,text/html,text/markdown,text/csv"><button class="button secondary" type="submit">Add document</button></div><div class="inline-error" role="alert" id="document-error"></div></form>`;
+const documentTypes='.pdf,.txt,.text,.md,.csv,.json,.htm,.html,application/pdf,text/plain,text/html,text/markdown,text/csv';
+const uploadForm=()=>`<form class="source-upload" id="document-upload"><div><h3>Add a document you have</h3><p class="field-help">PDF, HTML or plain text, up to 50 MB. It is saved in this project as a source you provided, which chat can quote right away. Continue research to include it in the report. Save Word files as PDF first; a scanned PDF needs text recognition.</p></div><div class="source-upload-row"><label class="visually-hidden" for="document-file">Document to add</label><input type="file" id="document-file" accept="${documentTypes}"><button class="button secondary" type="submit">Add document</button></div><div class="inline-error" role="alert" id="document-error"></div></form>`;
 function sourcesView(sources){if(!sources.length)return uploadForm()+empty('No sources yet','Official webpages, ordinances, maps, and documents will be recorded here as they are found.');return uploadForm()+sources.map(s=>`<article class="source-card" id="source-${esc(s.id)}"><div class="finding-top"><span class="eyebrow">${esc(s.id)} · ${esc(s.kind==='upload'?'your document':s.kind.replace('-',' '))}</span><span class="status-pill ${s.read_full?'green':''}">${s.read_full?'Read as evidence':'Discovered / visual only'}</span></div><h3>${link(s.url,s.title)||esc(s.title)}</h3><p>${s.kind==='upload'?'Added by you to this project':esc(s.url)}</p><p>${s.kind==='upload'?'Added':s.read_full?'Retrieved':s.kind==='pdf-visual'?'Inspected':'Discovered'} ${esc(date(s.retrieved))}${s.document_date?' · Source modified '+esc(s.document_date):''}</p>${s.text?`<details><summary>Inspect retrieved excerpt</summary><div class="source-excerpt">${esc(s.text)}</div></details>`:'<p>Search discovery only. No full-source passage has been retrieved.</p>'}</article>`).join('');}
 function activityView(detail){
   const {project:p,attempts,events}=detail;
@@ -329,7 +332,7 @@ async function saveProjectName(e){
 }
 function renderProject(){
   if(!state.detail)return;const {project:p,stages,sources,attempts}=state.detail,r=p.report;
-  const focused=document.activeElement,editing=focused?.matches('[data-question-form] textarea, #chat-form textarea, #chat-form input, .chat-proposal select, .chat-proposal button, #project-name')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
+  const focused=document.activeElement,editing=focused?.matches('[data-question-form] textarea, #chat-form textarea, #chat-form input, #chat-attach-button, .chat-proposal select, .chat-proposal button, #project-name')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
   const chatHistory=$('#chat-history'),chatScroll=chatHistory?{top:chatHistory.scrollTop,bottom:chatHistory.scrollHeight-chatHistory.scrollTop-chatHistory.clientHeight<40}:null;
   const openDetails=[...document.querySelectorAll('#main details[open]')].map(d=>d.closest('[id]')?.id).filter(Boolean);
   const active=['queued','researching','waiting_batch','waiting'].includes(p.status),uncertain=attempts.some(a=>a.state==='unknown');
@@ -459,19 +462,21 @@ function chatProposal(t,x,detail){
 function chatProposals(t,detail){return detail&&t.status!=='running'&&t.proposals?.length?`<div class="chat-proposals" aria-label="Proposed actions">${t.proposals.map(x=>chatProposal(t,x,detail)).join('')}</div>`:'';}
 function chatTurn(t,modes,busy,turns=[],detail=null){
   const running=t.status==='running';
-  return `<article class="chat-turn" data-chat-turn="${esc(t.id)}"><div class="chat-message chat-user"><div class="chat-message-label">YOU <time>${esc(date(t.created))}</time></div><div class="chat-prose chat-user-text">${esc(t.user)}</div></div><div class="chat-message chat-assistant"><div class="chat-message-label">ASSISTANT${t.modeLabel?` <span class="chat-mode-label">${esc(t.modeLabel)}</span>`:''} ${running?'<span class="status-pill">Working…</span>':''}</div>${running?chatLive(t):`${t.answer?`<div class="chat-prose">${chatAnswer(t)}</div>`:''}${t.note?`<p class="chat-note ${['failed','attention'].includes(t.status)?'chat-error':t.status==='declined'?'chat-declined':''}">${esc(t.note)}</p>`:''}`}${chatProposals(t,detail)}${t.status==='declined'&&!turns.some(x=>x.created>t.created&&x.user===t.user&&x.mode===t.retryMode)?chatRetry(t,modes,busy):''}${t.status==='attention'?'<button class="text-button" data-chat-activity>Review Activity</button>':''}${!running?`<p class="field-help">${esc(chatStatusLabels[t.status]||t.status)} · ${money(t.cost)} estimated${t.reserved?' · '+money(t.reserved)+' pending':''}</p>`:''}</div></article>`;
+  return `<article class="chat-turn" data-chat-turn="${esc(t.id)}"><div class="chat-message chat-user"><div class="chat-message-label">YOU <time>${esc(date(t.created))}</time></div><div class="chat-prose chat-user-text">${esc(t.user)}</div>${t.attachments?.length?`<ul class="chat-turn-attachments" aria-label="Attached documents">${t.attachments.map(a=>`<li><button type="button" data-source="${esc(a.sourceId)}" title="Open ${esc(a.title)} in Sources">${esc(a.sourceId)} · ${esc(a.title)}</button></li>`).join('')}</ul>`:''}</div><div class="chat-message chat-assistant"><div class="chat-message-label">ASSISTANT${t.modeLabel?` <span class="chat-mode-label">${esc(t.modeLabel)}</span>`:''} ${running?'<span class="status-pill">Working…</span>':''}</div>${running?chatLive(t):`${t.answer?`<div class="chat-prose">${chatAnswer(t)}</div>`:''}${t.note?`<p class="chat-note ${['failed','attention'].includes(t.status)?'chat-error':t.status==='declined'?'chat-declined':''}">${esc(t.note)}</p>`:''}`}${chatProposals(t,detail)}${t.status==='declined'&&!turns.some(x=>x.created>t.created&&x.user===t.user&&x.mode===t.retryMode)?chatRetry(t,modes,busy):''}${t.status==='attention'?'<button class="text-button" data-chat-activity>Review Activity</button>':''}${!running?`<p class="field-help">${esc(chatStatusLabels[t.status]||t.status)} · ${money(t.cost)} estimated${t.reserved?' · '+money(t.reserved)+' pending':''}</p>`:''}</div></article>`;
 }
 function chatView(detail){
   const p=detail.project,c=detail.chat||{},turns=chatTurns(detail),busy=Boolean(c.active)||chatPending.has(p.id),options=chatOptions.get(p.id)||{};
   const earlier=chatOlder.get(p.id)?.hasEarlier??c.hasEarlier,modes=c.modes||[],limits=c.limits||{},mode=modes.find(m=>m.id===options.mode)||modes[0];
   const chatCost=(detail.attempts||[]).filter(a=>a.stage_id==='chat').reduce((n,a)=>n+a.actual,0)/1e6;
-  return `<section class="chat-panel panel"><div class="chat-heading"><div><span class="eyebrow">PROJECT CONVERSATION</span><h2>Chat about ${esc(p.name)}</h2><p class="field-help" id="chat-mode-help">${mode?esc(modeHelp(mode)):''}</p></div><span class="status-pill green">Project context only</span></div><div class="chat-context"><p>Ask about your report, sources, research notes, or saved answers. The assistant looks through all saved project records, can search the web and read public pages when they don’t answer the question, and cites the evidence.</p><p class="field-help">Pages chat reads join this project’s source register. Search results are shown as leads, not evidence. Chat can propose answers, dismissals, research rounds and location corrections as cards; those proposed edits wait for you to apply them. Reading pages already adds sources and chat charges.</p></div><div class="chat-history" id="chat-history" role="log" aria-label="Project chat" aria-live="polite">${earlier?'<button class="text-button chat-earlier" id="chat-earlier">Show earlier messages</button>':''}${turns.length?turns.map(t=>chatTurn(t,modes,busy,turns,detail)).join(''):empty('Your project, in conversation','Ask which findings need attention, compare the saved code editions, or get help interpreting a cited passage.')}</div><form id="chat-form" class="chat-composer" data-chat-project="${p.id}"><label for="chat-message">Message about ${esc(p.name)}</label><textarea id="chat-message" name="message" rows="3" maxlength="${limits.messageChars||30000}" required placeholder="What should I resolve before submitting this project?" ${busy?'disabled':''}>${esc(chatDrafts.get(p.id)||'')}</textarea><div class="chat-options"><label for="chat-mode">Reply depth</label><select id="chat-mode" ${busy?'disabled':''}>${modes.map(m=>`<option value="${esc(m.id)}" ${m.id===mode?.id?'selected':''}>${esc(m.label)} — ${esc(m.model)}, ${esc(effortLabel(m.effort).toLowerCase())} reasoning</option>`).join('')}</select></div><details id="chat-limits"><summary>How replies work and what they cost</summary><p class="field-help">Each reply can use up to ${esc(limits.requests)} requests, ${esc(limits.toolCalls)} lookups, ${esc(limits.searches)} web searches (${esc(limits.searchesPerRequest)} per request), ${esc(limits.webReads)} public page reads (Anthropic web fetches included) and about ${esc(limits.minutes)} minutes of lookups, then writes its final answer from what it found. There is no spending limit; each reply shows its estimated cost. Web searches cost $10 per 1,000 plus the tokens of their results. Chat’s web allowance is separate from research’s.</p><p class="field-help">${esc(economyCostHelp())} Standard uses Sonnet 5.5 at high effort for most questions. Premium uses Opus 5.5 at high effort for the hardest analysis, at about twice Sonnet’s input/output price. Replies use real-time pricing, including for batch projects.</p><p class="field-help">The project’s evidence is cached for an hour, so follow-up questions in the same hour cost less than the first. Pages a reply reads change the evidence, so the next reply rebuilds that cache.</p></details><div id="chat-error" class="inline-error" role="alert">${esc(chatErrors.get(p.id)||'')}</div><div class="chat-send-row"><p class="field-help">${money(p.cost)} estimated for this project · ${money(chatCost)} from chat${p.reserved?' · '+money(p.reserved)+' pending':''}</p>${c.active?'<button type="button" class="button secondary" id="chat-stop">Stop reply</button>':`<button type="submit" class="button primary" ${busy?'disabled':''}>${busy?'Sending…':'Send message'}</button>`}</div></form></section>`;
+  const attached=chatAttachments.get(p.id)||[],adding=chatUploading.get(p.id)||[];
+  const attach=`<div class="chat-attach"><input type="file" id="chat-file" class="visually-hidden" tabindex="-1" multiple accept="${documentTypes}" ${busy||adding.length?'disabled':''}><button type="button" class="button secondary" id="chat-attach-button" ${busy?'disabled':''} ${adding.length?'aria-disabled="true"':''}>${adding.length?'Adding…':'Attach document'}</button>${attached.length||adding.length?`<ul class="chat-attachments" aria-label="Documents attached to this message">${attached.map(a=>`<li><span>${esc(a.sourceId)} · ${esc(a.title)}</span><button type="button" class="chat-detach" data-chat-detach="${esc(a.sourceId)}" aria-label="Remove ${esc(a.title)} from this message" ${busy?'disabled':''}>×</button></li>`).join('')}${adding.map(name=>`<li class="pending"><span>Adding ${esc(name)}…</span></li>`).join('')}</ul>`:''}<p class="field-help">PDF, HTML or plain text, up to 50 MB each; you can also drop files here. Each is saved to this project’s Sources as your document, and the reply reads it with your message. Removing it here keeps it in Sources.</p></div>`;
+  return `<section class="chat-panel panel"><div class="chat-heading"><div><span class="eyebrow">PROJECT CONVERSATION</span><h2>Chat about ${esc(p.name)}</h2><p class="field-help" id="chat-mode-help">${mode?esc(modeHelp(mode)):''}</p></div><span class="status-pill green">Project context only</span></div><div class="chat-context"><p>Ask about your report, sources, research notes, or saved answers. The assistant looks through all saved project records, can search the web and read public pages when they don’t answer the question, and cites the evidence.</p><p class="field-help">Pages chat reads join this project’s source register. Search results are shown as leads, not evidence. Chat can propose answers, dismissals, research rounds and location corrections as cards; those proposed edits wait for you to apply them. Reading pages already adds sources and chat charges.</p></div><div class="chat-history" id="chat-history" role="log" aria-label="Project chat" aria-live="polite">${earlier?'<button class="text-button chat-earlier" id="chat-earlier">Show earlier messages</button>':''}${turns.length?turns.map(t=>chatTurn(t,modes,busy,turns,detail)).join(''):empty('Your project, in conversation','Ask which findings need attention, compare the saved code editions, or get help interpreting a cited passage.')}</div><form id="chat-form" class="chat-composer" data-chat-project="${p.id}"><label for="chat-message">Message about ${esc(p.name)}</label><textarea id="chat-message" name="message" rows="3" maxlength="${limits.messageChars||30000}" required placeholder="What should I resolve before submitting this project?" ${busy?'disabled':''}>${esc(chatDrafts.get(p.id)||'')}</textarea>${attach}<div class="chat-options"><label for="chat-mode">Reply depth</label><select id="chat-mode" ${busy?'disabled':''}>${modes.map(m=>`<option value="${esc(m.id)}" ${m.id===mode?.id?'selected':''}>${esc(m.label)} — ${esc(m.model)}, ${esc(effortLabel(m.effort).toLowerCase())} reasoning</option>`).join('')}</select></div><details id="chat-limits"><summary>How replies work and what they cost</summary><p class="field-help">Each reply can use up to ${esc(limits.requests)} requests, ${esc(limits.toolCalls)} lookups, ${esc(limits.searches)} web searches (${esc(limits.searchesPerRequest)} per request), ${esc(limits.webReads)} public page reads (Anthropic web fetches included) and about ${esc(limits.minutes)} minutes of lookups, then writes its final answer from what it found. There is no spending limit; each reply shows its estimated cost. Web searches cost $10 per 1,000 plus the tokens of their results. Chat’s web allowance is separate from research’s.</p><p class="field-help">${esc(economyCostHelp())} Standard uses Sonnet 5.5 at high effort for most questions. Premium uses Opus 5.5 at high effort for the hardest analysis, at about twice Sonnet’s input/output price. Replies use real-time pricing, including for batch projects.</p><p class="field-help">The project’s evidence is cached for an hour, so follow-up questions in the same hour cost less than the first. Pages a reply reads change the evidence, so the next reply rebuilds that cache.</p></details><div id="chat-error" class="inline-error" role="alert">${esc(chatErrors.get(p.id)||'')}</div><div class="chat-send-row"><p class="field-help">${money(p.cost)} estimated for this project · ${money(chatCost)} from chat${p.reserved?' · '+money(p.reserved)+' pending':''}</p>${c.active?'<button type="button" class="button secondary" id="chat-stop">Stop reply</button>':`<button type="submit" class="button primary" ${busy||adding.length?'disabled':''}>${busy?'Sending…':'Send message'}</button>`}</div></form></section>`;
 }
 async function sendChat(id,request,fromComposer=false){
   chatPending.add(id);chatErrors.delete(id);renderProject();
   try{
     const chat=await api(`/api/projects/${id}/chat`,{method:'POST',body:request});
-    if(fromComposer){chatRequests.delete(id);if(chatDrafts.get(id)===request.message)chatDrafts.delete(id);}
+    if(fromComposer){chatRequests.delete(id);chatAttachments.delete(id);if(chatDrafts.get(id)===request.message)chatDrafts.delete(id);}
     if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;await refreshSelected();}
     return true;
   }catch(error){chatErrors.set(id,error.message);return false;}
@@ -515,19 +520,28 @@ async function applyProposal(id,card){
 function bindChat(){
   const form=$('#chat-form');if(!form)return;const id=form.dataset.chatProject;
   $('#chat-message').addEventListener('input',e=>chatDrafts.set(id,e.target.value));
+  // While files are being added the button keeps keyboard focus but opens nothing.
+  $('#chat-attach-button')?.addEventListener('click',e=>{if(e.currentTarget.getAttribute('aria-disabled')!=='true')$('#chat-file')?.click();});
+  $('#chat-file')?.addEventListener('change',e=>attachChatFiles(id,e.target.files));
+  for(const button of document.querySelectorAll('[data-chat-detach]'))button.addEventListener('click',()=>{chatAttachments.set(id,(chatAttachments.get(id)||[]).filter(a=>a.sourceId!==button.dataset.chatDetach));renderProject();$('#chat-attach-button')?.focus();});
+  // Files dropped on the composer are attached; the page never navigates to a dropped file.
+  const dragging=e=>[...(e.dataTransfer?.types||[])].includes('Files');
+  form.addEventListener('dragover',e=>{if(!dragging(e))return;e.preventDefault();form.classList.add('chat-dropping');});
+  form.addEventListener('dragleave',e=>{if(!form.contains(e.relatedTarget))form.classList.remove('chat-dropping');});
+  form.addEventListener('drop',e=>{if(!dragging(e))return;e.preventDefault();form.classList.remove('chat-dropping');attachChatFiles(id,e.dataTransfer.files);});
   $('#chat-mode')?.addEventListener('change',e=>{chatOptions.set(id,{...chatOptions.get(id),mode:e.target.value});const m=state.detail?.chat?.modes?.find(m=>m.id===e.target.value);if(m)$('#chat-mode-help').textContent=modeHelp(m);});
   form.addEventListener('submit',e=>{
-    e.preventDefault();if(chatPending.has(id)||state.detail?.chat?.active)return;
+    e.preventDefault();if(chatPending.has(id)||chatUploading.has(id)||state.detail?.chat?.active)return;
     if(!state.bootstrap.keyConfigured){openSettings();return;}
-    const message=$('#chat-message',form).value,mode=$('#chat-mode',form)?.value||'standard';
-    let request=chatRequests.get(id);if(!request||request.message!==message||request.mode!==mode)request={message,mode,clientId:crypto.randomUUID()};chatRequests.set(id,request);
+    const message=$('#chat-message',form).value,mode=$('#chat-mode',form)?.value||'standard',attachments=(chatAttachments.get(id)||[]).map(a=>a.sourceId);
+    let request=chatRequests.get(id);if(!request||request.message!==message||request.mode!==mode||String(request.attachments||[])!==String(attachments))request={message,mode,...(attachments.length?{attachments}:{}),clientId:crypto.randomUUID()};chatRequests.set(id,request);
     sendChat(id,request,true);
   });
   // A declined message can be sent again to the suggested model, which uses different safeguards.
   for(const button of document.querySelectorAll('[data-chat-retry]'))button.addEventListener('click',()=>{
     if(chatPending.has(id)||state.detail?.chat?.active)return;
     const turn=chatTurns(state.detail).find(t=>t.id===button.dataset.chatRetry);if(!turn?.retryMode)return;
-    const key=id+':'+turn.id;if(!chatRetries.has(key))chatRetries.set(key,{message:turn.user,mode:turn.retryMode,clientId:crypto.randomUUID()});
+    const key=id+':'+turn.id;if(!chatRetries.has(key))chatRetries.set(key,{message:turn.user,mode:turn.retryMode,...(turn.attachments?.length?{attachments:turn.attachments.map(a=>a.sourceId)}:{}),clientId:crypto.randomUUID()});
     sendChat(id,chatRetries.get(key));
   });
   $('#chat-stop')?.addEventListener('click',async()=>{const turnId=state.detail.chat.active;try{const chat=await api(`/api/projects/${id}/chat/stop`,{method:'POST',body:{turnId}});if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;renderProject();}}catch(e){chatErrors.set(id,e.message);if(state.selected===id)renderProject();}});
@@ -572,7 +586,7 @@ $('#action-form').addEventListener('submit',async e=>{
     if(a.type==='delete'){
       await api(`/api/projects/${a.id}`,{method:'DELETE'});
       $('#action-dialog').close();
-      for(const cache of [chatDrafts,chatOptions,chatPending,chatErrors,chatRequests,chatOlder])cache.delete(a.id);
+      for(const cache of [chatDrafts,chatOptions,chatPending,chatErrors,chatRequests,chatOlder,chatAttachments,chatUploading])cache.delete(a.id);
       for(const map of [questionDrafts,chatRetries,proposalBusy,proposalErrors,proposalModes,atlasRequests])for(const key of map.keys())if(key.startsWith(a.id+':'))map.delete(key);
       state.projects=state.projects.filter(p=>p.id!==a.id);
       if(state.selected===a.id)newForm();else renderSidebar();
@@ -589,16 +603,37 @@ async function removeNote(button){
   try{const {notes}=await api(`/api/projects/${id}/notes/${encodeURIComponent(button.dataset.deleteNote)}`,{method:'DELETE'});if(state.selected===id&&state.detail){state.detail.notes=notes;renderProject();}toast('Note removed from the report.');}
   catch(error){button.disabled=false;toast(error.message);}
 }
+// The Sources form and chat's Attach document add a file through the same route.
+async function uploadDocument(id,file){
+  let response;try{response=await fetch(`/api/projects/${encodeURIComponent(id)}/documents`,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream','X-App-Token':state.bootstrap.token,'X-File-Name':encodeURIComponent(file.name)},body:file});}catch(err){recordClientError('The browser could not reach the local application.','/api/projects/documents');throw err;}
+  const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'The document could not be added.');
+  return data.source;
+}
 async function addDocument(e){
   e.preventDefault();const form=e.currentTarget,file=$('#document-file',form).files?.[0],error=$('#document-error',form),button=$('button[type=submit]',form),id=state.selected;
   error.textContent='';if(!file){error.textContent='Choose a document to add.';return;}
   button.disabled=true;button.textContent='Adding…';
-  try{
-    let response;try{response=await fetch(`/api/projects/${encodeURIComponent(id)}/documents`,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream','X-App-Token':state.bootstrap.token,'X-File-Name':encodeURIComponent(file.name)},body:file});}catch(err){recordClientError('The browser could not reach the local application.','/api/projects/documents');throw err;}
-    const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'The document could not be added.');
-    toast(`Added ${data.source.title} as ${data.source.id}.`);await refreshSelected();
-  }catch(err){if($('#document-error'))$('#document-error').textContent=err.message;}
+  try{const source=await uploadDocument(id,file);toast(`Added ${source.title} as ${source.id}.`);await refreshSelected();}
+  catch(err){if($('#document-error'))$('#document-error').textContent=err.message;}
   finally{if(button.isConnected){button.disabled=false;button.textContent='Add document';}}
+}
+// Each attached file joins the project's sources first, so the message carries only source IDs.
+// Adding is free; the reply that reads the documents is paid when the message is sent.
+async function attachChatFiles(id,files){
+  const chosen=[...(files||[])];if(!chosen.length)return;
+  if(chatUploading.has(id))return;
+  if(chatPending.has(id)||state.detail?.chat?.active){chatErrors.set(id,'Wait for this project’s current reply to finish.');renderProject();return;}
+  const limit=state.detail?.chat?.limits?.attachments||5;
+  if((chatAttachments.get(id)||[]).length+chosen.length>limit){chatErrors.set(id,`Attach up to ${limit} documents to one message.`);renderProject();return;}
+  chatErrors.delete(id);chatUploading.set(id,chosen.map(f=>f.name));renderProject();
+  const failed=[];
+  for(const file of chosen){
+    try{const source=await uploadDocument(id,file),list=chatAttachments.get(id)||[];if(!list.some(a=>a.sourceId===source.id))chatAttachments.set(id,[...list,{sourceId:source.id,title:source.title}]);}
+    catch(error){failed.push(`${file.name}: ${error.message}`);}
+    if(chatUploading.has(id))chatUploading.set(id,chatUploading.get(id).slice(1));if(state.selected===id&&state.detail?.project.id===id)renderProject();
+  }
+  chatUploading.delete(id);if(failed.length)chatErrors.set(id,failed.join(' '));
+  if(state.selected===id&&state.detail?.project.id===id){renderProject();await refreshSelected().catch(error=>{chatErrors.set(id,error.message);if(state.selected===id)renderProject();});}
 }
 async function refreshSelected(){
   const load=projectLoad,generation=++detailGeneration;await refreshProjects();if(!state.selected||load!==projectLoad||generation!==detailGeneration)return;

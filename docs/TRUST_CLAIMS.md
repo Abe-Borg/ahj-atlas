@@ -21,7 +21,7 @@ The runtime inventory has **30 user action groups and 7 automatic behavior group
 | U11 | Research with saved answers | Engine.resume; questionContext | tests/questions.test.mjs |
 | U12 | Reconcile batch (Activity) | Engine.reconcile,importBatch | tests/core.test.mjs |
 | U13 | Resolve uncertain charge; amount; confirmation; note | lib/services.mjs:resolve-charge route | tests/core.test.mjs; tests/chat.test.mjs |
-| U14 | Chat with Atlas; Reply depth; compose; Send message; Ask Atlas; Show earlier messages | ProjectChat.start,view,run,chatPayload; public/app.js:askAtlas | tests/chat.test.mjs; tests/ask-atlas.test.mjs |
+| U14 | Chat with Atlas; Reply depth; compose; Send message; Ask Atlas; Show earlier messages | ProjectChat.start,view,run,chatPayload; attachedDocuments; public/app.js:askAtlas | tests/chat.test.mjs; tests/ask-atlas.test.mjs |
 | U15 | Retry a declined reply at suggested depth | public/app.js:chatRetries; ProjectChat.start | tests/chat.test.mjs |
 | U16 | Stop reply | ProjectChat.stop,run | tests/chat.test.mjs |
 | U17 | Apply; Apply and start research; processing mode on proposal | applyAction; Engine.resume; Store.saveQuestion; Store.addNote | tests/chat-actions.test.mjs; tests/ask-atlas.test.mjs |
@@ -35,7 +35,7 @@ The runtime inventory has **30 user action groups and 7 automatic behavior group
 | U25 | Start AHJ Atlas.cmd / launcher; Stop AHJ Atlas.cmd; window Close; Keep open / Close AHJ Atlas | launcher.mjs; stop.mjs; startDesktop; createApp.close | tests/desktop.test.mjs; manual |
 | U26 | Desktop Import existing workspace / select folder / Start fresh / Quit | preflightWorkspace; startDesktop | tests/desktop-migration.test.mjs |
 | U27 | Download update / Try again; Restart and install (banner or App updates) | createUpdateChecker.download,install; createApp /api/updates/download,/api/updates/install; desktop/main.mjs:launchInstaller; startDesktop(beforeExit) | tests/update-check.test.mjs; tests/desktop.test.mjs; tests/update-ui.mjs |
-| U28 | Sources → Add a document you have; Add document | addDocument; createApp POST /api/projects/:id/documents; ResearchTools.documentText; Store.source(upload) | tests/documents.test.mjs |
+| U28 | Sources → Add a document you have; Add document; Chat with Atlas → Attach document or drop files | addDocument; createApp POST /api/projects/:id/documents; ResearchTools.documentText; Store.source(upload); public/app.js:attachChatFiles | tests/documents.test.mjs; tests/chat.test.mjs; tests/chat-ui.mjs |
 | U29 | Overview → Notes → Remove; confirmation | createServices.route DELETE /api/projects/:id/notes/:noteId; Store.deleteNote | tests/chat-actions.test.mjs |
 | U30 | Project name; Save name | Store.renameProject; createServices.route POST /api/projects/:id/rename; public/app.js:saveProjectName | tests/rename-project.test.mjs |
 | A01 | startup/restart recovery, schema migrations and queued research | Store.constructor,recover; Engine.constructor,tick; ProjectChat.constructor | tests/upgrade.test.mjs; tests/chat.test.mjs |
