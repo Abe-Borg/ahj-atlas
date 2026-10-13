@@ -130,7 +130,8 @@ export const FACTS = {
     "fetchesPerRequest": 3,
     "webReads": 30,
     "proposals": 4,
-    "proposalCalls": 8
+    "proposalCalls": 8,
+    "attachments": 5
   },
   "modes": {
     "standard": {
