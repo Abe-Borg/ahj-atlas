@@ -111,19 +111,6 @@ export const FACTS = {
       "questions": 40000,
       "notes": 40000
     },
-    "economy": {
-      "excerptChars": 80000,
-      "historyChars": 60000,
-      "evidenceTailChars": 20000,
-      "preview": {
-        "report": 40000,
-        "research": 40000,
-        "sources": 20000,
-        "context": 20000,
-        "questions": 20000,
-        "notes": 20000
-      }
-    },
     "cacheTTL": "1h",
     "searchesPerRequest": 4,
     "searches": 20,
@@ -144,11 +131,6 @@ export const FACTS = {
       "label": "Standard",
       "modelKey": "research",
       "effort": "high"
-    },
-    "economy": {
-      "label": "Economy",
-      "modelKey": "economy",
-      "effort": "medium"
     },
     "opus": {
       "label": "Premium",
