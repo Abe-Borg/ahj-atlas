@@ -1,5 +1,7 @@
 # Haiku 5.5 Economy chat
 
+> **Retired.** Economy was removed from the reply-depth selector on 2026-10-15; see [Economy chat retired](economy-chat-retired-2026-10-15.md). This note describes the depth as it shipped.
+
 AHJ Atlas offers **Economy — Claude Haiku 5.5, medium reasoning** in the project chat reply-depth selector. Standard remains the default Sonnet 5.5 option; Premium remains Opus 5.5. Research, the evidence check and final reports continue to use Sonnet and Opus.
 
 Economy suits summaries and straightforward questions grounded in the project's saved evidence. It retains the same source lookups, web search, public-page readers, native citations and proposed-action cards as the other depths. Applying a proposed action follows the existing project validation and approval flow.
