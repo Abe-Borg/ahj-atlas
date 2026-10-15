@@ -30,7 +30,8 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
   const token=randomBytes(32).toString('hex');
   let services=null;
   const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));};
-  const server=http.createServer(async(req,res)=>{
+  // Export addresses puts every chosen project's ID in its link; 64 KB fits well over a thousand.
+  const server=http.createServer({maxHeaderSize:65536},async(req,res)=>{
     const started=Date.now(),localRequestId=randomUUID();let endpoint='';
     res.setHeader('X-Request-Id',localRequestId);
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cache-Control','no-store');res.setHeader('X-Frame-Options','DENY');
