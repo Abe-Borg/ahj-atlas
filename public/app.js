@@ -16,8 +16,13 @@ let updateState=null;
 const questionDrafts=new Map(),questionBusy=new Set();
 const nameDrafts=new Map(),nameBusy=new Set(),nameErrors=new Map();
 const chatDrafts=new Map(),chatOptions=new Map(),chatPending=new Set(),chatErrors=new Map(),chatRequests=new Map(),chatOlder=new Map();
-// Documents attached to each project's unsent message, and the file names still being added.
-const chatAttachments=new Map(),chatUploading=new Map();
+// Documents and images attached to each project's unsent message, and the file names still being added.
+const chatAttachments=new Map(),chatUploading=new Map(),chatImages=new Map(),chatImageUploading=new Map();
+// The floating chat panel: whether it is open or expanded, and where it sits. This browser remembers it.
+const DOCK_KEY='ahj-atlas.chat-dock',chatDock={open:false,expanded:false,x:null,y:null,w:null,h:null};
+try{const saved=JSON.parse(localStorage.getItem(DOCK_KEY)||'{}');chatDock.open=Boolean(saved.open);chatDock.expanded=Boolean(saved.expanded);for(const k of ['x','y','w','h'])chatDock[k]=Number.isFinite(saved[k])?saved[k]:null;}catch{}
+const saveDock=()=>{try{localStorage.setItem(DOCK_KEY,JSON.stringify(chatDock));}catch{}};
+let chatHtml='';
 // One new-project draft for this page, kept in memory like unsent chat and question
 // drafts. Opening a saved project leaves it in place. New research restores it.
 // Choosing New research again while that form is open asks before clearing it.
@@ -159,7 +164,7 @@ $('#open-diagnostics').addEventListener('click',()=>{ $('#settings-dialog').clos
 $('#diagnostic-project').addEventListener('change',loadDiagnostics);
 $('#refresh-diagnostics').addEventListener('click',loadDiagnostics);
 $('#download-diagnostics').addEventListener('click',()=>{if(!diagnosticsSnapshot)return;const a=document.createElement('a');a.href='/api/diagnostics/download'+($('#diagnostic-project').value?'?project='+encodeURIComponent($('#diagnostic-project').value):'');a.download='AHJ-Atlas-diagnostics.json';document.body.appendChild(a);a.click();a.remove();});
-const icons={pin:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>',people:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6m1 3a5 5 0 0 1 3 5v2"/></svg>',book:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h14a2 2 0 0 1 2 2v15H6a2 2 0 0 1-2-2V4Zm0 13h16M8 8h8M8 11h6"/></svg>',check:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg>'};
+const icons={chat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z"/></svg>',expand:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/></svg>',collapse:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10h-6V4M14 10l7-7M4 14h6v6M10 14l-7 7"/></svg>',minimize:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>',send:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12 20 4l-4 16-4-7-8-1Z"/></svg>',paperclip:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 12-8.5 8.5a5 5 0 0 1-7-7L13 5a3.3 3.3 0 0 1 4.7 4.7L9.5 18a1.6 1.6 0 0 1-2.3-2.3L15 8"/></svg>',image:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m20 16-4.5-4.5L8 19"/></svg>',pin:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>',people:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6m1 3a5 5 0 0 1 3 5v2"/></svg>',book:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h14a2 2 0 0 1 2 2v15H6a2 2 0 0 1-2-2V4Zm0 13h16M8 8h8M8 11h6"/></svg>',check:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg>'};
 function newForm({keepDraft=true}={}){
   if(keepDraft)captureNewProjectDraft();
   const prefill=keepDraft?(projectDrafts.get('new')||{}):{};
@@ -169,7 +174,7 @@ function newForm({keepDraft=true}={}){
   const use=buildingUses.includes(prefill.occupancy)?prefill.occupancy:buildingUses[0];
   const selectedUse=customUse?(String(prefill.customOccupancy||'').trim()||'Other — enter building use'):use;
   const detailsOpen=customUse||(prefill.detailsOpen!=null?Boolean(prefill.detailsOpen):Boolean(prefill.notes||prefill.siteDescription));
-  state.selected=null;state.detail=null;state.tab='overview';history.replaceState(null,'','/');renderSidebar();$('#breadcrumb').innerHTML='WORKSPACE <span>/</span> NEW RESEARCH';
+  state.selected=null;state.detail=null;state.tab='overview';history.replaceState(null,'','/');renderSidebar();renderChat();$('#breadcrumb').innerHTML='WORKSPACE <span>/</span> NEW RESEARCH';
   $('#main').innerHTML=`<div class="intro"><div><span class="eyebrow">A BETTER START TO DESIGN</span><h1>Know your jurisdiction.</h1><p>Find the authorities, people, and adopted codes that matter to your project.</p></div><span class="intro-badge">Built for engineers & architects</span></div>
   <div class="new-grid"><form id="project-form" class="panel"><div class="panel-padding"><div class="panel-head"><span class="step-number">01</span><h2>Your project</h2></div>
   <div class="form-row address-row stack-small"><div class="field"><label for="address">Project address</label><input id="address" name="address" required minlength="8" maxlength="500" autocomplete="street-address" placeholder="Street address, city, state or province, ZIP or postal code" value="${esc(prefill.address||'')}"><p class="field-help">A complete address helps distinguish municipal, county or regional, and special-district authority.</p></div><div class="field"><label for="country">Country</label><select id="country" name="country" required ${prefill.countryChosen?'data-chosen="1"':''}>${COUNTRIES.map(c=>`<option ${country===c?'selected':''}>${c}</option>`).join('')}</select><p class="field-help country-note" id="country-note" aria-live="polite"></p></div></div>
@@ -234,7 +239,7 @@ function applySavedProject(project){
   const option=$('#diagnostic-project')?.querySelector(`option[value="${CSS.escape(project.id)}"]`);
   if(option)option.textContent=project.name;
 }
-async function selectProject(id,{capture=true}={}){if(capture)captureNewProjectDraft();const load=++projectLoad;state.selected=id;state.detail=null;state.tab=state.tab==='chat'?'chat':'overview';history.replaceState(null,'',`/#project=${encodeURIComponent(id)}`);renderSidebar();$('#main').innerHTML='<div class="loading">Opening project…</div>';try{const detail=await api(`/api/projects/${id}`);if(load!==projectLoad||state.selected!==id)return;state.detail=detail;renderProject();}catch(e){if(load===projectLoad)$('#main').innerHTML=`<div class="error-panel">${esc(e.message)}</div>`;}}
+async function selectProject(id,{capture=true}={}){if(capture)captureNewProjectDraft();const load=++projectLoad;state.selected=id;state.detail=null;state.tab='overview';history.replaceState(null,'',`/#project=${encodeURIComponent(id)}`);renderSidebar();$('#main').innerHTML='<div class="loading">Opening project…</div>';renderChat();try{const detail=await api(`/api/projects/${id}`);if(load!==projectLoad||state.selected!==id)return;state.detail=detail;renderProject();}catch(e){if(load===projectLoad)$('#main').innerHTML=`<div class="error-panel">${esc(e.message)}</div>`;}}
 function statusClass(status){return ['complete','verified'].includes(status)?'green':['partial','budget','attention','conflicting','inferred','unverified','needs_key'].includes(status)?'amber':['failed','canceled'].includes(status)?'red':'';}
 function badge(status){return `<span class="status-pill ${statusClass(status)}">${esc(({verified:'Source-supported',inferred:'Conditional',conflicting:'Conflicting',unverified:'Unconfirmed'})[status]||statuses[status]||status)}</span>`;}
 function href(url){try{const u=new URL(url);return ['http:','https:'].includes(u.protocol)?u.href:'';}catch{return '';}}
@@ -333,19 +338,18 @@ async function saveProjectName(e){
 }
 function renderProject(){
   if(!state.detail)return;const {project:p,stages,sources,attempts}=state.detail,r=p.report;
-  const focused=document.activeElement,editing=focused?.matches('[data-question-form] textarea, #chat-form textarea, #chat-form input, #chat-attach-button, .chat-proposal select, .chat-proposal button, #project-name')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
-  const chatHistory=$('#chat-history'),chatScroll=chatHistory?{top:chatHistory.scrollTop,bottom:chatHistory.scrollHeight-chatHistory.scrollTop-chatHistory.clientHeight<40}:null;
+  const focused=document.activeElement,editing=focused?.matches('[data-question-form] textarea, #project-name')?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
   const openDetails=[...document.querySelectorAll('#main details[open]')].map(d=>d.closest('[id]')?.id).filter(Boolean);
-  const active=['queued','researching','waiting_batch','waiting'].includes(p.status),uncertain=attempts.some(a=>a.state==='unknown');
+  const active=['queued','researching','waiting_batch','waiting'].includes(p.status),uncertain=attempts.some(a=>a.state==='unknown'),chatBusy=chatPending.has(p.id)||Boolean(state.detail.chat?.active);
   const canStop=!p.cancel_requested&&(active||attempts.some(a=>a.stage_id!=='chat'&&['dispatching','pending','received'].includes(a.state)));
   $('#breadcrumb').innerHTML='WORKSPACE <span>/</span> PROJECT RESEARCH';
-  $('#main').innerHTML=`<div class="intro"><div><span class="eyebrow">PROJECT RESEARCH</span>${projectNameEditor(p)}<p>${esc(p.address)}</p>${p.input?.siteDescription?`<p class="field-help">Parcel / site: ${esc(p.input.siteDescription)}</p>`:''}<div class="report-meta"><span>${esc(p.discipline)}</span><span>·</span><span>${esc(p.input?.country||'United States')}</span><span>·</span><span>${p.mode==='batch'?'Batch processing':'Real-time research'}</span>${badge(p.status)}</div></div><div class="project-actions"><button class="button secondary danger" id="delete-project">Delete project</button>${canStop?'<button class="button secondary danger" id="cancel-research">Stop research</button>':''}${!active&&!state.detail.chat?.active&&!['canceling','needs_key'].includes(p.status)&&!uncertain?'<button class="button secondary" id="resume-research">'+(researchComplete()?'Review or extend report':'Continue research')+'</button>':''}${p.status==='needs_key'?'<button class="button primary" id="project-connect">Connect Claude</button>':''}<details class="export-menu"><summary class="button secondary">Export <span aria-hidden="true">⌄</span></summary><div class="export-options">${[['pdf','PDF report'],['xlsx','Excel workbook'],['xlsx-essentials','Excel essentials'],['json','Research data (JSON)']].map(([f,label])=>`<a href="/api/projects/${p.id}/export?format=${f}" download>${label}</a>`).join('')}</div></details></div></div>
+  $('#main').innerHTML=`<div class="intro"><div><span class="eyebrow">PROJECT RESEARCH</span>${projectNameEditor(p)}<p>${esc(p.address)}</p>${p.input?.siteDescription?`<p class="field-help">Parcel / site: ${esc(p.input.siteDescription)}</p>`:''}<div class="report-meta"><span>${esc(p.discipline)}</span><span>·</span><span>${esc(p.input?.country||'United States')}</span><span>·</span><span>${p.mode==='batch'?'Batch processing':'Real-time research'}</span>${badge(p.status)}</div></div><div class="project-actions"><button class="button primary" id="open-chat" type="button">${icons.chat} Chat with Atlas${chatBusy?' <span class="chat-dot" role="img" aria-label="A reply is in progress"></span>':''}</button><button class="button secondary danger" id="delete-project">Delete project</button>${canStop?'<button class="button secondary danger" id="cancel-research">Stop research</button>':''}${!active&&!state.detail.chat?.active&&!['canceling','needs_key'].includes(p.status)&&!uncertain?'<button class="button secondary" id="resume-research">'+(researchComplete()?'Review or extend report':'Continue research')+'</button>':''}${p.status==='needs_key'?'<button class="button primary" id="project-connect">Connect Claude</button>':''}<details class="export-menu"><summary class="button secondary">Export <span aria-hidden="true">⌄</span></summary><div class="export-options">${[['pdf','PDF report'],['xlsx','Excel workbook'],['xlsx-essentials','Excel essentials'],['json','Research data (JSON)']].map(([f,label])=>`<a href="/api/projects/${p.id}/export?format=${f}" download>${label}</a>`).join('')}</div></details></div></div>
   <div class="summary-strip"><div class="summary-stat"><small>AUTHORITIES</small><strong>${r?r.authorities.length:'—'}</strong><em>${r?'identified':'researching'}</em></div><div class="summary-stat"><small>CODE & STANDARD FINDINGS</small><strong>${r?codeCount(r):'—'}</strong><em>${r?'entries':'researching'}</em></div><div class="summary-stat"><small>EVIDENCE SOURCES</small><strong>${sources.length}</strong><em>${sources.filter(s=>s.read_full).length} read</em></div><div class="summary-stat"><small>ESTIMATED COST</small><strong style="font-size:1.15rem">${money(p.cost)}</strong><em>to date</em><small style="margin:7px 0 0">${money(p.reserved)} pending</small></div></div>
   <div class="stages">${stages.map((s,i)=>`<div class="stage ${s.status==='complete'?'done':['running','preparing','waiting_batch'].includes(s.status)?'current':''}"><small>${s.status==='complete'?'✓':'0'+(i+1)} &nbsp; STAGE ${i+1}</small><strong>${esc(stageLabels[s.id]||s.id)}</strong><p>${esc(({queued:'Waiting',running:'Researching…',preparing:'Preparing request…',waiting_batch:'Awaiting batch result',complete:'Brief complete',partial:'Partial findings',blocked:'Needs attention'})[s.status]||s.status)}</p></div>`).join('')}</div>
   ${p.note?`<div class="notice ${['queued','researching','waiting_batch'].includes(p.status)?'info':''}"><p>${esc(p.note)}</p>${['budget','attention'].includes(p.status)&&!attempts.some(a=>['dispatching','pending','received','unknown'].includes(a.state))&&stages.some(s=>s.id!=='review'&&!['complete','partial'].includes(s.status))?'<button class="button secondary" id="finish-partial">Finish with saved evidence</button>':''}${uncertain&&attempts.some(a=>a.mode==='batch'&&a.state==='unknown')?'<button class="button secondary" id="recover-batch">Reconcile original batch</button>':''}${uncertain?'<p class="field-help">Open Activity to inspect request identifiers and manually reconcile a confirmed charge.</p>':''}</div>`:''}
-  <div class="tabs" role="tablist" aria-label="Project report">${[['overview','Overview',p.questions?.filter(q=>q.status==='open').length],['contacts','Contacts',r?.contacts.length],['codes','Codes & standards',codeCount(r)],['sources','Sources',sources.length],['chat','Chat with Atlas',null],['activity','Activity',null]].map(([id,label,count])=>`<button class="tab ${state.tab===id?'active':''}" role="tab" aria-selected="${state.tab===id}" aria-controls="report-content" data-tab="${id}">${label}${count?`<span class="tab-count">${count}</span>`:''}</button>`).join('')}</div><div id="report-content" role="tabpanel">${state.tab==='chat'?chatView(state.detail):state.tab==='contacts'?contactsView(r):state.tab==='codes'?codesView(r):state.tab==='sources'?sourcesView(sources):state.tab==='activity'?activityView(state.detail):overview(state.detail)}</div>`;
+  <div class="tabs" role="tablist" aria-label="Project report">${[['overview','Overview',p.questions?.filter(q=>q.status==='open').length],['contacts','Contacts',r?.contacts.length],['codes','Codes & standards',codeCount(r)],['sources','Sources',sources.length],['activity','Activity',null]].map(([id,label,count])=>`<button class="tab ${state.tab===id?'active':''}" role="tab" aria-selected="${state.tab===id}" aria-controls="report-content" data-tab="${id}">${label}${count?`<span class="tab-count">${count}</span>`:''}</button>`).join('')}</div><div id="report-content" role="tabpanel">${state.tab==='contacts'?contactsView(r):state.tab==='codes'?codesView(r):state.tab==='sources'?sourcesView(sources):state.tab==='activity'?activityView(state.detail):overview(state.detail)}</div>`;
   for(const b of document.querySelectorAll('[data-tab]'))b.addEventListener('click',()=>{state.tab=b.dataset.tab;renderProject();});
-  for(const b of document.querySelectorAll('[data-source]'))b.addEventListener('click',()=>{const id=b.dataset.source;state.tab='sources';renderProject();document.getElementById('source-'+id)?.scrollIntoView({behavior:'smooth',block:'center'});});
+  for(const b of $('#main').querySelectorAll('[data-source]'))b.addEventListener('click',()=>{const id=b.dataset.source;state.tab='sources';renderProject();document.getElementById('source-'+id)?.scrollIntoView({behavior:'smooth',block:'center'});});
   $('#document-upload')?.addEventListener('submit',addDocument);
   for(const b of document.querySelectorAll('[data-delete-note]'))b.addEventListener('click',()=>removeNote(b));
   $('#delete-project').addEventListener('click',()=>openAction('delete'));
@@ -365,10 +369,10 @@ function renderProject(){
   for(const button of document.querySelectorAll('[data-question-action]'))button.addEventListener('click',()=>saveQuestion(button.closest('[data-question]'),button.dataset.questionAction));
   for(const button of document.querySelectorAll('[data-ask-atlas]'))button.addEventListener('click',()=>askAtlas(button.closest('[data-question]')));
   $('#research-answers')?.addEventListener('click',()=>openAction('resume'));
-  bindChat();
+  $('#open-chat').addEventListener('click',()=>openChat({focus:true}));
+  renderChat();
   revealActiveTab();
   if(editing){const field=document.getElementById(editing.id);field?.focus({preventScroll:true});if(typeof editing.start==='number')field?.setSelectionRange(editing.start,editing.end);}
-  const history=$('#chat-history');if(history)history.scrollTop=!chatScroll||chatScroll.bottom?history.scrollHeight:chatScroll.top;
   $('#refresh-standards')?.addEventListener('click',()=>openAction('standards'));$('#cancel-research')?.addEventListener('click',()=>openAction('cancel'));$('#resume-research')?.addEventListener('click',()=>openAction('resume'));$('#finish-partial')?.addEventListener('click',()=>openAction('partial'));$('#recover-batch')?.addEventListener('click',()=>openAction('reconcile'));$('#project-connect')?.addEventListener('click',openSettings);
 }
 // Source references such as [S1] open the saved source when it is in this project.
@@ -462,22 +466,100 @@ function chatProposal(t,x,detail){
 }
 function chatProposals(t,detail){return detail&&t.status!=='running'&&t.proposals?.length?`<div class="chat-proposals" aria-label="Proposed actions">${t.proposals.map(x=>chatProposal(t,x,detail)).join('')}</div>`:'';}
 function chatTurn(t,modes,busy,turns=[],detail=null){
-  const running=t.status==='running';
-  return `<article class="chat-turn" data-chat-turn="${esc(t.id)}"><div class="chat-message chat-user"><div class="chat-message-label">YOU <time>${esc(date(t.created))}</time></div><div class="chat-prose chat-user-text">${esc(t.user)}</div>${t.attachments?.length?`<ul class="chat-turn-attachments" aria-label="Attached documents">${t.attachments.map(a=>`<li><button type="button" data-source="${esc(a.sourceId)}" title="Open ${esc(a.title)} in Sources">${esc(a.sourceId)} · ${esc(a.title)}</button></li>`).join('')}</ul>`:''}</div><div class="chat-message chat-assistant"><div class="chat-message-label">ASSISTANT${t.modeLabel?` <span class="chat-mode-label">${esc(t.modeLabel)}</span>`:''} ${running?'<span class="status-pill">Working…</span>':''}</div>${running?chatLive(t):`${t.answer?`<div class="chat-prose">${chatAnswer(t)}</div>`:''}${t.note?`<p class="chat-note ${['failed','attention'].includes(t.status)?'chat-error':t.status==='declined'?'chat-declined':''}">${esc(t.note)}</p>`:''}`}${chatProposals(t,detail)}${t.status==='declined'&&!turns.some(x=>x.created>t.created&&x.user===t.user&&x.mode===t.retryMode)?chatRetry(t,modes,busy):''}${t.status==='attention'?'<button class="text-button" data-chat-activity>Review Activity</button>':''}${!running?`<p class="field-help">${esc(chatStatusLabels[t.status]||t.status)} · ${money(t.cost)} estimated${t.reserved?' · '+money(t.reserved)+' pending':''}</p>`:''}</div></article>`;
+  const running=t.status==='running',p=detail?.project;
+  const attachments=t.attachments?.length?`<ul class="chat-turn-attachments" aria-label="Attached documents">${t.attachments.map(a=>`<li><button type="button" data-source="${esc(a.sourceId)}" title="Open ${esc(a.title)} in Sources">${esc(a.sourceId)} · ${esc(a.title)}</button></li>`).join('')}</ul>`:'';
+  // Attached images are shown from the app's own copy; choosing one opens it full size.
+  const images=t.images?.length&&p?`<ul class="chat-turn-images" aria-label="Attached images">${t.images.map(i=>{const src=`/api/projects/${esc(p.id)}/images/${esc(i.id)}`;return `<li><button type="button" data-image="${src}" data-image-name="${esc(i.name)}" title="View ${esc(i.name)}"><img src="${src}" alt="${esc(i.name)}" width="${Number(i.width)||''}" height="${Number(i.height)||''}" loading="lazy"></button></li>`;}).join('')}</ul>`:'';
+  const note=t.note?`<p class="chat-note ${['failed','attention'].includes(t.status)?'chat-error':t.status==='declined'?'chat-declined':''}">${esc(t.note)}</p>`:'';
+  return `<article class="chat-turn" data-chat-turn="${esc(t.id)}"><div class="chat-message chat-user"><div class="chat-bubble"><div class="chat-prose chat-user-text">${esc(t.user)}</div>${attachments}${images}</div><time>${esc(date(t.created))}</time></div><div class="chat-message chat-assistant"><span class="chat-avatar" aria-hidden="true">A+</span><div class="chat-body"><div class="chat-message-label">Atlas${t.modeLabel?` <span class="chat-mode-label">${esc(t.modeLabel)}</span>`:''}${running?' <span class="status-pill">Working…</span>':''}</div>${running?chatLive(t):`${t.answer?`<div class="chat-prose">${chatAnswer(t)}</div>`:''}${note}`}${chatProposals(t,detail)}${t.status==='declined'&&!turns.some(x=>x.created>t.created&&x.user===t.user&&x.mode===t.retryMode)?chatRetry(t,modes,busy):''}${t.status==='attention'?'<button type="button" class="text-button" data-chat-activity>Review Activity</button>':''}${!running?`<p class="chat-meta">${esc(chatStatusLabels[t.status]||t.status)} · ${money(t.cost)} estimated${t.reserved?' · '+money(t.reserved)+' pending':''}</p>`:''}</div></div></article>`;
 }
+const chatStarters=['What should I resolve before submitting this project?','Compare the adopted code editions and their effective dates.','Which findings are still unconfirmed, and what evidence would settle them?'];
+// The panel's contents: header, conversation and composer. The draft is set on the textarea
+// after rendering, so typing does not change this HTML and does not force a re-render.
 function chatView(detail){
   const p=detail.project,c=detail.chat||{},turns=chatTurns(detail),busy=Boolean(c.active)||chatPending.has(p.id),options=chatOptions.get(p.id)||{};
   const earlier=chatOlder.get(p.id)?.hasEarlier??c.hasEarlier,modes=c.modes||[],limits=c.limits||{},mode=modes.find(m=>m.id===options.mode)||modes[0];
   const chatCost=(detail.attempts||[]).filter(a=>a.stage_id==='chat').reduce((n,a)=>n+a.actual,0)/1e6;
-  const attached=chatAttachments.get(p.id)||[],adding=chatUploading.get(p.id)||[];
-  const attach=`<div class="chat-attach"><input type="file" id="chat-file" class="visually-hidden" tabindex="-1" multiple accept="${documentTypes}" ${busy||adding.length?'disabled':''}><button type="button" class="button secondary" id="chat-attach-button" ${busy?'disabled':''} ${adding.length?'aria-disabled="true"':''}>${adding.length?'Adding…':'Attach document'}</button>${attached.length||adding.length?`<ul class="chat-attachments" aria-label="Documents attached to this message">${attached.map(a=>`<li><span>${esc(a.sourceId)} · ${esc(a.title)}</span><button type="button" class="chat-detach" data-chat-detach="${esc(a.sourceId)}" aria-label="Remove ${esc(a.title)} from this message" ${busy?'disabled':''}>×</button></li>`).join('')}${adding.map(name=>`<li class="pending"><span>Adding ${esc(name)}…</span></li>`).join('')}</ul>`:''}<p class="field-help">PDF, HTML or plain text, up to 50 MB each; you can also drop files here. Each is saved to this project’s Sources as your document, and the reply reads it with your message. Removing it here keeps it in Sources.</p></div>`;
-  return `<section class="chat-panel panel"><div class="chat-heading"><div><span class="eyebrow">PROJECT CONVERSATION</span><h2>Chat about ${esc(p.name)}</h2><p class="field-help" id="chat-mode-help">${mode?esc(modeHelp(mode)):''}</p></div><span class="status-pill green">Project context only</span></div><div class="chat-context"><p>Ask about your report, sources, research notes, or saved answers. The assistant looks through all saved project records, can search the web and read public pages when they don’t answer the question, and cites the evidence.</p><p class="field-help">Pages chat reads join this project’s source register. Search results are shown as leads, not evidence. Chat can propose answers, dismissals, research rounds and location corrections as cards; those proposed edits wait for you to apply them. Reading pages already adds sources and chat charges.</p></div><div class="chat-history" id="chat-history" role="log" aria-label="Project chat" aria-live="polite">${earlier?'<button class="text-button chat-earlier" id="chat-earlier">Show earlier messages</button>':''}${turns.length?turns.map(t=>chatTurn(t,modes,busy,turns,detail)).join(''):empty('Your project, in conversation','Ask which findings need attention, compare the saved code editions, or get help interpreting a cited passage.')}</div><form id="chat-form" class="chat-composer" data-chat-project="${p.id}"><label for="chat-message">Message about ${esc(p.name)}</label><textarea id="chat-message" name="message" rows="3" maxlength="${limits.messageChars||30000}" required placeholder="What should I resolve before submitting this project?" ${busy?'disabled':''}>${esc(chatDrafts.get(p.id)||'')}</textarea>${attach}<div class="chat-options"><label for="chat-mode">Reply depth</label><select id="chat-mode" ${busy?'disabled':''}>${modes.map(m=>`<option value="${esc(m.id)}" ${m.id===mode?.id?'selected':''}>${esc(m.label)} — ${esc(m.model)}, ${esc(effortLabel(m.effort).toLowerCase())} reasoning</option>`).join('')}</select></div><details id="chat-limits"><summary>How replies work and what they cost</summary><p class="field-help">Each reply can use up to ${esc(limits.requests)} requests, ${esc(limits.toolCalls)} lookups, ${esc(limits.searches)} web searches (${esc(limits.searchesPerRequest)} per request), ${esc(limits.webReads)} public page reads (Anthropic web fetches included) and about ${esc(limits.minutes)} minutes of lookups, then writes its final answer from what it found. There is no spending limit; each reply shows its estimated cost. Web searches cost $10 per 1,000 plus the tokens of their results. Chat’s web allowance is separate from research’s.</p><p class="field-help">${esc(economyCostHelp())} Standard uses Sonnet 5.5 at high effort for most questions. Premium uses Opus 5.5 at high effort for the hardest analysis, at about twice Sonnet’s input/output price. Replies use real-time pricing, including for batch projects.</p><p class="field-help">The project’s evidence is cached for an hour, so follow-up questions in the same hour cost less than the first. Pages a reply reads change the evidence, so the next reply rebuilds that cache.</p></details><div id="chat-error" class="inline-error" role="alert">${esc(chatErrors.get(p.id)||'')}</div><div class="chat-send-row"><p class="field-help">${money(p.cost)} estimated for this project · ${money(chatCost)} from chat${p.reserved?' · '+money(p.reserved)+' pending':''}</p>${c.active?'<button type="button" class="button secondary" id="chat-stop">Stop reply</button>':`<button type="submit" class="button primary" ${busy||adding.length?'disabled':''}>${busy?'Sending…':'Send message'}</button>`}</div></form></section>`;
+  const attached=chatAttachments.get(p.id)||[],adding=chatUploading.get(p.id)||[],images=chatImages.get(p.id)||[],addingImages=chatImageUploading.get(p.id)||[];
+  const uploading=adding.length||addingImages.length;
+  const attachments=attached.length||adding.length||images.length||addingImages.length?`<ul class="chat-attachments" aria-label="Attached to this message">${images.map(i=>`<li class="chat-attachment-image"><img src="/api/projects/${esc(p.id)}/images/${esc(i.id)}" alt="${esc(i.name)}"><span>${esc(i.name)}</span><button type="button" class="chat-detach" data-chat-detach-image="${esc(i.id)}" aria-label="Remove ${esc(i.name)} from this message" ${busy?'disabled':''}>×</button></li>`).join('')}${addingImages.map(name=>`<li class="pending"><span>Adding ${esc(name)}…</span></li>`).join('')}${attached.map(a=>`<li><span>${esc(a.sourceId)} · ${esc(a.title)}</span><button type="button" class="chat-detach" data-chat-detach="${esc(a.sourceId)}" aria-label="Remove ${esc(a.title)} from this message" ${busy?'disabled':''}>×</button></li>`).join('')}${adding.map(name=>`<li class="pending"><span>Adding ${esc(name)}…</span></li>`).join('')}</ul>`:'';
+  const emptyState=`<div class="chat-empty"><h3>Ask about ${esc(p.name)}</h3><p>Answers come from this project’s saved report, sources, notes and your answers. When they don’t settle a question, Atlas can search the web and read public pages, and it cites what it relies on.</p><div class="chat-starters">${chatStarters.map(s=>`<button type="button" class="chat-starter" data-chat-starter="${esc(s)}">${esc(s)}</button>`).join('')}</div><p class="field-help">Attach a document or an image, or paste a screenshot, to ask about it. Proposed changes to the project appear as cards and wait for you to apply them.</p></div>`;
+  const header=`<div class="chat-heading" id="chat-dock-head"><div class="chat-heading-main"><span class="chat-mark" aria-hidden="true">A<span>+</span></span><div class="chat-heading-text"><h2>Chat with Atlas</h2><p class="chat-heading-project" title="${esc(p.name)}">${esc(p.name)}</p></div></div><div class="chat-heading-tools">${busy?'<span class="status-pill"><span class="chat-live-dot" aria-hidden="true"></span>Replying…</span>':'<span class="status-pill green">Project context only</span>'}<button type="button" class="chat-icon" id="chat-expand" aria-pressed="${chatDock.expanded}" aria-label="${chatDock.expanded?'Restore the chat panel size':'Expand the chat panel'}" title="${chatDock.expanded?'Restore size':'Expand'}">${chatDock.expanded?icons.collapse:icons.expand}</button><button type="button" class="chat-icon" id="chat-minimize" aria-label="Minimize the chat panel" title="Minimize">${icons.minimize}</button></div></div>`;
+  const history=`<div class="chat-history" id="chat-history" role="log" aria-label="Project chat" aria-live="polite">${earlier?'<button type="button" class="text-button chat-earlier" id="chat-earlier">Show earlier messages</button>':''}${turns.length?turns.map(t=>chatTurn(t,modes,busy,turns,detail)).join(''):emptyState}</div>`;
+  const composer=`<form id="chat-form" class="chat-composer" data-chat-project="${esc(p.id)}">${attachments}<div class="chat-input"><label class="visually-hidden" for="chat-message">Message about ${esc(p.name)}</label><textarea id="chat-message" name="message" rows="1" maxlength="${limits.messageChars||30000}" required placeholder="Ask about this project… Enter sends, Shift+Enter adds a line" ${busy?'disabled':''}></textarea>${c.active?'<button type="button" class="button secondary chat-stop" id="chat-stop">Stop reply</button>':`<button type="submit" class="chat-send" aria-label="${busy?'Sending…':'Send message'}" title="Send message" ${busy||uploading?'disabled':''}>${icons.send}</button>`}</div><div class="chat-toolbar"><div class="chat-attach"><input type="file" id="chat-file" class="visually-hidden" tabindex="-1" multiple accept="${documentTypes}" ${busy||adding.length?'disabled':''}><input type="file" id="chat-image-file" class="visually-hidden" tabindex="-1" multiple accept="image/png,image/jpeg,image/gif,image/webp" ${busy||addingImages.length?'disabled':''}><button type="button" class="chat-tool" id="chat-attach-button" ${busy?'disabled':''} ${adding.length?'aria-disabled="true"':''}>${icons.paperclip}${adding.length?'Adding…':'Attach document'}</button><button type="button" class="chat-tool" id="chat-attach-image-button" ${busy?'disabled':''} ${addingImages.length?'aria-disabled="true"':''}>${icons.image}${addingImages.length?'Adding…':'Attach image'}</button></div><label class="visually-hidden" for="chat-mode">Reply depth</label><select id="chat-mode" class="chat-mode" ${busy?'disabled':''}>${modes.map(m=>`<option value="${esc(m.id)}" ${m.id===mode?.id?'selected':''}>${esc(m.label)} — ${esc(m.model)}, ${esc(effortLabel(m.effort).toLowerCase())} reasoning</option>`).join('')}</select></div><p class="field-help" id="chat-mode-help">${mode?esc(modeHelp(mode)):''}</p><div id="chat-error" class="inline-error" role="alert">${esc(chatErrors.get(p.id)||'')}</div><div class="chat-send-row"><p class="field-help">${money(p.cost)} estimated for this project · ${money(chatCost)} from chat${p.reserved?' · '+money(p.reserved)+' pending':''}</p></div><details id="chat-limits"><summary>How this chat works and what it costs</summary><div class="chat-limits-body"><p class="field-help">Ask about the report, sources, research notes or saved answers. Atlas looks through every saved project record, can search the web and read public pages when they don’t answer the question, and cites the evidence. Pages it reads join this project’s Sources; search results are leads, not evidence. It can propose answers, dismissals, notes, research rounds and location corrections as cards; nothing changes until you apply one.</p><p class="field-help">Documents: PDF, HTML or plain text, up to ${esc(limits.attachments||5)} per message and 50 MB each. Each is saved to this project’s Sources as your document as soon as you choose it, and the reply reads it with your message. Removing it here keeps it in Sources. Images: PNG, JPEG, GIF or WebP, up to ${esc(limits.images||5)} per message and ${esc(Math.round((limits.imageBytes||20971520)/1048576))} MB each, resized on this computer and sent only with this message; an image is not a source and cannot be cited. You can also drop files on the message box or paste a screenshot.</p><p class="field-help">Each reply can use up to ${esc(limits.requests)} requests, ${esc(limits.toolCalls)} lookups, ${esc(limits.searches)} web searches (${esc(limits.searchesPerRequest)} per request), ${esc(limits.webReads)} public page reads (Anthropic web fetches included) and about ${esc(limits.minutes)} minutes of lookups, then writes its final answer from what it found. There is no spending limit; each reply shows its estimated cost. Web searches cost $10 per 1,000 plus the tokens of their results. Chat’s web allowance is separate from research’s.</p><p class="field-help">${esc(economyCostHelp())} Standard uses Sonnet 5.5 at high effort for most questions. Premium uses Opus 5.5 at high effort for the hardest analysis, at about twice Sonnet’s input/output price. Replies use real-time pricing, including for batch projects.</p><p class="field-help">The project’s evidence is cached for an hour, so follow-up questions in the same hour cost less than the first. Pages a reply reads change the evidence, so the next reply rebuilds that cache.</p></div></details></form>`;
+  return header+history+composer;
 }
+// The panel is rendered whenever the project view is, into its own element outside the
+// workspace, so it stays open while you move between tabs and projects. Unchanged HTML is left
+// alone; otherwise focus, the conversation's scroll position and open disclosures are kept.
+function renderChat(){
+  const dock=$('#chat-dock'),launcher=$('#chat-launcher'),detail=state.detail;
+  if(!detail){
+    if(!state.selected){dock.hidden=true;launcher.hidden=true;chatHtml='';return;}
+    // A project is loading: the previous project's composer must not stay live meanwhile.
+    if(chatDock.open&&chatHtml){dock.innerHTML=`<div class="chat-heading" id="chat-dock-head"><div class="chat-heading-main"><span class="chat-mark" aria-hidden="true">A<span>+</span></span><div class="chat-heading-text"><h2>Chat with Atlas</h2><p class="chat-heading-project">Opening project…</p></div></div><div class="chat-heading-tools"><button type="button" class="chat-icon" id="chat-minimize" aria-label="Minimize the chat panel" title="Minimize">${icons.minimize}</button></div></div><div class="chat-history" id="chat-history"><p class="loading">Opening project…</p></div>`;chatHtml='';$('#chat-minimize',dock)?.addEventListener('click',closeChat);}
+    return;
+  }
+  const p=detail.project,busy=Boolean(detail.chat?.active)||chatPending.has(p.id);
+  launcher.hidden=chatDock.open;launcher.innerHTML=`<span class="chat-mark" aria-hidden="true">A<span>+</span></span>Chat with Atlas${busy?'<span class="chat-launcher-status">Replying…</span>':''}`;launcher.setAttribute('aria-label',busy?'Open Chat with Atlas (a reply is in progress)':'Open Chat with Atlas');
+  dock.hidden=!chatDock.open;if(!chatDock.open){chatHtml='';return;}
+  dock.classList.toggle('expanded',chatDock.expanded);placeDock();
+  const html=chatView(detail);if(html===chatHtml)return;
+  const focused=document.activeElement,editing=focused&&focused.id&&dock.contains(focused)?{id:focused.id,start:focused.selectionStart,end:focused.selectionEnd}:null;
+  const history=$('#chat-history',dock),scroll=history?{top:history.scrollTop,bottom:history.scrollHeight-history.scrollTop-history.clientHeight<40}:null;
+  const open=[...dock.querySelectorAll('details[open]')].map(d=>d.id).filter(Boolean);
+  dock.innerHTML=html;chatHtml=html;
+  const message=$('#chat-message',dock);if(message){message.value=chatDrafts.get(p.id)||'';autosize(message);}
+  for(const id of open){const d=document.getElementById(id);if(d?.matches('details'))d.open=true;}
+  bindChat();
+  if(editing){const field=document.getElementById(editing.id);field?.focus({preventScroll:true});if(typeof editing.start==='number'&&field?.setSelectionRange)try{field.setSelectionRange(editing.start,editing.end);}catch{}}
+  const next=$('#chat-history',dock);if(next)next.scrollTop=!scroll||scroll.bottom?next.scrollHeight:scroll.top;
+}
+const narrowScreen=()=>window.matchMedia('(max-width:760px)').matches;
+// Where the panel sits. Expanded, it fills the workspace through its stylesheet; on a narrow
+// screen it fills the window. Otherwise it keeps its remembered place and size, held on screen.
+function placeDock(){
+  const dock=$('#chat-dock');if(dock.hidden)return;
+  if(chatDock.expanded||narrowScreen()){for(const k of ['left','top','width','height'])dock.style[k]='';return;}
+  const w=Math.min(Math.max(chatDock.w||460,340),window.innerWidth-16),h=Math.min(Math.max(chatDock.h||640,380),window.innerHeight-16);
+  const x=chatDock.x??window.innerWidth-w-22,y=chatDock.y??window.innerHeight-h-22;
+  dock.style.width=w+'px';dock.style.height=h+'px';
+  dock.style.left=Math.max(8,Math.min(x,window.innerWidth-w-8))+'px';dock.style.top=Math.max(8,Math.min(y,window.innerHeight-h-8))+'px';
+}
+function openChat({focus=false}={}){chatDock.open=true;saveDock();renderChat();if(focus)$('#chat-message')?.focus({preventScroll:true});}
+function closeChat(){chatDock.open=false;saveDock();renderChat();$('#chat-launcher')?.focus();}
+function toggleExpand(){chatDock.expanded=!chatDock.expanded;saveDock();renderChat();$('#chat-expand')?.focus();}
+function autosize(field){field.style.height='auto';field.style.height=Math.min(field.scrollHeight,220)+'px';}
+// One-time wiring of the panel element itself: dragging by its header, remembering a resize,
+// Escape to minimize, the launcher, and the image viewer's backdrop.
+function bindDock(){
+  const dock=$('#chat-dock');
+  dock.addEventListener('pointerdown',e=>{
+    const head=e.target.closest('#chat-dock-head');if(!head||e.button!==0||e.target.closest('button,select,input,a'))return;
+    if(chatDock.expanded||narrowScreen())return;
+    const rect=dock.getBoundingClientRect(),dx=e.clientX-rect.left,dy=e.clientY-rect.top;
+    try{head.setPointerCapture(e.pointerId);}catch{}
+    e.preventDefault();
+    const move=ev=>{chatDock.x=ev.clientX-dx;chatDock.y=ev.clientY-dy;placeDock();};
+    const stop=()=>{head.removeEventListener('pointermove',move);head.removeEventListener('pointerup',stop);head.removeEventListener('pointercancel',stop);const r=dock.getBoundingClientRect();chatDock.x=Math.round(r.left);chatDock.y=Math.round(r.top);saveDock();};
+    head.addEventListener('pointermove',move);head.addEventListener('pointerup',stop);head.addEventListener('pointercancel',stop);
+  });
+  let sizeTimer=null;
+  new ResizeObserver(()=>{
+    if(dock.hidden||chatDock.expanded||narrowScreen())return;
+    clearTimeout(sizeTimer);sizeTimer=setTimeout(()=>{const r=dock.getBoundingClientRect();if(!r.width||!r.height)return;if(Math.abs(r.width-(chatDock.w||460))>1||Math.abs(r.height-(chatDock.h||640))>1){chatDock.w=Math.round(r.width);chatDock.h=Math.round(r.height);saveDock();}},250);
+  }).observe(dock);
+  window.addEventListener('resize',placeDock);
+  dock.addEventListener('keydown',e=>{if(e.key==='Escape'&&!e.defaultPrevented){e.preventDefault();closeChat();}});
+  $('#chat-launcher').addEventListener('click',()=>openChat({focus:true}));
+  const viewer=$('#image-dialog');viewer.addEventListener('click',e=>{if(e.target===viewer)viewer.close();});
+}
+bindDock();
 async function sendChat(id,request,fromComposer=false){
   chatPending.add(id);chatErrors.delete(id);renderProject();
   try{
     const chat=await api(`/api/projects/${id}/chat`,{method:'POST',body:request});
-    if(fromComposer){chatRequests.delete(id);chatAttachments.delete(id);if(chatDrafts.get(id)===request.message)chatDrafts.delete(id);}
+    if(fromComposer){chatRequests.delete(id);chatAttachments.delete(id);chatImages.delete(id);if(chatDrafts.get(id)===request.message)chatDrafts.delete(id);}
     if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;await refreshSelected();}
     return true;
   }catch(error){chatErrors.set(id,error.message);return false;}
@@ -490,7 +572,7 @@ async function askAtlas(card){
   if(!state.bootstrap?.keyConfigured){openSettings();return;}
   const questionId=card?.dataset.question;if(!questionId)return;
   if(chatPending.has(id)||state.detail.chat?.active){
-    state.tab='chat';chatErrors.set(id,'Wait for this project’s current reply to finish.');renderProject();return;
+    chatErrors.set(id,'Wait for this project’s current reply to finish.');openChat();return;
   }
   const modes=state.detail.chat?.modes||[],chosen=chatOptions.get(id)?.mode;
   const mode=modes.some(m=>m.id===chosen)?chosen:(modes[0]?.id||'standard');
@@ -498,7 +580,7 @@ async function askAtlas(card){
   let request=atlasRequests.get(key);
   if(!request||request.mode!==mode)request={questionId,mode,clientId:crypto.randomUUID()};
   atlasRequests.set(key,request);
-  state.tab='chat';
+  openChat();
   if(await sendChat(id,request))atlasRequests.delete(key);
 }
 // Apply is the user's approval. The server applies the saved proposal, identified by turn and id.
@@ -519,38 +601,56 @@ async function applyProposal(id,card){
   finally{proposalBusy.delete(key);if(state.selected===id&&state.detail?.project.id===id)renderProject();}
 }
 function bindChat(){
-  const form=$('#chat-form');if(!form)return;const id=form.dataset.chatProject;
-  $('#chat-message').addEventListener('input',e=>chatDrafts.set(id,e.target.value));
-  // While files are being added the button keeps keyboard focus but opens nothing.
+  const form=$('#chat-form');if(!form)return;const id=form.dataset.chatProject,dock=$('#chat-dock');
+  $('#chat-expand')?.addEventListener('click',toggleExpand);
+  $('#chat-minimize')?.addEventListener('click',closeChat);
+  const message=$('#chat-message',form);
+  message.addEventListener('input',e=>{chatDrafts.set(id,e.target.value);autosize(e.target);});
+  // Enter sends; Shift+Enter starts a new line.
+  message.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!e.isComposing){e.preventDefault();form.requestSubmit();}});
+  // A screenshot pasted into the message box is attached as an image.
+  message.addEventListener('paste',e=>{const files=[...(e.clipboardData?.files||[])].filter(isImageFile);if(files.length){e.preventDefault();attachChatImages(id,files);}});
+  for(const button of dock.querySelectorAll('[data-chat-starter]'))button.addEventListener('click',()=>{if(message.disabled)return;message.value=button.dataset.chatStarter;chatDrafts.set(id,message.value);autosize(message);message.focus();});
+  // While files are being added the buttons keep keyboard focus but open nothing.
   $('#chat-attach-button')?.addEventListener('click',e=>{if(e.currentTarget.getAttribute('aria-disabled')!=='true')$('#chat-file')?.click();});
   $('#chat-file')?.addEventListener('change',e=>attachChatFiles(id,e.target.files));
-  for(const button of document.querySelectorAll('[data-chat-detach]'))button.addEventListener('click',()=>{chatAttachments.set(id,(chatAttachments.get(id)||[]).filter(a=>a.sourceId!==button.dataset.chatDetach));renderProject();$('#chat-attach-button')?.focus();});
-  // Files dropped on the composer are attached; the page never navigates to a dropped file.
+  $('#chat-attach-image-button')?.addEventListener('click',e=>{if(e.currentTarget.getAttribute('aria-disabled')!=='true')$('#chat-image-file')?.click();});
+  $('#chat-image-file')?.addEventListener('change',e=>attachChatImages(id,e.target.files));
+  for(const button of dock.querySelectorAll('[data-chat-detach]'))button.addEventListener('click',()=>{chatAttachments.set(id,(chatAttachments.get(id)||[]).filter(a=>a.sourceId!==button.dataset.chatDetach));renderChat();$('#chat-attach-button')?.focus();});
+  for(const button of dock.querySelectorAll('[data-chat-detach-image]'))button.addEventListener('click',()=>detachChatImage(id,button.dataset.chatDetachImage));
+  // Files dropped on the composer are attached, images as images and the rest as documents;
+  // the page never navigates to a dropped file.
   const dragging=e=>[...(e.dataTransfer?.types||[])].includes('Files');
   form.addEventListener('dragover',e=>{if(!dragging(e))return;e.preventDefault();form.classList.add('chat-dropping');});
   form.addEventListener('dragleave',e=>{if(!form.contains(e.relatedTarget))form.classList.remove('chat-dropping');});
-  form.addEventListener('drop',e=>{if(!dragging(e))return;e.preventDefault();form.classList.remove('chat-dropping');attachChatFiles(id,e.dataTransfer.files);});
+  form.addEventListener('drop',e=>{if(!dragging(e))return;e.preventDefault();form.classList.remove('chat-dropping');const files=[...e.dataTransfer.files],images=files.filter(isImageFile),documents=files.filter(f=>!isImageFile(f));if(images.length)attachChatImages(id,images);if(documents.length)attachChatFiles(id,documents);});
   $('#chat-mode')?.addEventListener('change',e=>{chatOptions.set(id,{...chatOptions.get(id),mode:e.target.value});const m=state.detail?.chat?.modes?.find(m=>m.id===e.target.value);if(m)$('#chat-mode-help').textContent=modeHelp(m);});
   form.addEventListener('submit',e=>{
-    e.preventDefault();if(chatPending.has(id)||chatUploading.has(id)||state.detail?.chat?.active)return;
+    e.preventDefault();if(chatPending.has(id)||chatUploading.has(id)||chatImageUploading.has(id)||state.detail?.chat?.active)return;
     if(!state.bootstrap.keyConfigured){openSettings();return;}
-    const message=$('#chat-message',form).value,mode=$('#chat-mode',form)?.value||'standard',attachments=(chatAttachments.get(id)||[]).map(a=>a.sourceId);
-    let request=chatRequests.get(id);if(!request||request.message!==message||request.mode!==mode||String(request.attachments||[])!==String(attachments))request={message,mode,...(attachments.length?{attachments}:{}),clientId:crypto.randomUUID()};chatRequests.set(id,request);
+    const text=message.value;if(!text.trim())return;
+    const mode=$('#chat-mode',form)?.value||'standard',attachments=(chatAttachments.get(id)||[]).map(a=>a.sourceId),images=(chatImages.get(id)||[]).map(i=>i.id);
+    let request=chatRequests.get(id);if(!request||request.message!==text||request.mode!==mode||String(request.attachments||[])!==String(attachments)||String(request.images||[])!==String(images))request={message:text,mode,...(attachments.length?{attachments}:{}),...(images.length?{images}:{}),clientId:crypto.randomUUID()};chatRequests.set(id,request);
     sendChat(id,request,true);
   });
   // A declined message can be sent again to the suggested model, which uses different safeguards.
-  for(const button of document.querySelectorAll('[data-chat-retry]'))button.addEventListener('click',()=>{
+  for(const button of dock.querySelectorAll('[data-chat-retry]'))button.addEventListener('click',()=>{
     if(chatPending.has(id)||state.detail?.chat?.active)return;
     const turn=chatTurns(state.detail).find(t=>t.id===button.dataset.chatRetry);if(!turn?.retryMode)return;
-    const key=id+':'+turn.id;if(!chatRetries.has(key))chatRetries.set(key,{message:turn.user,mode:turn.retryMode,...(turn.attachments?.length?{attachments:turn.attachments.map(a=>a.sourceId)}:{}),clientId:crypto.randomUUID()});
+    const key=id+':'+turn.id;if(!chatRetries.has(key))chatRetries.set(key,{message:turn.user,mode:turn.retryMode,...(turn.attachments?.length?{attachments:turn.attachments.map(a=>a.sourceId)}:{}),...(turn.images?.length?{images:turn.images.map(i=>i.id)}:{}),clientId:crypto.randomUUID()});
     sendChat(id,chatRetries.get(key));
   });
-  $('#chat-stop')?.addEventListener('click',async()=>{const turnId=state.detail.chat.active;try{const chat=await api(`/api/projects/${id}/chat/stop`,{method:'POST',body:{turnId}});if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;renderProject();}}catch(e){chatErrors.set(id,e.message);if(state.selected===id)renderProject();}});
-  $('#chat-earlier')?.addEventListener('click',async e=>{e.target.disabled=true;try{const before=chatTurns(state.detail)[0]?.id,chat=await api(`/api/projects/${id}/chat?before=${encodeURIComponent(before)}`),previous=chatOlder.get(id)?.turns||[];chatOlder.set(id,{turns:[...chat.turns,...previous],hasEarlier:chat.hasEarlier});if(state.selected===id&&state.detail?.project.id===id){renderProject();$('#chat-history').scrollTop=0;}}catch(e){chatErrors.set(id,e.message);if(state.selected===id)renderProject();}});
-  for(const button of document.querySelectorAll('[data-chat-activity]'))button.addEventListener('click',()=>{state.tab='activity';renderProject();});
-  for(const select of document.querySelectorAll('[data-proposal-mode]'))select.addEventListener('change',e=>{const card=e.target.closest('[data-proposal]');proposalModes.set(`${id}:${card.dataset.proposalTurn}:${card.dataset.proposal}`,e.target.value);});
-  for(const button of document.querySelectorAll('[data-proposal-apply]'))button.addEventListener('click',()=>applyProposal(id,button.closest('[data-proposal]')));
+  $('#chat-stop')?.addEventListener('click',async()=>{const turnId=state.detail.chat.active;try{const chat=await api(`/api/projects/${id}/chat/stop`,{method:'POST',body:{turnId}});if(state.selected===id&&state.detail?.project.id===id){state.detail.chat=chat;renderProject();}}catch(e){chatErrors.set(id,e.message);if(state.selected===id)renderChat();}});
+  $('#chat-earlier')?.addEventListener('click',async e=>{e.target.disabled=true;try{const before=chatTurns(state.detail)[0]?.id,chat=await api(`/api/projects/${id}/chat?before=${encodeURIComponent(before)}`),previous=chatOlder.get(id)?.turns||[];chatOlder.set(id,{turns:[...chat.turns,...previous],hasEarlier:chat.hasEarlier});if(state.selected===id&&state.detail?.project.id===id){renderChat();$('#chat-history').scrollTop=0;}}catch(e){chatErrors.set(id,e.message);if(state.selected===id)renderChat();}});
+  // Opening a source or Activity from the panel shows it in the workspace; an expanded panel steps aside.
+  const reveal=tab=>{state.tab=tab;if(chatDock.expanded){chatDock.expanded=false;saveDock();}renderProject();};
+  for(const button of dock.querySelectorAll('[data-source]'))button.addEventListener('click',()=>{reveal('sources');document.getElementById('source-'+button.dataset.source)?.scrollIntoView({behavior:'smooth',block:'center'});});
+  for(const button of dock.querySelectorAll('[data-chat-activity]'))button.addEventListener('click',()=>reveal('activity'));
+  for(const button of dock.querySelectorAll('[data-image]'))button.addEventListener('click',()=>{const img=$('#image-dialog-img');img.src=button.dataset.image;img.alt=button.dataset.imageName;$('#image-dialog-caption').textContent=button.dataset.imageName;$('#image-dialog').showModal();});
+  for(const select of dock.querySelectorAll('[data-proposal-mode]'))select.addEventListener('change',e=>{const card=e.target.closest('[data-proposal]');proposalModes.set(`${id}:${card.dataset.proposalTurn}:${card.dataset.proposal}`,e.target.value);});
+  for(const button of dock.querySelectorAll('[data-proposal-apply]'))button.addEventListener('click',()=>applyProposal(id,button.closest('[data-proposal]')));
 }
+const isImageFile=f=>/^image\/(?:png|jpeg|gif|webp)$/i.test(f.type)||!f.type&&/\.(?:png|jpe?g|gif|webp)$/i.test(f.name||'');
 function researchComplete(){return Boolean(state.detail)&&state.detail.stages.filter(s=>s.id!=='review').every(s=>s.status==='complete');}
 // Searches and source reads left in the project's current research round, shown before paid
 // work starts. The ceilings come from the server (lib/config.mjs LIMITS).
@@ -587,7 +687,7 @@ $('#action-form').addEventListener('submit',async e=>{
     if(a.type==='delete'){
       await api(`/api/projects/${a.id}`,{method:'DELETE'});
       $('#action-dialog').close();
-      for(const cache of [chatDrafts,chatOptions,chatPending,chatErrors,chatRequests,chatOlder,chatAttachments,chatUploading])cache.delete(a.id);
+      for(const cache of [chatDrafts,chatOptions,chatPending,chatErrors,chatRequests,chatOlder,chatAttachments,chatUploading,chatImages,chatImageUploading])cache.delete(a.id);
       for(const map of [questionDrafts,chatRetries,proposalBusy,proposalErrors,proposalModes,atlasRequests])for(const key of map.keys())if(key.startsWith(a.id+':'))map.delete(key);
       state.projects=state.projects.filter(p=>p.id!==a.id);
       if(state.selected===a.id)newForm();else renderSidebar();
@@ -666,18 +766,47 @@ async function addDocument(e){
 async function attachChatFiles(id,files){
   const chosen=[...(files||[])];if(!chosen.length)return;
   if(chatUploading.has(id))return;
-  if(chatPending.has(id)||state.detail?.chat?.active){chatErrors.set(id,'Wait for this project’s current reply to finish.');renderProject();return;}
+  if(chatPending.has(id)||state.detail?.chat?.active){chatErrors.set(id,'Wait for this project’s current reply to finish.');renderChat();return;}
   const limit=state.detail?.chat?.limits?.attachments||5;
-  if((chatAttachments.get(id)||[]).length+chosen.length>limit){chatErrors.set(id,`Attach up to ${limit} documents to one message.`);renderProject();return;}
-  chatErrors.delete(id);chatUploading.set(id,chosen.map(f=>f.name));renderProject();
+  if((chatAttachments.get(id)||[]).length+chosen.length>limit){chatErrors.set(id,`Attach up to ${limit} documents to one message.`);renderChat();return;}
+  chatErrors.delete(id);chatUploading.set(id,chosen.map(f=>f.name));renderChat();
   const failed=[];
   for(const file of chosen){
     try{const source=await uploadDocument(id,file),list=chatAttachments.get(id)||[];if(!list.some(a=>a.sourceId===source.id))chatAttachments.set(id,[...list,{sourceId:source.id,title:source.title}]);}
     catch(error){failed.push(`${file.name}: ${error.message}`);}
-    if(chatUploading.has(id))chatUploading.set(id,chatUploading.get(id).slice(1));if(state.selected===id&&state.detail?.project.id===id)renderProject();
+    if(chatUploading.has(id))chatUploading.set(id,chatUploading.get(id).slice(1));if(state.selected===id&&state.detail?.project.id===id)renderChat();
   }
   chatUploading.delete(id);if(failed.length)chatErrors.set(id,failed.join(' '));
-  if(state.selected===id&&state.detail?.project.id===id){renderProject();await refreshSelected().catch(error=>{chatErrors.set(id,error.message);if(state.selected===id)renderProject();});}
+  if(state.selected===id&&state.detail?.project.id===id){renderChat();await refreshSelected().catch(error=>{chatErrors.set(id,error.message);if(state.selected===id)renderChat();});}
+}
+// An image goes to the app, which decodes, scales and re-encodes it without its metadata, and
+// it stays with the message it is sent with. It is not a source: removing it before sending
+// removes it from the project.
+async function uploadImage(id,file){
+  let response;try{response=await fetch(`/api/projects/${encodeURIComponent(id)}/images`,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream','X-App-Token':state.bootstrap.token,'X-File-Name':encodeURIComponent(file.name||'Pasted image')},body:file});}catch(err){recordClientError('The browser could not reach the local application.','/api/projects/images');throw err;}
+  const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'The image could not be attached.');
+  return data.image;
+}
+async function attachChatImages(id,files){
+  const chosen=[...(files||[])];if(!chosen.length)return;
+  if(chatImageUploading.has(id))return;
+  if(chatPending.has(id)||state.detail?.chat?.active){chatErrors.set(id,'Wait for this project’s current reply to finish.');renderChat();return;}
+  const limit=state.detail?.chat?.limits?.images||5;
+  if((chatImages.get(id)||[]).length+chosen.length>limit){chatErrors.set(id,`Attach up to ${limit} images to one message.`);renderChat();return;}
+  chatErrors.delete(id);chatImageUploading.set(id,chosen.map(f=>f.name||'Pasted image'));renderChat();
+  const failed=[];
+  for(const file of chosen){
+    try{const image=await uploadImage(id,file),list=chatImages.get(id)||[];if(!list.some(i=>i.id===image.id))chatImages.set(id,[...list,image]);}
+    catch(error){failed.push(`${file.name||'Pasted image'}: ${error.message}`);}
+    if(chatImageUploading.has(id))chatImageUploading.set(id,chatImageUploading.get(id).slice(1));if(state.selected===id&&state.detail?.project.id===id)renderChat();
+  }
+  chatImageUploading.delete(id);if(failed.length)chatErrors.set(id,failed.join(' '));
+  if(state.selected===id&&state.detail?.project.id===id)renderChat();
+}
+function detachChatImage(id,imageId){
+  chatImages.set(id,(chatImages.get(id)||[]).filter(i=>i.id!==imageId));renderChat();$('#chat-attach-image-button')?.focus();
+  // An image no sent message carries leaves the project; one a message carries stays with it.
+  api(`/api/projects/${id}/images/${encodeURIComponent(imageId)}`,{method:'DELETE'}).catch(()=>{});
 }
 async function refreshSelected(){
   const load=projectLoad,generation=++detailGeneration;await refreshProjects();if(!state.selected||load!==projectLoad||generation!==detailGeneration)return;
@@ -691,7 +820,7 @@ setInterval(()=>{if(!document.hidden&&state.bootstrap){refreshSelected().catch((
 let chatFollowing=false;
 setInterval(async()=>{
   const detail=state.detail,active=detail?.chat?.active;
-  if(document.hidden||chatFollowing||state.tab!=='chat'||!active)return;
+  if(document.hidden||chatFollowing||!chatDock.open||!active)return;
   const id=detail.project.id,load=projectLoad;chatFollowing=true;
   try{
     const chat=await api(`/api/projects/${id}/chat`);

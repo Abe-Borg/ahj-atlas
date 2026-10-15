@@ -131,7 +131,13 @@ export const FACTS = {
     "webReads": 30,
     "proposals": 4,
     "proposalCalls": 8,
-    "attachments": 5
+    "attachments": 5,
+    "images": 5,
+    "imageBytes": 20971520,
+    "imageEdge": 1568,
+    "imagePixels": 1150000,
+    "imageStoredBytes": 2097152,
+    "imageRequestBytes": 20971520
   },
   "modes": {
     "standard": {

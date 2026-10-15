@@ -176,9 +176,9 @@ test('the project page can rename while research is running and after it is fini
   assert.deepEqual(s.attempt(attempt.id).payload,attempt.payload);
   assert.equal(s.attempt(attempt.id).state,'pending');
   assert.equal(await page.$eval(`[data-project="${running.id}"] strong`,e=>e.textContent),'Running synthetic project draft');
-  await click('[data-tab=chat]');
-  await page.waitForSelector('.chat-heading h2');
-  assert.match(await page.$eval('.chat-heading h2',e=>e.textContent),/Running synthetic project draft/);
+  await click('#open-chat');
+  await page.waitForSelector('.chat-heading-project');
+  assert.match(await page.$eval('.chat-heading-project',e=>e.textContent),/Running synthetic project draft/);
   await click('[data-tab=activity]');
   await page.waitForFunction(()=>document.querySelector('.activity')?.textContent.includes('Project renamed from “Running synthetic project” to “Running synthetic project draft”'));
   assert.match(await page.$eval('.activity',e=>e.textContent),/Project renamed from “Running synthetic project” to “Running synthetic project draft”/);

@@ -30,7 +30,7 @@ try {
   await page.select('#occupancy','Hyperscale data center');assert.equal(await page.$eval('#custom-occupancy-field',e=>e.hidden),true);assert.equal(await page.$eval('#custom-occupancy',e=>e.disabled),true);
   phase="question forms";console.log(phase);await page.click(`[data-project="${p.id}"]`);await page.waitForSelector('[data-question-form]');
   assert.deepEqual(await page.$$eval('[data-ask-atlas]',els=>els.map(e=>e.textContent)),['Ask Atlas','Ask Atlas']);
-  assert.match(await page.$eval('.tabs',e=>e.textContent),/Chat with Atlas/);
+  assert.equal(await page.$eval('#open-chat',e=>e.textContent.trim()),'Chat with Atlas');assert.doesNotMatch(await page.$eval('.tabs',e=>e.textContent),/Chat with Atlas/);
   assert.equal(/Chat with AI/.test(await page.$eval('#main',e=>e.textContent)),false);
   const [one,two]=app.store.project(p.id).questions,answer=`#answer-${one.id}`;
   await page.type(answer,'Wet-pipe sprinklers and one electric fire pump.');
@@ -68,7 +68,7 @@ try {
   assert.match(await page.$eval('#saved-questions',e=>e.textContent),/Reason: A later research report no longer includes this question/);
   await page.setViewport({width:1440,height:1080});await page.screenshot({path:'test-results/question-closed-desktop.png',fullPage:true});
   assert.equal(provider.calls.length,0);assert.equal(provider.batches.size,0);assert.deepEqual(errors,[]);
-  console.log('Browser checks passed: optional labels, Ask Atlas on each question card, Chat with Atlas tab, save failure/retry, answer/edit/dismiss/reopen, reason on the question card, closure after a replacement report, reload persistence, polling draft protection, research handoff, desktop/mobile layout. No provider calls.');
+  console.log('Browser checks passed: optional labels, Ask Atlas on each question card, Chat with Atlas button, save failure/retry, answer/edit/dismiss/reopen, reason on the question card, closure after a replacement report, reload persistence, polling draft protection, research handoff, desktop/mobile layout. No provider calls.');
 } catch(e) {
   console.error("Failed during: "+phase);if(page){console.error(await page.evaluate(()=>document.body.innerText).catch(()=>"Page unavailable"));await page.screenshot({path:"test-results/question-cards-failure.png",fullPage:true}).catch(()=>{});}throw e;
 } finally {
