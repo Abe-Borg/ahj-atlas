@@ -7,8 +7,9 @@ import { readFile } from 'node:fs/promises';
 import { mkdirSync, openSync, closeSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Store } from './lib/store.mjs';
-import { VERSION, MODELS, LIMITS } from './lib/config.mjs';
+import { VERSION, MODELS, LIMITS, CHAT_LIMITS } from './lib/config.mjs';
 import { addDocument, uploadLimitMb } from './lib/documents.mjs';
+import { addChatImage, imageLimitMb } from './lib/images.mjs';
 import { createServices } from './lib/services.mjs';
 import { errorDetails } from './lib/diagnostics.mjs';
 
@@ -56,6 +57,14 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
           const source=await addDocument(store,services.chat.tools,upload[1],{name,type:String(req.headers['content-type']||''),buffer:Buffer.concat(chunks)});
           return send(res,201,{source:{id:source.id,title:source.title,kind:source.kind,characters:source.text.length}});
         }
+        // An image for a chat message arrives the same way. It is decoded, scaled and re-encoded here.
+        const imageUpload=req.method==='POST'&&url.pathname.match(/^\/api\/projects\/([a-f0-9-]+)\/images$/);
+        if(imageUpload){
+          const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>CHAT_LIMITS.imageBytes){send(res,413,{error:`Attach an image of ${imageLimitMb} MB or less.`});return;}chunks.push(chunk);}
+          let name='';try{name=decodeURIComponent(String(req.headers['x-file-name']||''));}catch{}
+          const image=await addChatImage(store,imageUpload[1],{name,type:String(req.headers['content-type']||''),buffer:Buffer.concat(chunks)});
+          return send(res,201,{image});
+        }
         if(!req.headers['content-type']?.startsWith('application/json'))return send(res,415,{error:'JSON requests are required.'});
         let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>262144){send(res,413,{error:'Request is too large.'});return;}raw+=chunk;}
         try{body=raw?JSON.parse(raw):{};}catch{return send(res,400,{error:'The request is not valid JSON.'});}
@@ -77,6 +86,16 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
       }
       if(url.pathname==='/api/shutdown'&&req.method==='POST'){send(res,200,{stopping:true});setTimeout(()=>closeApp().catch(()=>{}),20);return;}
       if(url.pathname==='/api/projects'&&req.method==='GET')return send(res,200,store.list().map(({report,input,...p})=>({...p,input,reportSummary:report?.summary||''})));
+      // An attached image is shown from its stored bytes. Its ID is the hash of those bytes, so the
+      // browser may keep it; removing one that no sent message carries is allowed before sending.
+      const imageAction=url.pathname.match(/^\/api\/projects\/([a-f0-9-]+)\/images\/([a-f0-9]{16})$/);
+      if(imageAction&&(req.method==='GET'||req.method==='DELETE')){
+        const [,projectId,imageId]=imageAction;if(!store.project(projectId))return send(res,404,{error:'Project not found.'});
+        const image=store.chatImage(projectId,imageId);if(!image)return send(res,404,{error:'Image not found.'});
+        if(req.method==='DELETE')return store.deleteChatImage(projectId,imageId)?send(res,200,{deleted:true}):send(res,409,{error:'This image is part of a sent message and stays with it.'});
+        res.setHeader('Cache-Control','private, max-age=31536000, immutable');
+        res.writeHead(200,{'Content-Type':image.mediaType,'Content-Length':image.bytes.length,'Content-Disposition':'inline'});res.end(image.bytes);return;
+      }
       if(services && await services.route({req,res,url,body,send}))return;
       if(url.pathname==='/api/projects'&&req.method==='POST'){const project=store.create(body);return send(res,201,project);}
       const match=url.pathname.match(/^\/api\/projects\/([a-f0-9-]+)$/);
