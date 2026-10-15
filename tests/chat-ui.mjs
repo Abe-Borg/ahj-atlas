@@ -42,7 +42,10 @@ try{
   phase='late project response';await click(`[data-project="${b.id}"]`);await page.waitForFunction(()=>document.querySelector('.chat-heading-project')?.textContent.includes('BRAVO'));
   await page.setRequestInterception(true);let held=null,holdA=true;
   page.on('request',req=>{if(holdA&&req.url()===app.url+'/api/projects/'+a.id){holdA=false;held=req;}else req.continue();});
-  await click(`[data-project="${a.id}"]`);while(!held)await new Promise(r=>setTimeout(r,5));await click(`[data-project="${b.id}"]`);await page.waitForFunction(()=>document.querySelector('.chat-heading-project')?.textContent.includes('BRAVO'));await held.continue();await new Promise(r=>setTimeout(r,300));assert.match(await page.$eval('.chat-heading-project',e=>e.textContent),/BRAVO/);assert.ok(!(await page.$eval('#chat-history',e=>e.textContent)).includes('ALPHA'));
+  await click(`[data-project="${a.id}"]`);while(!held)await new Promise(r=>setTimeout(r,5));
+  // While the project loads, the panel shows that and the previous project's composer is gone.
+  assert.equal(await page.$('#chat-dock #chat-form'),null);assert.match(await page.$eval('#chat-dock',e=>e.textContent),/Opening project/);
+  await click(`[data-project="${b.id}"]`);await page.waitForFunction(()=>document.querySelector('.chat-heading-project')?.textContent.includes('BRAVO'));await held.continue();await new Promise(r=>setTimeout(r,300));assert.match(await page.$eval('.chat-heading-project',e=>e.textContent),/BRAVO/);assert.ok(!(await page.$eval('#chat-history',e=>e.textContent)).includes('ALPHA'));
   phase='estimated costs without budgets';assert.doesNotMatch(await page.$eval('#main',e=>e.innerText)+await page.$eval('#chat-dock',e=>e.innerText),/budget|allowance/i);assert.match(await page.$eval('.chat-send-row',e=>e.textContent),/estimated for this project · \$[\d.]+ from chat/);
   await click('#settings-top');await page.waitForFunction(()=>document.querySelector('#spending-summary')?.textContent.includes('TODAY'));assert.doesNotMatch(await page.$eval('#settings-dialog',e=>e.innerText),/budget|allowance/i);await click('[data-close=settings-dialog]');
   phase='markdown and live draft';let finishLive=null;

@@ -239,7 +239,7 @@ function applySavedProject(project){
   const option=$('#diagnostic-project')?.querySelector(`option[value="${CSS.escape(project.id)}"]`);
   if(option)option.textContent=project.name;
 }
-async function selectProject(id,{capture=true}={}){if(capture)captureNewProjectDraft();const load=++projectLoad;state.selected=id;state.detail=null;state.tab='overview';history.replaceState(null,'',`/#project=${encodeURIComponent(id)}`);renderSidebar();$('#main').innerHTML='<div class="loading">Opening project…</div>';try{const detail=await api(`/api/projects/${id}`);if(load!==projectLoad||state.selected!==id)return;state.detail=detail;renderProject();}catch(e){if(load===projectLoad)$('#main').innerHTML=`<div class="error-panel">${esc(e.message)}</div>`;}}
+async function selectProject(id,{capture=true}={}){if(capture)captureNewProjectDraft();const load=++projectLoad;state.selected=id;state.detail=null;state.tab='overview';history.replaceState(null,'',`/#project=${encodeURIComponent(id)}`);renderSidebar();$('#main').innerHTML='<div class="loading">Opening project…</div>';renderChat();try{const detail=await api(`/api/projects/${id}`);if(load!==projectLoad||state.selected!==id)return;state.detail=detail;renderProject();}catch(e){if(load===projectLoad)$('#main').innerHTML=`<div class="error-panel">${esc(e.message)}</div>`;}}
 function statusClass(status){return ['complete','verified'].includes(status)?'green':['partial','budget','attention','conflicting','inferred','unverified','needs_key'].includes(status)?'amber':['failed','canceled'].includes(status)?'red':'';}
 function badge(status){return `<span class="status-pill ${statusClass(status)}">${esc(({verified:'Source-supported',inferred:'Conditional',conflicting:'Conflicting',unverified:'Unconfirmed'})[status]||statuses[status]||status)}</span>`;}
 function href(url){try{const u=new URL(url);return ['http:','https:'].includes(u.protocol)?u.href:'';}catch{return '';}}
@@ -494,7 +494,12 @@ function chatView(detail){
 // alone; otherwise focus, the conversation's scroll position and open disclosures are kept.
 function renderChat(){
   const dock=$('#chat-dock'),launcher=$('#chat-launcher'),detail=state.detail;
-  if(!detail){if(!state.selected){dock.hidden=true;launcher.hidden=true;chatHtml='';}return;}
+  if(!detail){
+    if(!state.selected){dock.hidden=true;launcher.hidden=true;chatHtml='';return;}
+    // A project is loading: the previous project's composer must not stay live meanwhile.
+    if(chatDock.open&&chatHtml){dock.innerHTML=`<div class="chat-heading" id="chat-dock-head"><div class="chat-heading-main"><span class="chat-mark" aria-hidden="true">A<span>+</span></span><div class="chat-heading-text"><h2>Chat with Atlas</h2><p class="chat-heading-project">Opening project…</p></div></div><div class="chat-heading-tools"><button type="button" class="chat-icon" id="chat-minimize" aria-label="Minimize the chat panel" title="Minimize">${icons.minimize}</button></div></div><div class="chat-history" id="chat-history"><p class="loading">Opening project…</p></div>`;chatHtml='';$('#chat-minimize',dock)?.addEventListener('click',closeChat);}
+    return;
+  }
   const p=detail.project,busy=Boolean(detail.chat?.active)||chatPending.has(p.id);
   launcher.hidden=chatDock.open;launcher.innerHTML=`<span class="chat-mark" aria-hidden="true">A<span>+</span></span>Chat with Atlas${busy?'<span class="chat-launcher-status">Replying…</span>':''}`;launcher.setAttribute('aria-label',busy?'Open Chat with Atlas (a reply is in progress)':'Open Chat with Atlas');
   dock.hidden=!chatDock.open;if(!chatDock.open){chatHtml='';return;}

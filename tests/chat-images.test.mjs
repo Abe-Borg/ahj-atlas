@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { createApp } from '../server.mjs';
 import { CHAT_LIMITS } from '../lib/config.mjs';
-import { chatPayload, projectSection } from '../lib/chat.mjs';
+import { chatPayload, projectSection, storedPayload } from '../lib/chat.mjs';
 import { addChatImage, exifOrientation, imageType } from '../lib/images.mjs';
 import { input, report, ChatProvider, chatResponse } from './fixtures.mjs';
 
@@ -89,6 +89,11 @@ test('images attached to a message are validated, saved with it, sent as image b
   assert.ok(text.endsWith(JSON.stringify(sent.map(({name,width,height})=>({name,width,height})))));
   assert.ok(!JSON.stringify(provider.calls[0].payload).includes('BRAVO_PRIVATE'));
   assert.match(provider.calls[0].payload.system,/Images the user attached to a message/);
+  // The request saved with the attempt keeps the image blocks' place and size, not their data.
+  const savedRequest=s.attempts(a.id).find(x=>x.stage_id==='chat').payload,savedLatest=savedRequest.messages.at(-1).content;
+  assert.equal(savedLatest.at(-3).type,'image');assert.equal(savedLatest.at(-3).source.data,`[omitted from the saved request: ${content.at(-3).source.data.length} base64 characters]`);
+  assert.ok(!JSON.stringify(savedRequest).includes(content.at(-3).source.data));assert.deepEqual(savedRequest.tools,provider.calls[0].payload.tools);
+  assert.deepEqual(storedPayload({messages:[{role:'user',content:[{type:'tool_result',tool_use_id:'t',content:[{type:'text',text:'page'},{type:'image',source:{type:'base64',media_type:'image/png',data:'abcd'}}]}]}]}).messages[0].content[0].content[1].source.data,'[omitted from the saved request: 4 base64 characters]');
   // The same send again is the same message; changed images are refused.
   assert.equal((await post(a.id,request1)).status,202);assert.equal(s.chatTurns(a.id).length,1);
   assert.equal((await post(a.id,{...request1,images:[first.id]})).status,400);
@@ -99,6 +104,18 @@ test('images attached to a message are validated, saved with it, sent as image b
   assert.ok(at>1);assert.deepEqual(blocks.slice(at-2,at).map(b=>b.source.media_type),['image/png','image/jpeg']);
   assert.equal(JSON.stringify(next).split('Images I attached').length,2);assert.equal(JSON.stringify(next).split(content.at(-3).source.data).length,2);
   s.updateChatTurn(a.id,turn.id,{status:'complete'});
+  // Earlier turns keep their images only while the request's image allowance holds them, newest first.
+  const allowance=CHAT_LIMITS.imageRequestBytes,pair=content.at(-3).source.data.length+content.at(-2).source.data.length;
+  try{
+    const third=s.createChatTurn(a.id,{clientId:randomUUID(),message:'Third question.'}),imagesIn=payload=>payload.messages.flatMap(m=>m.content.filter(b=>b.type==='image'));
+    CHAT_LIMITS.imageRequestBytes=pair-1;assert.equal(imagesIn(chatPayload(s,third)).length,0);
+    CHAT_LIMITS.imageRequestBytes=pair;assert.equal(imagesIn(chatPayload(s,third)).length,2);s.updateChatTurn(a.id,third.id,{status:'complete'});
+    const newest=(await(await upload(picture(200,200),{name:'Newest.png'})).json()).image,fourth=s.createChatTurn(a.id,{clientId:randomUUID(),message:'With a new image.',images:[{id:newest.id,name:newest.name,width:newest.width,height:newest.height}]});
+    const latestOnly=chatPayload(s,fourth),latestBlocks=latestOnly.messages.at(-1).content.filter(b=>b.type==='image');
+    assert.equal(latestBlocks.length,1);assert.equal(imagesIn(latestOnly).length,1);
+    CHAT_LIMITS.imageRequestBytes=pair+latestBlocks[0].source.data.length;assert.equal(imagesIn(chatPayload(s,fourth)).length,3);
+    s.updateChatTurn(a.id,fourth.id,{status:'complete'});
+  }finally{CHAT_LIMITS.imageRequestBytes=allowance;}
   // A sent image stays with its message. Deleting the project removes every image.
   assert.equal((await request('DELETE',a.id,first.id)).status,409);assert.equal(s.chatImageSent(a.id,first.id),true);
   s.deleteProject(a.id);assert.deepEqual(s.chatImages(a.id),[]);assert.equal(s.db.prepare('SELECT COUNT(*) n FROM chat_images').get().n,1);

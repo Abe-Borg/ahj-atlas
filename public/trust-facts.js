@@ -136,7 +136,8 @@ export const FACTS = {
     "imageBytes": 20971520,
     "imageEdge": 1568,
     "imagePixels": 1150000,
-    "imageStoredBytes": 5242880
+    "imageStoredBytes": 2097152,
+    "imageRequestBytes": 20971520
   },
   "modes": {
     "standard": {
