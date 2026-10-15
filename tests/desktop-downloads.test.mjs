@@ -43,11 +43,17 @@ test('only expected attachment endpoints on the exact loopback origin are accept
   assert.equal(exportDownload(`${origin}/api/diagnostics/download?project=a`,origin),'json');
   assert.equal(exportDownload(`${origin}/api/projects/123e4567-e89b-12d3-a456-426614174000/export?format=xlsx-essentials`,origin),'xlsx');
   assert.equal(exportDownload(`${origin}/api/projects/123e4567-e89b-12d3-a456-426614174000/export?format=xlsx`,origin),'xlsx');
+  assert.equal(exportDownload(`${origin}/api/addresses/export?format=csv&projects=123e4567-e89b-12d3-a456-426614174000,223e4567-e89b-12d3-a456-426614174000`,origin),'csv');
+  assert.equal(exportDownload(`${origin}/api/addresses/export?format=xlsx&projects=123e4567-e89b-12d3-a456-426614174000`,origin),'xlsx');
   for(const value of ['file:///C:/report.pdf','https://example.com/report.pdf',
     'http://127.0.0.1:54322/api/diagnostics/download',`${origin}/api/projects/x/export?format=pdf`,
     `${origin}/api/projects/123e4567-e89b-12d3-a456-426614174000/export?format=exe`,
     `${origin}/api/projects/123e4567-e89b-12d3-a456-426614174000/export?format=xlsx-essentials&next=1`,
-    `${origin}/api/diagnostics/download?next=file:///C:/secret`])
+    `${origin}/api/diagnostics/download?next=file:///C:/secret`,
+    `${origin}/api/addresses/export?format=pdf&projects=123e4567-e89b-12d3-a456-426614174000`,
+    `${origin}/api/addresses/export?format=csv`,`${origin}/api/addresses/export?format=csv&projects=a,,b`,
+    `${origin}/api/addresses/export?format=csv&projects=../secret`,
+    `${origin}/api/addresses/export?format=csv&projects=123e4567-e89b-12d3-a456-426614174000&next=1`])
     assert.equal(exportDownload(value,origin),null,value);
 });
 
@@ -84,6 +90,27 @@ test('essentials Excel saves as an xlsx beside the full workbook',async t=>{
   assert.deepEqual(saveOptions[0].filters,[{name:'Excel essentials',extensions:['xlsx']}]);
   assert.equal(saveOptions[0].defaultPath,path.join(downloadsDir,filename));
   assert.equal(readFileSync(destination,'utf8'),'synthetic essentials workbook');
+  dispose();
+});
+
+test('an address export saves as a CSV file',async t=>{
+  const {downloadsDir,session,contents,selections,saveOptions,dispose}=fixture(t);
+  const url=`${origin}/api/addresses/export?format=csv&projects=123e4567-e89b-12d3-a456-426614174000`;
+  const filename='AHJ Atlas project addresses 2026-10-15.csv';
+  const download=item({url,filename,chain:[url]});
+  const destination=path.join(downloadsDir,'Saved addresses.csv');
+  selections.push({canceled:false,filePath:destination});
+  session.emit('will-download',{},download,contents);
+  assert.equal(download.canceled,false);
+  writeFileSync(download.savePath,'Project,Address');
+  download.emit('done',{},'completed');
+  await until(()=>existsSync(destination));
+  assert.deepEqual(saveOptions[0].filters,[{name:'CSV file',extensions:['csv']}]);
+  assert.equal(saveOptions[0].defaultPath,path.join(downloadsDir,filename));
+  assert.equal(readFileSync(destination,'utf8'),'Project,Address');
+  // The server names it .csv; a different extension from the same link is refused.
+  const renamed=item({url,filename:'AHJ Atlas project addresses 2026-10-15.exe',chain:[url]});
+  session.emit('will-download',{},renamed,contents);assert.equal(renamed.canceled,true);
   dispose();
 });
 

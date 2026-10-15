@@ -14,6 +14,11 @@ function exportRequest(url,appUrl){
       const format=target.searchParams.get('format')||'pdf';
       return {pdf:{extension:'pdf',label:'PDF report'},xlsx:{extension:'xlsx',label:'Excel workbook'},'xlsx-essentials':{extension:'xlsx',label:'Excel essentials'},json:{extension:'json',label:'JSON data'}}[format]||null;
     }
+    if(target.pathname==='/api/addresses/export'){
+      if([...target.searchParams.keys()].some(key=>!['format','projects'].includes(key)))return null;
+      if(!/^[a-f0-9-]+(?:,[a-f0-9-]+)*$/.test(target.searchParams.get('projects')||''))return null;
+      return {csv:{extension:'csv',label:'CSV file'},xlsx:{extension:'xlsx',label:'Excel workbook'}}[target.searchParams.get('format')||'csv']||null;
+    }
     if(target.pathname==='/api/diagnostics/download'){
       if([...target.searchParams.keys()].some(key=>key!=='project'))return null;
       return {extension:'json',label:'JSON data'};
