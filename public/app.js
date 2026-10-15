@@ -199,6 +199,7 @@ function renderSidebar(){
   $('#project-count').textContent=state.projects.length;
   $('#project-list').innerHTML=state.projects.length?state.projects.map(p=>`<button class="project-nav ${state.selected===p.id?'active':''}" data-project="${esc(p.id)}"><strong>${esc(p.name)}</strong><small>${esc(p.discipline)} · ${esc(statuses[p.status]||p.status)}</small></button>`).join(''):'<p class="sidebar-empty">Your projects will appear here.</p>';
   for(const b of document.querySelectorAll('[data-project]'))b.addEventListener('click',()=>selectProject(b.dataset.project));
+  $('#export-addresses').hidden=!state.projects.length;
   const view=connectionView(),button=$('#open-settings');$('#connection-label').textContent=view.label;button.title=view.title;button.dataset.status=view.status;
   const light=$('.connection-light');light.classList.toggle('on',view.status==='connected');light.classList.toggle('off',['missing','invalid'].includes(view.status));light.classList.toggle('pending',['checking','unavailable'].includes(view.status));
 }
@@ -691,6 +692,49 @@ $('#action-form').addEventListener('submit',async e=>{
     const body=a.type==='cancel'?{}:a.type==='resolve'?{attemptId:a.attemptId,actualCost:Number(values.actualCost),note:values.note,confirmed:values.confirmed==='on'}:a.type==='reconcile'?values:{mode:values.mode,clarification:values.clarification||'',finishPartial:a.type==='partial',...(a.type==='standards'?{focus:standardsFocus().focus}:{}),...(a.type==='resume'?{address:values.address,country:values.country,siteDescription:values.siteDescription||''}:{})};
     await api(`/api/projects/${a.id}/${endpoint}`,{method:'POST',body});$('#action-dialog').close();await refreshSelected();toast(a.type==='cancel'?'Research is stopping. Saved work is retained.':'Project updated.');
   }catch(error){$('#action-error').textContent=error.message;}finally{b.disabled=false;}
+});
+// Export addresses lists every project, all chosen. The filter only hides rows; a hidden row
+// keeps its choice. The server writes the chosen projects in the sidebar's order.
+let addressFormat='csv';
+function openAddressExport(){
+  $('#address-projects').innerHTML=state.projects.map(p=>`<label class="address-choice"><input type="checkbox" value="${esc(p.id)}" checked><span><strong>${esc(p.name)}</strong><small>${esc(p.address)}</small><small>${esc(p.discipline)} · ${esc(p.input?.country||'United States')}</small></span></label>`).join('');
+  $('#address-filter').value='';$('#addresses-error').textContent='';
+  for(const radio of document.querySelectorAll('#addresses-form [name=format]'))radio.checked=radio.value===addressFormat;
+  syncAddressExport();$('#addresses-dialog').showModal();
+}
+function syncAddressExport(){
+  const term=$('#address-filter').value.trim().toLowerCase(),boxes=[...document.querySelectorAll('#address-projects input')];
+  for(const box of boxes){const row=box.closest('label');row.hidden=Boolean(term)&&!row.textContent.toLowerCase().includes(term);}
+  const chosen=boxes.filter(b=>b.checked),unseen=chosen.filter(b=>b.closest('label').hidden).length;
+  $('#address-none').hidden=!term||boxes.some(b=>!b.closest('label').hidden);
+  $('#address-count').textContent=`${chosen.length} of ${boxes.length} selected${unseen?` (${unseen} hidden by the filter)`:''}`;
+  $('#address-select-all').textContent=term?'Select shown':'Select all';$('#address-clear').textContent=term?'Clear shown':'Clear all';
+  const submit=$('#addresses-submit');submit.disabled=!chosen.length;submit.textContent=chosen.length===1?'Export 1 address':`Export ${chosen.length} addresses`;
+}
+$('#export-addresses').addEventListener('click',openAddressExport);
+$('#address-filter').addEventListener('input',syncAddressExport);
+// Enter in the filter would submit the form and export rows the filter hides.
+$('#address-filter').addEventListener('keydown',e=>{if(e.key==='Enter')e.preventDefault();});
+$('#address-projects').addEventListener('change',syncAddressExport);
+for(const [id,checked] of [['#address-select-all',true],['#address-clear',false]])$(id).addEventListener('click',()=>{for(const box of document.querySelectorAll('#address-projects input'))if(!box.closest('label').hidden)box.checked=checked;syncAddressExport();});
+$('#addresses-form').addEventListener('submit',async e=>{
+  e.preventDefault();const error=$('#addresses-error'),submit=$('#addresses-submit');
+  const chosen=new Set([...document.querySelectorAll('#address-projects input:checked')].map(b=>b.value));if(!chosen.size)return;
+  addressFormat=new FormData(e.target).get('format')==='xlsx'?'xlsx':'csv';error.textContent='';submit.disabled=true;
+  try{
+    // A project deleted since the list opened leaves the list, and nothing is exported yet.
+    await refreshProjects();
+    const ids=state.projects.filter(p=>chosen.has(p.id)).map(p=>p.id);
+    if(ids.length<chosen.size){
+      for(const box of document.querySelectorAll('#address-projects input'))if(!state.projects.some(p=>p.id===box.value))box.closest('label').remove();
+      error.textContent='A project you chose has been deleted, so it was removed from the list. Review the selection and export again.';return;
+    }
+    const href=`/api/addresses/export?format=${addressFormat}&projects=${ids.join(',')}`;
+    if(href.length>60000){error.textContent='Too many projects for one file. Choose fewer and export the rest separately.';return;}
+    const a=document.createElement('a');a.href=href;a.download='';document.body.appendChild(a);a.click();a.remove();
+    $('#addresses-dialog').close();toast(`Exporting ${ids.length===1?'1 project address':`${ids.length} project addresses`}.`);
+  }catch(err){error.textContent=err.message;}
+  finally{syncAddressExport();}
 });
 async function removeNote(button){
   if(!confirm('Remove this note from the report? It stays in the chat conversation.'))return;
