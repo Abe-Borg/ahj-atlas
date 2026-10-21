@@ -198,4 +198,7 @@ test('navigation stays on the runtime origin and rejects unsafe protocols and lo
   assert.equal(window.url,origin+'/help');
   assert.deepEqual(window.openHandler({url:'javascript:alert(1)'}),{action:'deny'});
   let permission;window.permissionHandler(null,'camera',answer=>{permission=answer;});assert.equal(permission,false);
+  // Only the app's own pages may write to the clipboard (chat's Copy buttons); nothing may read it.
+  const ask=(name,requestingUrl)=>{let answer;window.permissionHandler(null,name,a=>{answer=a;},{requestingUrl});return answer;};
+  assert.equal(ask('clipboard-sanitized-write',origin+'/'),true);assert.equal(ask('clipboard-sanitized-write','https://example.com/'),false);assert.equal(ask('clipboard-read',origin+'/'),false);assert.equal(ask('clipboard-sanitized-write',undefined),false);
 });

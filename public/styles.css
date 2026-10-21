@@ -45,6 +45,8 @@
 .chat-table th,.chat-table td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;overflow-wrap:normal;min-width:6em}
 .chat-table th{background:#f3f6f8;font-weight:650}.chat-table tr:last-child td{border-bottom:0}
 .chat-table .align-center{text-align:center}.chat-table .align-right{text-align:right}
+.chat-table-tools{display:flex;justify-content:flex-end;margin:-4px 0 2px}.chat-table-tools .text-button,.chat-answer-tools .text-button{font-size:.75rem;padding:2px 0}
+.chat-answer-tools{margin:2px 0 0}
 .chat-step{display:flex;align-items:center;gap:8px}.chat-step::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:var(--teal);animation:chat-pulse 1.4s ease-in-out infinite}
 @keyframes chat-pulse{0%,100%{opacity:.25}50%{opacity:1}}
 @media(prefers-reduced-motion:reduce){.chat-step::before{animation:none}}
