@@ -604,6 +604,8 @@ test('chat saves pages fetched through web_fetch to the register, counts them as
   const turn=c.view(a.id).turns[0];assert.equal(turn.status,'complete');
   const source=s.sources(a.id).find(x=>x.url===fetched);assert.equal(source.kind,'web-fetch');assert.equal(source.read_full,true);assert.match(source.text,/2024 International Fire Code/);
   assert.equal(s.chatUsage(a.id,turn.id).reads,2);assert.equal(s.project(a.id).reads,0);
+  // Both fetches count toward the allowance, but the reply's status line counts only the page that came back.
+  assert.deepEqual(turn.web,{searches:0,reads:1});
   assert.ok(s.events(a.id).some(e=>e.message===`Project chat: fetched a public page through Anthropic's web fetch (${source.id}).`));
   assert.ok(s.events(a.id).some(e=>/page fetch through Anthropic could not finish \(url_not_accessible\)/.test(e.message)));
   assert.match(provider.calls[0].payload.system,/web_fetch retrieves it through Anthropic/);assert.match(provider.calls[0].payload.system,/kind upload are documents the user added/);

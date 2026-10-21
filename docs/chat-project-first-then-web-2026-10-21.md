@@ -51,7 +51,7 @@ Several of the changes are adapted from Drawing Analyzer's report chat and its c
 
 - **Header pill.** It reads **Project first · web as needed**, with a tooltip.
 - **Help line under the reply depth.** It says the project's records come first, then the web.
-- **Reply status line.** `view()` returns each turn's `web: {searches, reads}` from `store.chatUsage`. Under a finished reply the status line reads **Checked the web: 2 searches, 1 page read** or **From project records**. Drawing Analyzer shows web activity as chips during a reply; Atlas already showed live steps, and this keeps the outcome visible afterward.
+- **Reply status line.** `view()` returns each finished turn's `web: {searches, reads}` from `store.chatWebUse`: billed searches, plus the page reads and web fetches that returned content. A failed fetch or read still counts toward the reply's allowance (`store.chatUsage`), but not on this line. The result is cached per turn until the turn is next updated, so the page's once-a-second poll does not reparse fetched pages. Under a finished reply the status line reads **Checked the web: 2 searches, 1 page read** or **From project records**. Drawing Analyzer shows web activity as chips during a reply; Atlas already showed live steps, and this keeps the outcome visible afterward.
 - **Fourth starter question.** "Check the authority's current website for code adoptions or amendments newer than this report."
 - **Copy answer** copies a finished reply's Markdown.
 - **Copy table** appears above each table in a finished reply.
@@ -75,7 +75,7 @@ Several of the changes are adapted from Drawing Analyzer's report chat and its c
 ## Verification
 
 - **`tests/chat.test.mjs`** (the web research test):
-  - the reply's `web` usage;
+  - the reply's `web` usage, including that a failed web fetch is not counted as a page read;
   - the chat search tool's `blocked_domains`;
   - research's search tool without `blocked_domains`;
   - the prompt's project-first rule, and the absence of the silo wording.
