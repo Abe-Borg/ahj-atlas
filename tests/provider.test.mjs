@@ -6,6 +6,7 @@ import path from 'node:path';
 import { Anthropic, providerError, validateCapabilities } from '../lib/provider.mjs';
 import { costMicros, CHAT_LIMITS, LIMITS } from '../lib/config.mjs';
 import { CHAT_TOOLS } from '../lib/chat.mjs';
+import { LOW_QUALITY_DOMAINS } from '../lib/research-tools.mjs';
 import { Store } from '../lib/store.mjs';
 import { createServices } from '../lib/services.mjs';
 
@@ -22,7 +23,7 @@ test('chat sends compatible strict tool schemas to both token counting and gener
     const sent=JSON.parse(options.body);
     // Eleven strict app tools (including four proposal tools) plus native web search and web fetch, which have no input schema.
     assert.equal(sent.tools.length,13);
-    assert.deepEqual(sent.tools.filter(tool=>!tool.input_schema),[{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct'],user_location:{type:'approximate',country:'US'}},{type:'web_fetch_20250910',name:'web_fetch',max_uses:CHAT_LIMITS.fetchesPerRequest,max_content_tokens:LIMITS.fetchContentTokens}]);
+    assert.deepEqual(sent.tools.filter(tool=>!tool.input_schema),[{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct'],user_location:{type:'approximate',country:'US'},blocked_domains:[...LOW_QUALITY_DOMAINS]},{type:'web_fetch_20250910',name:'web_fetch',max_uses:CHAT_LIMITS.fetchesPerRequest,max_content_tokens:LIMITS.fetchContentTokens}]);
     for(const tool of sent.tools.filter(tool=>tool.input_schema)){
       assert.equal(tool.strict,true);
       assert.equal(tool.input_schema.additionalProperties,false);

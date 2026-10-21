@@ -35,5 +35,7 @@ export function secureWindowNavigation({window,appUrl,shell,validate=validatePub
     if(decision==='external')void openExternal(url);
     return {action:'deny'};
   });
-  contents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));
+  // Every permission is refused except writing to the clipboard from the app's own pages,
+  // which the chat's Copy buttons use. Reading the clipboard stays refused.
+  contents.session.setPermissionRequestHandler((_contents,permission,callback,details)=>callback(permission==='clipboard-sanitized-write'&&navigationDecision(details?.requestingUrl||'',appUrl)==='internal'));
 }

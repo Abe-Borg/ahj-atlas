@@ -9,7 +9,7 @@ import { Store } from '../lib/store.mjs';
 import { chatPayload,projectSection,ProjectChat,describeLookup,CHAT_TOOLS } from '../lib/chat.mjs';
 import { initialChatEvidence } from '../lib/chat-citations.mjs';
 import { addDocument } from '../lib/documents.mjs';
-import { ResearchTools, searchTool, TOOL_DEFS } from '../lib/research-tools.mjs';
+import { ResearchTools, searchTool, TOOL_DEFS, LOW_QUALITY_DOMAINS } from '../lib/research-tools.mjs';
 import { remainingSearches } from '../lib/prompts.mjs';
 import { CHAT_LIMITS,LIMITS,FETCH_HISTORY_CHARS,MODELS,costMicros } from '../lib/config.mjs';
 import { ProviderError,validateCapabilities } from '../lib/provider.mjs';
@@ -507,14 +507,18 @@ test('chat searches the web, reads found pages into the source register and cite
   assert.ok(s.knownLinks(a.id).includes('https://county.example.gov/amendments'));assert.ok(!s.sources(a.id).some(x=>x.url.includes('attacker')));
   assert.ok(s.events(a.id).some(e=>e.message==='Project chat read a public source (S2).'));
   // Chat's usage is its own: research's project totals are untouched.
-  assert.deepEqual(s.chatUsage(a.id,turn.id),{searches:1,reads:1});assert.equal(s.project(a.id).searches,0);assert.equal(s.project(a.id).reads,0);assert.ok(turn.cost>.01);
+  assert.deepEqual(s.chatUsage(a.id,turn.id),{searches:1,reads:1});assert.deepEqual(turn.web,{searches:1,reads:1});assert.equal(s.project(a.id).searches,0);assert.equal(s.project(a.id).reads,0);assert.ok(turn.cost>.01);
   const tools=provider.calls.map(call=>JSON.stringify(call.payload.tools));assert.equal(new Set(tools).size,1);
   // Search is localized to the project address; web fetch follows it as a fallback reader.
-  const search=provider.calls[0].payload.tools.find(t=>t.name==='web_search');assert.deepEqual(search,searchTool(CHAT_LIMITS.searchesPerRequest,s.project(a.id).input));
-  assert.deepEqual(search,{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct'],user_location:search.user_location});assert.equal(search.user_location.country,'US');
+  const search=provider.calls[0].payload.tools.find(t=>t.name==='web_search');assert.deepEqual(search,searchTool(CHAT_LIMITS.searchesPerRequest,s.project(a.id).input,{blockedDomains:LOW_QUALITY_DOMAINS}));
+  assert.deepEqual(search,{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct'],user_location:search.user_location,blocked_domains:[...LOW_QUALITY_DOMAINS]});
+  // AI-written answers and forums are left out of chat's searches; research's search tool is unchanged.
+  assert.ok(search.blocked_domains.includes('chatgpt.com')&&search.blocked_domains.includes('reddit.com'));assert.ok(!Object.hasOwn(searchTool(4,s.project(a.id).input),'blocked_domains'));assert.equal(search.user_location.country,'US');
   assert.deepEqual(provider.calls[0].payload.tools.find(t=>t.name==='web_fetch'),{type:'web_fetch_20250910',name:'web_fetch',max_uses:CHAT_LIMITS.fetchesPerRequest,max_content_tokens:LIMITS.fetchContentTokens});
   assert.deepEqual(provider.calls[0].payload.tools.filter(t=>t.input_schema).map(t=>t.name),['read_project','find_project_sources','read_saved_source','read_source','render_page','inspect_pdf','locate_address','propose_question_update','propose_research_round','propose_report_note','propose_address_correction']);
   assert.match(provider.calls[0].payload.system,/Search results are leads, not evidence/);assert.match(provider.calls[0].payload.system,/Use a table when comparing/);assert.ok(!/do not use them/.test(provider.calls[0].payload.system));
+  // Project isolation is between projects; the model is told to search unprompted when the records fall short.
+  assert.doesNotMatch(provider.calls[0].payload.system,/strict project silo/);assert.match(provider.calls[0].payload.system,/project first, then the web/i);
 });
 
 test('chat reads a page the user names, and each reply has its own page-read allowance',async t=>{
