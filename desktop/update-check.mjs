@@ -8,11 +8,14 @@ const RELEASES_API='https://api.github.com/repos/Abe-Borg/ahj-atlas/releases/lat
 const CHECK_INTERVAL_MS=24*60*60*1000;
 const DOWNLOAD_IDLE_MS=60*1000;
 const MAX_INSTALLER_BYTES=1024*1024*1024;
+const MAX_NOTES_CHARS=20000;
 const VERSION_PATTERN=/^\d+\.\d+\.\d+$/;
 const INSTALLER_FILE=/^AHJ-Atlas-\d+\.\d+\.\d+-Windows-x64-Setup\.exe(?:\.partial)?$/;
-// Update an installed copy in place: skip the license and folder pages, install
-// silently, then reopen the app. The installer waits for this app to exit.
-export const INSTALLER_ARGS=['--updated','/S','--force-run'];
+// Run the installer with the pages a first install shows: the license agreement
+// (I Agree), install options, progress and Finish, whose Run AHJ Atlas option
+// reopens the app. It still upgrades in place and keeps app data. '--updated'
+// would skip the license page and '/S' every page.
+export const INSTALLER_ARGS=[];
 const installerName=version=>`AHJ-Atlas-${version}-Windows-x64-Setup.exe`;
 // Messages written for the user; other failures (network, disk) get a generic one.
 class UpdateError extends Error{}
@@ -24,6 +27,10 @@ export function compareVersions(a,b){
   return 0;
 }
 
+const validDate=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))?value:null;
+// The release notes are the docs/releases/<version>.md text published with the release.
+const releaseNotes=value=>typeof value==='string'&&value.trim()?value.trim().slice(0,MAX_NOTES_CHARS):null;
+
 function releaseDetails(release,currentVersion){
   const tag=release?.tag_name;
   if(release?.draft||release?.prerelease||typeof tag!=='string'||!/^v\d+\.\d+\.\d+$/.test(tag))throw new Error('Published release metadata is invalid.');
@@ -32,6 +39,7 @@ function releaseDetails(release,currentVersion){
   const installer=assets.find(asset=>asset.name===installerName(version));
   if(!installer||!assets.some(asset=>asset.name==='SHA256SUMS.txt'))throw new Error('The published Windows release is missing its installer or checksum.');
   return {latestVersion:version,releaseUrl:`https://github.com/Abe-Borg/ahj-atlas/releases/tag/${tag}`,updateAvailable:compareVersions(version,currentVersion)>0,
+    publishedAt:validDate(release.published_at),releaseNotes:releaseNotes(release.body),
     installerBytes:Number.isSafeInteger(installer.size)&&installer.size>0?installer.size:null,
     installerDigest:/^sha256:([0-9a-f]{64})$/i.exec(String(installer.digest||''))?.[1].toLowerCase()||null};
 }
@@ -75,8 +83,11 @@ export function createUpdateChecker({dataDir,currentVersion,downloadDir=null,lau
           latestVersion,
           releaseUrl:latestVersion?`https://github.com/Abe-Borg/ahj-atlas/releases/tag/v${latestVersion}`:null,
           updateAvailable:latestVersion?compareVersions(latestVersion,currentVersion)>0:false,
-          checkedAt:Number.isFinite(Date.parse(parsed.checkedAt))?parsed.checkedAt:null,
-          lastAttemptAt:Number.isFinite(Date.parse(parsed.lastAttemptAt))?parsed.lastAttemptAt:null,
+          checkedAt:validDate(parsed.checkedAt),
+          lastAttemptAt:validDate(parsed.lastAttemptAt),
+          publishedAt:latestVersion?validDate(parsed.publishedAt):null,
+          releaseNotes:latestVersion?releaseNotes(parsed.releaseNotes):null,
+          installerBytes:latestVersion&&Number.isSafeInteger(parsed.installerBytes)&&parsed.installerBytes>0?parsed.installerBytes:null,
           error:typeof parsed.error==='string'?parsed.error:null,
         };
         const d=parsed.download;
@@ -89,10 +100,11 @@ export function createUpdateChecker({dataDir,currentVersion,downloadDir=null,lau
   if(downloadDir)try{
     for(const name of readdirSync(downloadDir))if(INSTALLER_FILE.test(name)&&name!==(ready&&installerName(ready.version)))rmSync(path.join(downloadDir,name),{force:true});
   }catch{}
-  let download={state:ready?'ready':'idle',version:ready?.version||null,receivedBytes:0,totalBytes:0,error:null};
+  let download={state:ready?'ready':'idle',version:ready?.version||null,receivedBytes:0,totalBytes:0,error:null,sha256:ready?.sha256||null};
   let inFlight=null,downloading=null;
   const status=()=>({currentVersion,latestVersion:saved.latestVersion||null,releaseUrl:saved.releaseUrl||null,
     updateAvailable:Boolean(saved.updateAvailable),checkedAt:saved.checkedAt||null,lastAttemptAt:saved.lastAttemptAt||null,
+    publishedAt:saved.publishedAt||null,releaseNotes:saved.releaseNotes||null,installerBytes:saved.installerBytes||null,
     error:saved.error||null,checking:Boolean(inFlight),canInstall:Boolean(downloadDir&&launchInstaller),
     download:{...download},installing:Boolean(installing),notice});
   const persist=()=>{
@@ -152,7 +164,7 @@ export function createUpdateChecker({dataDir,currentVersion,downloadDir=null,lau
     if(installing)throw new UpdateError('The update is already installing.');
     if(downloading)return status();
     // Report progress from the first response, before any network wait.
-    download={state:'downloading',version:saved.latestVersion||null,receivedBytes:0,totalBytes:0,error:null};
+    download={state:'downloading',version:saved.latestVersion||null,receivedBytes:0,totalBytes:0,error:null,sha256:null};
     downloading=(async()=>{
       let version=null,partial=null;
       try{
@@ -160,8 +172,8 @@ export function createUpdateChecker({dataDir,currentVersion,downloadDir=null,lau
         if(!details?.updateAvailable)throw new UpdateError('No newer published release is available.');
         version=details.latestVersion;
         saved={...saved,...details,error:null};
-        if(ready?.version===version){download={state:'ready',version,receivedBytes:0,totalBytes:0,error:null};return;}
-        download={state:'downloading',version,receivedBytes:0,totalBytes:details.installerBytes||0,error:null};
+        if(ready?.version===version){download={state:'ready',version,receivedBytes:0,totalBytes:0,error:null,sha256:ready.sha256};return;}
+        download={state:'downloading',version,receivedBytes:0,totalBytes:details.installerBytes||0,error:null,sha256:null};
         const name=installerName(version),base=`${REPOSITORY}/releases/download/v${version}/`;
         const sums=await fetchImpl(base+'SHA256SUMS.txt',{headers:{'User-Agent':headers['User-Agent']},signal:AbortSignal.timeout(10000)});
         if(!sums.ok)throw new UpdateError(`GitHub returned HTTP ${sums.status} for the checksum file.`);
@@ -174,12 +186,12 @@ export function createUpdateChecker({dataDir,currentVersion,downloadDir=null,lau
         renameSync(partial,target);partial=null;
         if(ready)rmSync(path.join(downloadDir,installerName(ready.version)),{force:true});
         ready={version,sha256};
-        download={state:'ready',version,receivedBytes:bytes,totalBytes:bytes,error:null};
+        download={state:'ready',version,receivedBytes:bytes,totalBytes:bytes,error:null,sha256};
         // Losing this record only means a restart downloads the installer again.
         try{persist();}catch{}
       }catch(error){
         if(partial)rmSync(partial,{force:true});
-        download={state:'failed',version,receivedBytes:0,totalBytes:0,
+        download={state:'failed',version,receivedBytes:0,totalBytes:0,sha256:null,
           error:error instanceof UpdateError?error.message:'The download stopped. Check your connection and try again.'};
       }
     })().finally(()=>{downloading=null;});
@@ -196,7 +208,7 @@ export function createUpdateChecker({dataDir,currentVersion,downloadDir=null,lau
     let sha256=null;try{sha256=await hashFile(target);}catch{}
     if(sha256!==ready.sha256){
       rmSync(target,{force:true});
-      download={state:'failed',version:ready.version,receivedBytes:0,totalBytes:0,error:'The downloaded installer changed or was removed. Download the update again.'};
+      download={state:'failed',version:ready.version,receivedBytes:0,totalBytes:0,sha256:null,error:'The downloaded installer changed or was removed. Download the update again.'};
       ready=null;try{persist();}catch{}
       throw new UpdateError(download.error);
     }

@@ -95,15 +95,31 @@ async function api(url,options={}){
 }
 function toast(text){$('#toast').textContent=text;$('#toast').hidden=false;clearTimeout(timer);timer=setTimeout(()=>$('#toast').hidden=true,5000);}
 const updateReady=u=>Boolean(u?.updateAvailable&&u.download?.state==='ready'&&u.download.version===u.latestVersion);
+const megabytes=bytes=>`${(bytes/1048576).toLocaleString(undefined,{maximumFractionDigits:1})} MB`;
+// Release facts, what the installer will show, and the published release notes.
+function renderUpdateDetails(u,available,inApp){
+  $('#update-details').hidden=!available;
+  if(!available)return;
+  const ready=updateReady(u);
+  const published=u.publishedAt?new Date(u.publishedAt).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):null;
+  $('#update-facts').innerHTML=[`<strong>AHJ Atlas ${esc(u.latestVersion)}</strong>${published?` · published ${esc(published)}`:''}`,
+    u.installerBytes?`Windows installer ${esc(megabytes(u.installerBytes))}`:'',
+    'From github.com/Abe-Borg/ahj-atlas releases; the installer is unsigned',
+    ready&&u.download.sha256?`Verified SHA-256 <code>${esc(u.download.sha256)}</code>`:''].filter(Boolean).join(' · ');
+  $('#update-license-note').hidden=!inApp;
+  $('#update-notes').hidden=!u.releaseNotes;
+  $('#update-notes-title').textContent=`What’s new in ${u.latestVersion}`;
+  $('#update-notes-body').innerHTML=u.releaseNotes?renderMarkdown(u.releaseNotes):'';
+}
 function renderUpdateStatus(){
   if(!state.bootstrap?.updatesEnabled)return;
   const u=updateState,current=u?.currentVersion||state.bootstrap.version,available=Boolean(u?.updateAvailable&&u.releaseUrl),inApp=Boolean(u?.canInstall),d=u?.download||{};
   const percent=d.totalBytes?Math.min(100,Math.floor(d.receivedBytes/d.totalBytes*100)):null;
-  const unfinished=u?.notice?.type==='failed'?`The update to ${u.notice.version} did not finish. `:'';
+  const unfinished=u?.notice?.type==='failed'?`The update to ${u.notice.version} did not finish or was cancelled. `:'';
   let text='',action='';
-  if(u?.installing)text=`Installing AHJ Atlas ${d.version||u.latestVersion}. The app will close and reopen when the update finishes.`;
+  if(u?.installing)text=`Installing AHJ Atlas ${d.version||u.latestVersion}. The app will close and the installer will open: review the license, choose I Agree, then Finish to reopen the app.`;
   else if(inApp&&d.state==='downloading'){text=`Downloading AHJ Atlas ${d.version||u.latestVersion}…${percent==null?'':` ${percent}%`}`;action='Downloading…';}
-  else if(updateReady(u)){text=`${unfinished}AHJ Atlas ${u.latestVersion} is downloaded and verified. Restart to install it; the app reopens and your projects are kept.`;action='Restart and install';}
+  else if(updateReady(u)){text=`${unfinished}AHJ Atlas ${u.latestVersion} is downloaded and verified. Restart to install it: the installer shows the license agreement and other details, then reopens the app. Your projects are kept.`;action='Restart and install';}
   else if(available&&inApp&&d.state==='failed'){text=`The update download did not finish. ${d.error}`;action='Try again';}
   else if(available&&inApp){text=`${unfinished}AHJ Atlas ${u.latestVersion} is available. You have ${current}.`;action='Download update';}
   else if(available)text=`AHJ Atlas ${u.latestVersion} is available. You have ${current}.`;
@@ -112,6 +128,7 @@ function renderUpdateStatus(){
   $('#update-banner-text').textContent=text;
   for(const id of ['#update-banner-action','#update-action']){const button=$(id);button.hidden=!action;button.textContent=action;button.disabled=d.state==='downloading'||Boolean(u?.installing);}
   $('#update-banner-link').hidden=!available;$('#update-release-link').hidden=!available;
+  renderUpdateDetails(u,available,inApp);
   if(available){
     $('#update-banner-link').textContent=inApp?'What’s new ↗':'View release and install ↗';
     $('#update-banner-link').href=u.releaseUrl;
@@ -140,7 +157,8 @@ async function checkUpdates(force=false){
   catch(error){$('#update-status').textContent=`Could not check for updates: ${error.message}`;}
   finally{if(force){button.disabled=false;button.textContent='Check for updates';}}
 }
-// Download verifies the installer's published checksum; install closes the app, runs the installer and reopens.
+// Download verifies the installer's published checksum; install closes the app and runs the installer, whose
+// license and Finish pages the user goes through before the app reopens.
 async function runUpdateAction(){
   try{
     updateState=await api(updateReady(updateState)?'/api/updates/install':'/api/updates/download',{method:'POST',body:{}});

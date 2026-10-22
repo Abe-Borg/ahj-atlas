@@ -19,7 +19,8 @@ try{
   const checker=createUpdateChecker({dataDir,downloadDir:path.join(root,'updates'),currentVersion:'1.5.2',launchInstaller:(file,args)=>launches.push({file,args}),fetchImpl:async url=>{
     if(url.startsWith('https://api.github.com/')){
       checks++;
-      return {ok:true,status:200,json:async()=>({tag_name:'v1.5.3',draft:false,prerelease:false,assets:[
+      return {ok:true,status:200,json:async()=>({tag_name:'v1.5.3',draft:false,prerelease:false,published_at:'2026-10-20T16:00:00Z',
+        body:'## Highlights\n\n- **Synthetic** change <script>window.injected=1</script>',assets:[
         {name,state:'uploaded',size:installer.length},
         {name:'SHA256SUMS.txt',state:'uploaded'},
       ]})};
@@ -42,6 +43,13 @@ try{
   await page.locator('#settings-top').click();
   await page.waitForSelector('#settings-dialog[open]');
   assert.equal(await page.$eval('#update-release-link',element=>element.hidden),false);
+  // Before downloading: release facts, the license the installer will show, and escaped release notes.
+  assert.equal(await page.$eval('#update-details',element=>element.hidden),false);
+  assert.match(await page.$eval('#update-facts',element=>element.textContent),/AHJ Atlas 1\.5\.3 · published .*2026.*Windows installer 0\.4 MB.*unsigned/);
+  assert.match(await page.$eval('#update-license-note',element=>element.textContent),/license agreement for the new version.*I Agree.*Run AHJ Atlas/);
+  assert.equal(await page.$eval('#update-notes-title',element=>element.textContent),'What’s new in 1.5.3');
+  assert.equal(await page.$eval('#update-notes-body strong',element=>element.textContent),'Synthetic');
+  assert.equal(await page.$('#update-notes-body script'),null);assert.equal(await page.evaluate(()=>window.injected),undefined);
   await page.locator('#check-updates').click();
   await page.waitForFunction(()=>document.querySelector('#check-updates').textContent==='Check for updates'&&!document.querySelector('#check-updates').disabled);
   assert.equal(checks,2);
@@ -50,12 +58,13 @@ try{
   assert.equal(await page.$eval('#update-action',element=>element.disabled),true);
   release();
   await page.waitForFunction(()=>document.querySelector('#update-action').textContent==='Restart and install');
-  assert.match(await page.$eval('#update-status',element=>element.textContent),/downloaded and verified/);
+  assert.match(await page.$eval('#update-status',element=>element.textContent),/downloaded and verified.*license agreement/);
+  assert.equal(await page.$eval('#update-facts code',element=>element.textContent),sha);
   await page.locator('#update-action').click();
-  await page.waitForFunction(()=>/Installing AHJ Atlas 1\.5\.3/.test(document.querySelector('#update-banner-text').textContent));
-  assert.deepEqual(launches.map(launch=>[path.basename(launch.file),launch.args]),[[name,['--updated','/S','--force-run']]]);
+  await page.waitForFunction(()=>/Installing AHJ Atlas 1\.5\.3.*I Agree/.test(document.querySelector('#update-banner-text').textContent));
+  assert.deepEqual(launches.map(launch=>[path.basename(launch.file),launch.args]),[[name,[]]]);
   assert.deepEqual(errors,[]);
-  console.log('Update UI check passed: notice, manual check, verified download progress, and restart to install.');
+  console.log('Update UI check passed: notice, release details and notes, manual check, verified download progress, and restart to install.');
 }finally{
   release();
   await browser?.close();

@@ -49,6 +49,7 @@ const inlineFacts=[
   ['updateTimeoutMs','desktop/update-check.mjs',/AbortSignal.timeout\((\d+)\)/],
   ['updateDownloadIdleMs','desktop/update-check.mjs',/DOWNLOAD_IDLE_MS=([\d*]+)/],
   ['updateMaxBytes','desktop/update-check.mjs',/MAX_INSTALLER_BYTES=([\d*]+)/],
+  ['updateNotesChars','desktop/update-check.mjs',/MAX_NOTES_CHARS=(\d+)/],
   ['sourceIdleMs','lib/research-tools.mjs',/req.setTimeout\((\d+)/],
   ['redirects','lib/research-tools.mjs',/if\(redirects>(\d+)\)/],
   ['cacheMs','lib/research-tools.mjs',/Date.now\(\)-cached.time<(\d+)/],
