@@ -18,12 +18,15 @@ module.exports={
   win:{target:[{target:'nsis',arch:['x64']}],icon:'build/icon.ico',executableName:'AHJ Atlas',forceCodeSigning:false},
   nsis:{
     artifactName:'AHJ-Atlas-${version}-Windows-x64-Setup.${ext}',
-    // The assisted installer shows LICENSE and requires "I Agree" before installing.
+    // The assisted installer shows LICENSE and requires "I Agree" before installing,
+    // for a first install and for an in-app update alike (desktop/update-check.mjs).
     license:'LICENSE',
     oneClick:false,perMachine:false,allowElevation:false,
     allowToChangeInstallationDirectory:false,
     createDesktopShortcut:false,createStartMenuShortcut:true,
     shortcutName:'AHJ Atlas',uninstallDisplayName:'AHJ Atlas',
-    deleteAppDataOnUninstall:false,runAfterFinish:false,
+    deleteAppDataOnUninstall:false,
+    // The Finish page's checked "Run AHJ Atlas" option reopens the app after an update.
+    runAfterFinish:true,
   },
 };

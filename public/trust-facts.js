@@ -176,6 +176,7 @@ export const FACTS = {
   "updateTimeoutMs": 10000,
   "updateDownloadIdleMs": 60000,
   "updateMaxBytes": 1073741824,
+  "updateNotesChars": 20000,
   "sourceIdleMs": 25000,
   "redirects": 5,
   "cacheMs": 300000,

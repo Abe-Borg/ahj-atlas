@@ -68,9 +68,19 @@ test('missing published release is distinct from a network error',async t=>{
 
 test('cached release links are reconstructed from valid versions',t=>{
   const dataDir=workspace(t);
-  writeFileSync(path.join(dataDir,'update-check.json'),JSON.stringify({currentVersion:'1.5.2',latestVersion:'1.5.3',releaseUrl:'javascript:alert(1)',updateAvailable:true,lastAttemptAt:'2026-09-28T12:00:00Z'}));
+  writeFileSync(path.join(dataDir,'update-check.json'),JSON.stringify({currentVersion:'1.5.2',latestVersion:'1.5.3',releaseUrl:'javascript:alert(1)',updateAvailable:true,lastAttemptAt:'2026-09-28T12:00:00Z',
+    publishedAt:'not a date',releaseNotes:{text:'not text'},installerBytes:-1}));
   const checker=createUpdateChecker({dataDir,currentVersion:'1.5.2'});
   assert.equal(checker.status().releaseUrl,'https://github.com/Abe-Borg/ahj-atlas/releases/tag/v1.5.3');
+  assert.equal(checker.status().publishedAt,null);assert.equal(checker.status().releaseNotes,null);assert.equal(checker.status().installerBytes,null);
+});
+
+test('long release notes are bounded and blank ones are omitted',async t=>{
+  for(const [body,expected] of [['x'.repeat(30000),'x'.repeat(20000)],['  \n ',null],[undefined,null]]){
+    const dataDir=workspace(t);
+    const checker=createUpdateChecker({dataDir,currentVersion:'1.5.2',fetchImpl:async()=>response(200,{...release('1.5.3'),body})});
+    assert.equal((await checker.check()).releaseNotes,expected);
+  }
 });
 
 test('update API respects the app token and shares the same checker for automatic and manual checks',async t=>{
@@ -97,7 +107,8 @@ function github({version='1.7.0',bytes=Buffer.from('synthetic installer '.repeat
   const name=`AHJ-Atlas-${version}-Windows-x64-Setup.exe`,sha=createHash('sha256').update(bytes).digest('hex'),urls=[];
   const fetchImpl=async url=>{
     urls.push(url);
-    if(url.startsWith('https://api.github.com/'))return response(200,{tag_name:`v${version}`,draft:false,prerelease:false,assets:[
+    if(url.startsWith('https://api.github.com/'))return response(200,{tag_name:`v${version}`,draft:false,prerelease:false,
+      published_at:'2026-10-20T16:00:00Z',body:'# AHJ Atlas notes\n\n- Synthetic change.',assets:[
       {name,state:'uploaded',size,...(digest===false?{}:{digest:`sha256:${digest||sha}`})},{name:'SHA256SUMS.txt',state:'uploaded',size:100}]});
     if(url===`https://github.com/Abe-Borg/ahj-atlas/releases/download/v${version}/SHA256SUMS.txt`)return {ok:true,status:200,text:async()=>`${checksum||sha}  ${name}\n`};
     if(url===`https://github.com/Abe-Borg/ahj-atlas/releases/download/v${version}/${name}`)return {ok:installerStatus===200,status:installerStatus,url:'https://release-assets.githubusercontent.com/synthetic',
@@ -120,23 +131,30 @@ test('release checksum lines are matched to the exact installer name',()=>{
   assert.throws(()=>checksumFor('x'.repeat(70000),'a'),/invalid/);
 });
 
-test('a verified download installs silently after restart and the next version reports the outcome',async t=>{
+test('a verified download runs the installer with its license page after restart and the next version reports the outcome',async t=>{
   const u=updater(t);
   let checker=u.make();
-  assert.equal((await checker.check()).canInstall,true);
+  const checked=await checker.check();
+  assert.equal(checked.canInstall,true);
+  // The release details shown before installing.
+  assert.equal(checked.publishedAt,'2026-10-20T16:00:00Z');
+  assert.equal(checked.releaseNotes,'# AHJ Atlas notes\n\n- Synthetic change.');
+  assert.equal(checked.installerBytes,100000);
   const started=await checker.download();
   assert.equal(started.download.state,'downloading');
   const done=await finished(checker);
-  assert.equal(done.download.state,'ready');assert.equal(done.download.version,'1.7.0');
+  assert.equal(done.download.state,'ready');assert.equal(done.download.version,'1.7.0');assert.equal(done.download.sha256,u.remote.sha);
   const saved=path.join(u.downloadDir,u.remote.name);
   assert.equal(createHash('sha256').update(readFileSync(saved)).digest('hex'),u.remote.sha);
   assert.deepEqual(readdirSync(u.downloadDir),[u.remote.name]);
-  // A restart keeps the verified download instead of fetching it again.
-  checker=u.make();assert.equal(checker.status().download.state,'ready');
+  // A restart keeps the verified download and the release details instead of fetching them again.
+  checker=u.make();assert.equal(checker.status().download.state,'ready');assert.equal(checker.status().download.sha256,u.remote.sha);
+  assert.equal(checker.status().releaseNotes,checked.releaseNotes);assert.equal(checker.status().publishedAt,checked.publishedAt);
   const installing=await checker.install();
   assert.equal(installing.installing,true);
   assert.deepEqual(u.launches,[{file:saved,args:INSTALLER_ARGS}]);
-  assert.deepEqual(INSTALLER_ARGS,['--updated','/S','--force-run']);
+  // No '--updated' (skips the license page) and no '/S' (skips every page).
+  assert.deepEqual(INSTALLER_ARGS,[]);
   assert.equal(JSON.parse(readFileSync(path.join(u.dataDir,'update-check.json'),'utf8')).installing.toVersion,'1.7.0');
   // The installed version reports success once and removes the used installer.
   checker=u.make('1.7.0');
