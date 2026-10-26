@@ -237,5 +237,5 @@ test('web search is localized to a project city and state or province read from 
   for(const input of [{address:'4500 Centre St NE, Calgary',country:'Canada'},{address:'Toronto',country:'Canada'},{address:'1 Main St, Mexico City',country:'Mexico'}])assert.equal(searchLocation(input),null,input.address);
   assert.ok(!Object.hasOwn(searchTool(4,{address:'Toronto',country:'Canada'}),'user_location'));
   assert.deepEqual(searchTool(4,{address:'1 King St W, Toronto, ON M5H 1A1',country:'Canada'}).user_location,{type:'approximate',city:'Toronto',region:'Ontario',timezone:'America/Toronto'});
-  assert.deepEqual(searchTool(4,{address:'123 Main St, Springfield, IL 62701'}),{type:'web_search_20250305',name:'web_search',max_uses:4,allowed_callers:['direct'],user_location:{type:'approximate',city:'Springfield',region:'Illinois',country:'US'}});
+  assert.deepEqual(searchTool(4,{address:'123 Main St, Springfield, IL 62701'}),{type:'web_search_20260209',name:'web_search',max_uses:4,allowed_callers:['code_execution_20260120'],user_location:{type:'approximate',city:'Springfield',region:'Illinois',country:'US'}});
 });
