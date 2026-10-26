@@ -41,7 +41,7 @@ The unit and browser tests cover each change against the shapes Anthropic docume
 
 **History.** A turn that fell back is sent back as the API documents (`echoContent` in `lib/conversation.mjs`). The `fallback` block stays where it was. Thinking, connector text, client tool calls and unanswered server tool calls before the last `fallback` block are dropped, since the model that continued never saw them. Only tool calls after the handoff run. Text the fallback model continued is joined without a separator, so a report's JSON split at the handoff still parses.
 
-**Pricing.** `usage.iterations` records each attempt at its own model. The top-level counts describe only the attempt that returned the message. `costMicros` prices each declined attempt from its iteration and the serving attempt from the top-level counts, each at its own model's list rate. The rates come from `MODELS` or the fallback-candidate table in `lib/config.mjs`. Where the record is incomplete, the estimate is conservative:
+**Pricing.** `usage.iterations` records each attempt at its own model. The top-level counts describe only the attempt that returned the message. `costMicros` prices each declined attempt from its iteration, a fallback model that declined in turn included, and the serving attempt from the top-level counts, each at its own model's list rate. The rates come from `MODELS` or the fallback-candidate table in `lib/config.mjs`. Where the record is incomplete, the estimate is conservative:
 
 - A decline before any output is always counted. Anthropic bills it only in some refusal categories, and the response does not name the declined attempt's category.
 - Unitemized cache writes in a declined attempt are priced as one-hour writes.

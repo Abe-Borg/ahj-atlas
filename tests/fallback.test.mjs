@@ -23,6 +23,9 @@ test('a request that fell back is priced per attempt at each model’s rates and
   assert.equal(costMicros({...usage,iterations:[declined,{...served,model:'claude-future-9'}]},'research'),535*2+412*10+264*50+1000*1);
   // Sticky routing sends a later turn straight to the fallback model.
   assert.equal(costMicros({input_tokens:100,output_tokens:10,iterations:[{type:'fallback_message',model:opus48,input_tokens:100,output_tokens:10}]},'research'),100*5+10*25);
+  // A fallback model that declined in turn is priced from its own iteration; the serving model from the top-level counts.
+  const chain={...usage,iterations:[declined,{type:'fallback_message',model:'claude-opus-5',input_tokens:100,output_tokens:10},served]};
+  assert.equal(costMicros(chain,'research')-costMicros(usage,'research'),100*5+10*25);assert.equal(fallbackModel(chain),opus48);
   // Searches that ran before the decline carry over to the fallback and count once.
   const searched={...usage,server_tool_use:{web_search_requests:1},iterations:[{...declined,server_tool_use:{web_search_requests:2}},served]};
   assert.equal(costMicros(searched,'research')-costMicros(usage,'research'),2*10000);
