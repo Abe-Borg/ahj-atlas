@@ -511,10 +511,10 @@ test('chat searches the web, reads found pages into the source register and cite
   const tools=provider.calls.map(call=>JSON.stringify(call.payload.tools));assert.equal(new Set(tools).size,1);
   // Search is localized to the project address; web fetch follows it as a fallback reader.
   const search=provider.calls[0].payload.tools.find(t=>t.name==='web_search');assert.deepEqual(search,searchTool(CHAT_LIMITS.searchesPerRequest,s.project(a.id).input,{blockedDomains:LOW_QUALITY_DOMAINS}));
-  assert.deepEqual(search,{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct'],user_location:search.user_location,blocked_domains:[...LOW_QUALITY_DOMAINS]});
+  assert.deepEqual(search,{type:'web_search_20260209',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['code_execution_20260120'],user_location:search.user_location,blocked_domains:[...LOW_QUALITY_DOMAINS]});
   // AI-written answers and forums are left out of chat's searches; research's search tool is unchanged.
   assert.ok(search.blocked_domains.includes('chatgpt.com')&&search.blocked_domains.includes('reddit.com'));assert.ok(!Object.hasOwn(searchTool(4,s.project(a.id).input),'blocked_domains'));assert.equal(search.user_location.country,'US');
-  assert.deepEqual(provider.calls[0].payload.tools.find(t=>t.name==='web_fetch'),{type:'web_fetch_20250910',name:'web_fetch',max_uses:CHAT_LIMITS.fetchesPerRequest,max_content_tokens:LIMITS.fetchContentTokens});
+  assert.deepEqual(provider.calls[0].payload.tools.find(t=>t.name==='web_fetch'),{type:'web_fetch_20260209',name:'web_fetch',max_uses:CHAT_LIMITS.fetchesPerRequest,allowed_callers:['code_execution_20260120'],max_content_tokens:LIMITS.fetchContentTokens});
   assert.deepEqual(provider.calls[0].payload.tools.filter(t=>t.input_schema).map(t=>t.name),['read_project','find_project_sources','read_saved_source','read_source','render_page','inspect_pdf','locate_address','propose_question_update','propose_research_round','propose_report_note','propose_address_correction']);
   assert.match(provider.calls[0].payload.system,/Search results are leads, not evidence/);assert.match(provider.calls[0].payload.system,/Use a table when comparing/);assert.ok(!/do not use them/.test(provider.calls[0].payload.system));
   // Project isolation is between projects; the model is told to search unprompted when the records fall short.
@@ -586,6 +586,54 @@ test('a streaming reply saves its draft about once a second and shows the curren
   assert.equal(describeLookup({name:'read_saved_source',input:{sourceId:'S4',query:'NFPA 13'}}),'Reading S4 for “NFPA 13”…');
   assert.equal(describeLookup({name:'read_source',input:{url:'https://www.loudoun.gov/fire',query:'x'.repeat(200)}}),`Reading loudoun.gov for “${'x'.repeat(79)}…”…`);
   assert.equal(describeLookup({name:'inspect_pdf',input:{url:'https://county.example.gov/docs/Fire%20Code.pdf',page:12}}),'Inspecting page 12 of Fire Code.pdf…');
+});
+
+test('dynamic filtering shows its own steps, and the searches and fetches its code makes join the register',async t=>{
+  const lead='https://county.example.gov/adoption',fetched='https://county.example.gov/fire-ordinance',caller={type:'code_execution_20260120',tool_id:'srvtoolu_code'},seen=[];
+  const blocks=[
+    {type:'server_tool_use',id:'srvtoolu_code',name:'code_execution',input:{code:'results = await web_search({"query": "county fire code adoption"})'}},
+    {type:'server_tool_use',id:'srvtoolu_s',name:'web_search',input:{query:'county fire code adoption'},caller},
+    {type:'web_search_tool_result',tool_use_id:'srvtoolu_s',caller,content:[{type:'web_search_result',url:lead,title:'County fire code adoption',encrypted_content:'opaque-result'}]},
+    {type:'server_tool_use',id:'srvtoolu_f',name:'web_fetch',input:{url:fetched},caller},
+    {type:'web_fetch_tool_result',tool_use_id:'srvtoolu_f',caller,content:{type:'web_fetch_result',url:fetched,content:{type:'document',source:{type:'text',media_type:'text/plain',data:'The county adopts the 2024 International Fire Code.'},title:'Fire ordinance'}}},
+    {type:'code_execution_tool_result',tool_use_id:'srvtoolu_code',content:{type:'code_execution_result',stdout:'County adopts the 2024 IFC.',stderr:'',return_code:0,content:[]}},
+  ];
+  const provider=new ChatProvider((payload,n,{onEvent})=>{
+    const turn=()=>provider.store.chatTurns(provider.projectId)[0],e=event=>{onEvent(event);seen.push(turn().note);};
+    blocks.forEach((block,index)=>{e({type:'content_block_start',index,content_block:block});e({type:'content_block_stop',index});});
+    e({type:'content_block_start',index:blocks.length,content_block:{type:'text',text:''}});
+    return chatResponse('',{usage:{input_tokens:1000,output_tokens:400,server_tool_use:{web_search_requests:1,web_fetch_requests:1}},content:[...blocks,{type:'text',text:'The county adopts the 2024 International Fire Code.'}]});
+  });
+  const {app,a}=await setup(t,provider),c=app.services.chat,s=app.store;provider.store=s;provider.projectId=a.id;c.start(a.id,body());await settled(c);
+  assert.deepEqual([...new Set(seen)],['Filtering web results…','Searching the web…','Reviewing 1 search result…','Fetching a page through Anthropic…','Reading the page fetched from county.example.gov…','Reviewing the filtered web results…','Writing the answer…']);
+  const turn=c.view(a.id).turns[0];assert.equal(turn.status,'complete');assert.deepEqual(turn.web,{searches:1,reads:1});
+  assert.equal(s.sources(a.id).find(x=>x.url===lead).read_full,false);
+  const source=s.sources(a.id).find(x=>x.url===fetched);assert.equal(source.kind,'web-fetch');assert.equal(source.read_full,true);
+});
+
+test('a reply that falls back keeps its partial answer, runs only the lookups after the handoff and says which model answered',async t=>{
+  const seen=[],iterations=[{type:'message',model:'claude-sonnet-5-5',input_tokens:1200,output_tokens:30},{type:'fallback_message',model:'claude-opus-4-8',input_tokens:1000,output_tokens:400}];
+  const handoff={type:'fallback',from:{model:'claude-sonnet-5-5'},to:{model:'claude-opus-4-8'}};
+  const provider=new ChatProvider((payload,n,{onEvent})=>{
+    if(n===1){
+      onEvent({type:'content_block_start',index:0,content_block:handoff});seen.push(provider.store.chatTurns(provider.projectId)[0].note);
+      return chatResponse('',{stop_reason:'tool_use',usage:{input_tokens:1000,output_tokens:400,iterations},content:[
+        {type:'thinking',thinking:'',signature:'declined-signature'},{type:'tool_use',id:'declined_lookup',name:'read_project',input:{section:'report',offset:0,length:500}},
+        handoff,{type:'tool_use',id:'kept_lookup',name:'read_project',input:{section:'notes',offset:0,length:500}}]});
+    }
+    return chatResponse('',{usage:{input_tokens:1000,output_tokens:400,iterations:[{type:'fallback_message',model:'claude-opus-4-8',input_tokens:1000,output_tokens:400}]},content:[{type:'text',text:'The county adopts '},handoff,{type:'text',text:'the 2024 International Fire Code.'}]});
+  });
+  const {app,a}=await setup(t,provider),c=app.services.chat,s=app.store;provider.store=s;provider.projectId=a.id;c.start(a.id,body());await settled(c);
+  assert.ok(provider.calls.every(call=>call.payload.fallbacks==='default'));
+  assert.deepEqual(seen,['Anthropic’s safeguards declined this request; continuing on Claude Opus 4.8…']);
+  // The second request echoes the turn from the handoff on and answers only the lookup made after it.
+  const echoed=provider.calls[1].payload.messages.at(-2),results=provider.calls[1].payload.messages.at(-1);
+  assert.deepEqual(echoed.content.map(b=>b.id||b.type),['fallback','kept_lookup']);assert.deepEqual(results.content.filter(b=>b.type==='tool_result').map(b=>b.tool_use_id),['kept_lookup']);
+  const turn=c.view(a.id).turns[0];assert.equal(turn.status,'complete');assert.equal(turn.answer,'The county adopts the 2024 International Fire Code.');
+  assert.equal(turn.note,'Anthropic’s safeguards declined this request on Claude Sonnet 5.5, so Claude Opus 4.8 answered it through server-side fallback. Its estimated cost is priced at each model’s rates.');
+  const attempts=s.attempts(a.id).filter(x=>x.stage_id==='chat');assert.ok(attempts.every(x=>x.estimated===1));
+  assert.equal(attempts[0].actual,1200*2+30*10+1000*5+400*25);
+  assert.ok(s.diagnostics(a.id).some(d=>d.event==='chat.fallback'&&d.details.servedBy==='claude-opus-4-8'));
 });
 
 test('chat saves pages fetched through web_fetch to the register, counts them as page reads, and reads them by URL',async t=>{

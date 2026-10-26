@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Anthropic, providerError, validateCapabilities } from '../lib/provider.mjs';
+import { Anthropic, providerError, validateCapabilities, API_VERSION } from '../lib/provider.mjs';
 import { costMicros, CHAT_LIMITS, LIMITS } from '../lib/config.mjs';
 import { CHAT_TOOLS } from '../lib/chat.mjs';
 import { LOW_QUALITY_DOMAINS } from '../lib/research-tools.mjs';
@@ -23,7 +23,7 @@ test('chat sends compatible strict tool schemas to both token counting and gener
     const sent=JSON.parse(options.body);
     // Eleven strict app tools (including four proposal tools) plus native web search and web fetch, which have no input schema.
     assert.equal(sent.tools.length,13);
-    assert.deepEqual(sent.tools.filter(tool=>!tool.input_schema),[{type:'web_search_20250305',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['direct'],user_location:{type:'approximate',country:'US'},blocked_domains:[...LOW_QUALITY_DOMAINS]},{type:'web_fetch_20250910',name:'web_fetch',max_uses:CHAT_LIMITS.fetchesPerRequest,max_content_tokens:LIMITS.fetchContentTokens}]);
+    assert.deepEqual(sent.tools.filter(tool=>!tool.input_schema),[{type:'web_search_20260209',name:'web_search',max_uses:CHAT_LIMITS.searchesPerRequest,allowed_callers:['code_execution_20260120'],user_location:{type:'approximate',country:'US'},blocked_domains:[...LOW_QUALITY_DOMAINS]},{type:'web_fetch_20260209',name:'web_fetch',max_uses:CHAT_LIMITS.fetchesPerRequest,allowed_callers:['code_execution_20260120'],max_content_tokens:LIMITS.fetchContentTokens}]);
     for(const tool of sent.tools.filter(tool=>tool.input_schema)){
       assert.equal(tool.strict,true);
       assert.equal(tool.input_schema.additionalProperties,false);
@@ -110,7 +110,7 @@ test('cache comparison metadata reaches generation and survives streaming withou
 test('the progress-update display sends its beta header to generation, token counting and batches only',async()=>{
   const seen=[];
   const c=client(async(url,options)=>{
-    seen.push({path:new URL(url).pathname,beta:new Headers(options.headers).get('anthropic-beta'),key:new Headers(options.headers).get('x-api-key')});
+    const headers=new Headers(options.headers);seen.push({path:new URL(url).pathname,beta:headers.get('anthropic-beta'),version:headers.get('anthropic-version'),key:headers.get('x-api-key')||headers.get('authorization')?.replace(/^Bearer /,'')});
     if(String(url).endsWith('/count_tokens'))return new Response(JSON.stringify({input_tokens:100}),{headers:{'content-type':'application/json'}});
     if(String(url).endsWith('/batches'))return new Response(JSON.stringify({id:'msgbatch_fixture',processing_status:'in_progress'}),{headers:{'content-type':'application/json'}});
     return eventsResponse([initial,...ending]);
@@ -121,6 +121,8 @@ test('the progress-update display sends its beta header to generation, token cou
   assert.deepEqual(seen.map(r=>r.path),['/v1/messages/count_tokens','/v1/messages','/v1/messages/batches','/v1/messages/count_tokens','/v1/messages','/v1/messages/batches']);
   assert.deepEqual(seen.map(r=>r.beta),['thinking-display-updates-2026-08-18','thinking-display-updates-2026-08-18','thinking-display-updates-2026-08-18',null,null,null]);
   assert.ok(seen.every(r=>r.key==='fake-unit-key'));
+  // SDK 1.x streams on API version 2026-10-21; the app's own requests send the same version.
+  assert.ok(seen.every(r=>r.version===API_VERSION&&r.version==='2026-10-21'));
 });
 
 test('streamed native saved-source citations retain their location and exact cited text',async()=>{

@@ -13,6 +13,7 @@ import {selectPassages,allocateEvidence,mergeEvidence,validateProgress,progressM
 import {researchPayload,reviewPayload,evidencePackage,validateReport,REVIEW_FINAL} from '../lib/prompts.mjs';
 import {encodeReport} from '../lib/report-format.mjs';
 import {input,FakeProvider,fakeTools,report,nfpaReport,evidenceText,fetchBlocks,pdfFetchBlocks} from './fixtures.mjs';
+import {pendingServerTool} from '../lib/conversation.mjs';
 
 // A discipline without a standards checklist, so canned finish calls need no standards rows.
 function fixture(t){
@@ -419,13 +420,64 @@ test('research saves pages fetched through web_fetch, counts them as reads, and 
     {type:'server_tool_use',id:'srvtoolu_f',name:'web_fetch',input:{url:fetched}},{type:'web_fetch_tool_result',tool_use_id:'srvtoolu_f',content:{type:'web_fetch_result',url:fetched,content:{type:'document',source:{type:'text',media_type:'text/plain',data:'The county adopts the 2024 International Fire Code.'},title:'Fire ordinance'}}},
     ...finished().content]});
   const tools=researchPayload(s,s.project(p.id),s.stage(p.id,'jurisdiction')).tools;
-  assert.deepEqual(tools.find(t=>t.name==='web_fetch'),{type:'web_fetch_20250910',name:'web_fetch',max_uses:LIMITS.fetchesPerRequest,max_content_tokens:LIMITS.fetchContentTokens});assert.equal(tools.find(t=>t.name==='web_search').user_location.country,'US');
+  assert.deepEqual(tools.find(t=>t.name==='web_fetch'),{type:'web_fetch_20260209',name:'web_fetch',max_uses:LIMITS.fetchesPerRequest,allowed_callers:['code_execution_20260120'],max_content_tokens:LIMITS.fetchContentTokens});assert.equal(tools.find(t=>t.name==='web_search').user_location.country,'US');
   await e.dispatch(p.id,'jurisdiction');
   const source=s.sources(p.id).find(x=>x.url===fetched);assert.equal(source.kind,'web-fetch');assert.equal(source.read_full,true);assert.equal(s.project(p.id).reads,1);assert.equal(s.stage(p.id,'jurisdiction').status,'complete');
   assert.ok(s.events(p.id).some(x=>x.message===`Jurisdiction: fetched a public page through Anthropic's web fetch (${source.id}).`));
   // A spent read allowance leaves web_fetch out of new conversations.
   const a=s.reserve(p.id,'codes',{mode:'realtime',modelKey:'research',payload:{},reserve:1});s.updateAttempt(a.id,{state:'settled',usage:{server_tool_use:{web_fetch_requests:LIMITS.reads}}});
   assert.ok(!researchPayload(s,s.project(p.id),s.stage(p.id,'contacts')).tools.some(t=>t.name==='web_fetch'));
+});
+// Dynamic filtering: Claude searches and fetches from code, and each call it makes comes back
+// as its own result block with a caller field, beside the code's own result.
+const filtered=(code,blocks)=>[{type:'server_tool_use',id:code,name:'code_execution',input:{code:'results = await web_search({"query": "county fire code adoption"})'}},...blocks.map(b=>({...b,caller:{type:'code_execution_20260120',tool_id:code}})),{type:'code_execution_tool_result',tool_use_id:code,content:{type:'code_execution_result',stdout:'County adopts the 2024 IFC.',stderr:'',return_code:0,content:[]}}];
+test('searches and fetches made by dynamic filtering join the register, and a conversation saved with the basic web tools restarts from its checkpoint',async t=>{
+  const {store:s,project:p,provider,engine:e}=fixture(t),reader=new ResearchTools(s);e.tools=Object.assign(fakeTools(s),{captureFetches:(...args)=>reader.captureFetches(...args)});
+  const lead='https://county.example.gov/adoption',fetched='https://county.example.gov/fire-ordinance';
+  // A conversation an earlier version saved with the basic, direct-only web tools.
+  const current=researchPayload(s,s.project(p.id),s.stage(p.id,'jurisdiction'));
+  const basic={...current,tools:current.tools.map(x=>x.name==='web_search'?{...x,type:'web_search_20250305',allowed_callers:['direct']}:x.name==='web_fetch'?{type:'web_fetch_20250910',name:'web_fetch',max_uses:x.max_uses,max_content_tokens:x.max_content_tokens}:x)};
+  const saved=s.reserve(p.id,'jurisdiction',{mode:'realtime',modelKey:'research',payload:basic,reserve:1});s.updateAttempt(saved.id,{state:'settled',applied:1,usage});
+  s.updateStage(p.id,'jurisdiction',{messages:[...basic.messages,{role:'assistant',content:[{type:'text',text:'Earlier progress on the adoption record.'}]},{role:'user',content:'Continue.'}]});
+  provider.response=()=>({id:'msg_filtered',stop_reason:'tool_use',usage:{...usage,server_tool_use:{web_search_requests:1,web_fetch_requests:1}},content:[...filtered('srvtoolu_code',[
+    {type:'server_tool_use',id:'srvtoolu_s',name:'web_search',input:{query:'county fire code adoption'}},
+    {type:'web_search_tool_result',tool_use_id:'srvtoolu_s',content:[{type:'web_search_result',url:lead,title:'County fire code adoption',encrypted_content:'opaque-result',page_age:null}]},
+    {type:'server_tool_use',id:'srvtoolu_f',name:'web_fetch',input:{url:fetched}},
+    {type:'web_fetch_tool_result',tool_use_id:'srvtoolu_f',content:{type:'web_fetch_result',url:fetched,content:{type:'document',source:{type:'text',media_type:'text/plain',data:'The county adopts the 2024 International Fire Code.'},title:'Fire ordinance'}}},
+  ]),...finished().content]});
+  await e.dispatch(p.id,'jurisdiction');
+  const stage=s.stage(p.id,'jurisdiction');
+  assert.equal(stage.context_resets,1);assert.equal(provider.calls[0].messages.length,1);
+  assert.ok(s.events(p.id).some(x=>/the web search and fetch tools were updated/.test(x.message)));
+  const web=name=>provider.calls[0].tools.find(x=>x.name===name);
+  assert.deepEqual([web('web_search').type,web('web_search').allowed_callers,web('web_fetch').type,web('web_fetch').allowed_callers],['web_search_20260209',['code_execution_20260120'],'web_fetch_20260209',['code_execution_20260120']]);
+  assert.equal(s.sources(p.id).find(x=>x.url===lead).read_full,false);
+  const source=s.sources(p.id).find(x=>x.url===fetched);assert.equal(source.kind,'web-fetch');assert.equal(source.read_full,true);
+  assert.equal(s.project(p.id).reads,1);assert.equal(stage.status,'complete');
+  // A code call requested beside a client lookup waits for its result, like any server tool.
+  assert.equal(pendingServerTool(filtered('srvtoolu_wait',[]).slice(0,1)),true);assert.equal(pendingServerTool(filtered('srvtoolu_done',[])),false);
+});
+test('a real-time stage that falls back mid-turn runs only the calls after the handoff, echoes the turn as documented and is priced at each model’s rates; batches carry no fallback',async t=>{
+  const {store:s,project:p,provider,engine:e}=fixture(t);
+  const iterations=[{type:'message',model:'claude-sonnet-5-5',input_tokens:120,output_tokens:20},{type:'fallback_message',model:'claude-opus-4-8',input_tokens:100,output_tokens:50}];
+  provider.response=()=>({id:'msg_fallback',model:'claude-opus-4-8',stop_reason:'tool_use',usage:{input_tokens:100,output_tokens:50,iterations},content:[
+    {type:'thinking',thinking:'',signature:'declined-signature'},
+    {type:'tool_use',id:'declined_call',name:'save_progress',input:{brief:'Declined partial progress that the fallback model never saw.',claims:[],questions:[]}},
+    {type:'text',text:'Checking the adoption record.'},
+    {type:'fallback',from:{model:'claude-sonnet-5-5'},to:{model:'claude-opus-4-8'}},
+    {type:'thinking',thinking:'',signature:'serving-signature'},
+    ...finished().content]});
+  await e.dispatch(p.id,'jurisdiction');
+  assert.equal(provider.calls[0].fallbacks,'default');
+  const stage=s.stage(p.id,'jurisdiction'),attempt=s.attempts(p.id)[0];
+  assert.equal(stage.status,'complete');assert.equal(s.tool(attempt.id,'declined_call'),null);
+  assert.deepEqual(stage.messages.find(m=>m.role==='assistant').content.map(b=>b.signature||b.id||b.type),['text','fallback','serving-signature','finish']);
+  assert.equal(attempt.actual,120*2+20*10+100*5+50*25);assert.equal(attempt.estimated,1);
+  assert.ok(s.events(p.id).some(x=>x.message==='Jurisdiction: Claude Opus 4.8 answered through server-side fallback, because Anthropic’s safeguards declined this conversation on Claude Sonnet 5.5. Its cost is estimated at each model’s rates.'));
+  assert.ok(s.diagnostics(p.id).some(d=>d.event==='request.fallback'&&d.details.servedBy==='claude-opus-4-8'));
+  // Message Batches reject fallbacks, so a batch request never carries them.
+  s.updateProject(p.id,{mode:'batch'});provider.autoEnd=false;await e.dispatch(p.id,'contacts');
+  const [batch]=[...provider.batches.values()];assert.ok(batch);assert.ok(!Object.hasOwn(batch.attempts[0].payload,'fallbacks'));
 });
 test('the final review receives long stage briefs and more of a decisive source, and the Opus stages run at high effort',t=>{
   const {store:s,project:p}=fixture(t);

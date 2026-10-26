@@ -66,7 +66,7 @@ const inlineFacts=[
   ['providerRequestMs','lib/provider.mjs',/timeout=(\d+),jsonl/],
   ['providerStreamMs','lib/provider.mjs',/streamDeadlineMs=([\d*]+)/],
   ['modelsTimeoutMs','lib/provider.mjs',/after_id='\+encodeURIComponent\(after\):''\),\{timeout:(\d+)/],
-  ['tokenCountMs','lib/provider.mjs',/method:'POST',body,timeout:(\d+),context,headers:betaHeaders\(payload\)/],
+  ['tokenCountMs','lib/provider.mjs',/method:'POST',body,timeout:(\d+),context,headers:betaHeaders\(body\)/],
   ['batchSubmitMs','lib/provider.mjs',/params:a.payload\}\)\)\},timeout:(\d+)/],
   ['batchPollMs','lib/provider.mjs',/encodeURIComponent\(id\)\}`,\{timeout:(\d+)/],
   ['batchResultsMs','lib/provider.mjs',/\/results`,\{timeout:(\d+)/],
