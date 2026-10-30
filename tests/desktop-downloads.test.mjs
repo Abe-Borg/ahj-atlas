@@ -45,6 +45,7 @@ test('only expected attachment endpoints on the exact loopback origin are accept
   assert.equal(exportDownload(`${origin}/api/projects/123e4567-e89b-12d3-a456-426614174000/export?format=xlsx`,origin),'xlsx');
   assert.equal(exportDownload(`${origin}/api/addresses/export?format=csv&projects=123e4567-e89b-12d3-a456-426614174000,223e4567-e89b-12d3-a456-426614174000`,origin),'csv');
   assert.equal(exportDownload(`${origin}/api/addresses/export?format=xlsx&projects=123e4567-e89b-12d3-a456-426614174000`,origin),'xlsx');
+  assert.equal(exportDownload(`${origin}/api/workspace/export`,origin),'ahjatlas');
   for(const value of ['file:///C:/report.pdf','https://example.com/report.pdf',
     'http://127.0.0.1:54322/api/diagnostics/download',`${origin}/api/projects/x/export?format=pdf`,
     `${origin}/api/projects/123e4567-e89b-12d3-a456-426614174000/export?format=exe`,
@@ -53,7 +54,8 @@ test('only expected attachment endpoints on the exact loopback origin are accept
     `${origin}/api/addresses/export?format=pdf&projects=123e4567-e89b-12d3-a456-426614174000`,
     `${origin}/api/addresses/export?format=csv`,`${origin}/api/addresses/export?format=csv&projects=a,,b`,
     `${origin}/api/addresses/export?format=csv&projects=../secret`,
-    `${origin}/api/addresses/export?format=csv&projects=123e4567-e89b-12d3-a456-426614174000&next=1`])
+    `${origin}/api/addresses/export?format=csv&projects=123e4567-e89b-12d3-a456-426614174000&next=1`,
+    `${origin}/api/workspace/export?format=json`,`${origin}/api/workspace/import`,'http://127.0.0.1:54322/api/workspace/export'])
     assert.equal(exportDownload(value,origin),null,value);
 });
 
@@ -110,6 +112,25 @@ test('an address export saves as a CSV file',async t=>{
   assert.equal(readFileSync(destination,'utf8'),'Project,Address');
   // The server names it .csv; a different extension from the same link is refused.
   const renamed=item({url,filename:'AHJ Atlas project addresses 2026-10-15.exe',chain:[url]});
+  session.emit('will-download',{},renamed,contents);assert.equal(renamed.canceled,true);
+  dispose();
+});
+
+test('a workspace export saves as an AHJ Atlas workspace file',async t=>{
+  const {downloadsDir,session,contents,selections,saveOptions,dispose}=fixture(t);
+  const url=`${origin}/api/workspace/export`,filename='AHJ Atlas workspace 2026-10-30.ahjatlas';
+  const download=item({url,filename,chain:[url]});
+  const destination=path.join(downloadsDir,'For the team.ahjatlas');
+  selections.push({canceled:false,filePath:destination});
+  session.emit('will-download',{},download,contents);
+  assert.equal(download.canceled,false);
+  writeFileSync(download.savePath,'synthetic workspace bytes');
+  download.emit('done',{},'completed');
+  await until(()=>existsSync(destination));
+  assert.deepEqual(saveOptions[0].filters,[{name:'AHJ Atlas workspace',extensions:['ahjatlas']}]);
+  assert.equal(saveOptions[0].defaultPath,path.join(downloadsDir,filename));
+  assert.equal(readFileSync(destination,'utf8'),'synthetic workspace bytes');
+  const renamed=item({url,filename:'AHJ Atlas workspace 2026-10-30.zip',chain:[url]});
   session.emit('will-download',{},renamed,contents);assert.equal(renamed.canceled,true);
   dispose();
 });

@@ -35,6 +35,8 @@ Projects, sources, chat, settings, and diagnostics are stored under `%LOCALAPPDA
 
 For a backup, close AHJ Atlas, then copy the entire `%LOCALAPPDATA%\AHJ Atlas` folder to a secure location. Keep the backup private: it contains project data and the protected credential. The encrypted key may not be usable from a different Windows account or computer; re-enter it there if needed.
 
+To move your projects to another computer, or to give them to teammates so they can continue them, use **Export workspace** and **Import workspace** in the app's sidebar instead of copying the folder. The workspace file holds every project but not your API key, and importing adds projects to a workspace that already has its own. See [Sharing a workspace with your team](../README.md#sharing-a-workspace-with-your-team).
+
 To remove the app, use Windows **Settings → Apps → Installed Apps → AHJ Atlas → Uninstall**. To remove saved data too, first make any backup you want, then delete `%LOCALAPPDATA%\AHJ Atlas` manually after uninstall. Deleting that folder permanently removes the workspace and remembered key.
 
 For source development instead of the installer, see the [README](../README.md#source-development).
