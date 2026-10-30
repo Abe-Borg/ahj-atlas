@@ -217,7 +217,7 @@ function renderSidebar(){
   $('#project-count').textContent=state.projects.length;
   $('#project-list').innerHTML=state.projects.length?state.projects.map(p=>`<button class="project-nav ${state.selected===p.id?'active':''}" data-project="${esc(p.id)}"><strong>${esc(p.name)}</strong><small>${esc(p.discipline)} · ${esc(statuses[p.status]||p.status)}</small></button>`).join(''):'<p class="sidebar-empty">Your projects will appear here.</p>';
   for(const b of document.querySelectorAll('[data-project]'))b.addEventListener('click',()=>selectProject(b.dataset.project));
-  $('#export-addresses').hidden=!state.projects.length;
+  $('#export-addresses').hidden=!state.projects.length;$('#export-workspace').hidden=!state.projects.length;
   const view=connectionView(),button=$('#open-settings');$('#connection-label').textContent=view.label;button.title=view.title;button.dataset.status=view.status;
   const light=$('.connection-light');light.classList.toggle('on',view.status==='connected');light.classList.toggle('off',['missing','invalid'].includes(view.status));light.classList.toggle('pending',['checking','unavailable'].includes(view.status));
 }
@@ -784,6 +784,93 @@ $('#addresses-form').addEventListener('submit',async e=>{
     $('#addresses-dialog').close();toast(`Exporting ${ids.length===1?'1 project address':`${ids.length} project addresses`}.`);
   }catch(err){error.textContent=err.message;}
   finally{syncAddressExport();}
+});
+// Export workspace saves every project to one file; Import workspace stages a file on the server,
+// lists its projects beside this workspace's copies, and copies only the ones chosen.
+const heldReasons={research:'its research requests were still running when the file was exported. Ask for a new export once they finish.',uncertain:'it had a request with an uncertain charge. Ask for it to be resolved in Activity and exported again.',chat:'a chat reply was still running when the file was exported. Ask for a new export.',invalid:'its project ID is not one AHJ Atlas makes.'};
+async function openWorkspaceExport(){
+  $('#workspace-export-error').textContent='';$('#workspace-export-count').textContent='Checking projects…';$('#workspace-export-held').hidden=true;$('#workspace-export-submit').disabled=false;
+  $('#workspace-export-dialog').showModal();
+  try{
+    const summary=await api('/api/workspace');
+    $('#workspace-export-count').textContent=`${summary.projects===1?'1 project':`${summary.projects} projects`} will be saved.`;
+    $('#workspace-export-submit').disabled=!summary.projects;
+    const held=$('#workspace-export-held');held.hidden=!summary.held.length;
+    held.innerHTML=summary.held.length?`<strong>Still running:</strong> these are saved in the file, but a teammate can import them only from an export made after their requests finish or an uncertain charge is resolved.<ul>${summary.held.map(p=>`<li>${esc(p.name)}</li>`).join('')}</ul>`:'';
+  }catch(error){$('#workspace-export-count').textContent='';$('#workspace-export-error').textContent=error.message;}
+}
+$('#export-workspace').addEventListener('click',openWorkspaceExport);
+$('#workspace-export-form').addEventListener('submit',e=>{
+  e.preventDefault();
+  const a=document.createElement('a');a.href='/api/workspace/export';a.download='';document.body.appendChild(a);a.click();a.remove();
+  $('#workspace-export-dialog').close();toast('Preparing the workspace file. A large workspace can take a minute.');
+});
+let stagedImport=null,importUpload=0;
+function openWorkspaceImport(){
+  stagedImport=null;importUpload++;
+  for(const id of ['#workspace-file-name','#workspace-import-error','#workspace-projects'])$(id).textContent='';
+  $('#workspace-preview').hidden=true;$('#workspace-choose').disabled=false;$('#workspace-choose').textContent='Choose workspace file';syncWorkspaceImport();
+  $('#workspace-import-dialog').showModal();
+}
+function workspaceChoice(p){
+  const facts=[p.discipline,p.country,statuses[p.status]||p.status,p.lastActivity?`last activity ${date(p.lastActivity)}`:''].filter(Boolean).join(' · ');
+  let note,kind='',checked=false,disabled=false,replace=false;
+  if(p.held){note=`Cannot be imported: ${heldReasons[p.held]||heldReasons.invalid}`;kind='held';disabled=true;}
+  else if(!p.local){note='New to your workspace.';checked=true;}
+  else if(p.local.same){note='Already in your workspace and up to date.';disabled=true;}
+  else{
+    replace=true;kind='replace';
+    note=`In your workspace${p.local.name!==p.name?` as “${p.local.name}”`:''}. Check to replace your copy with this one.`;
+    if(p.local.lastActivity>p.lastActivity)note+=` Your copy has newer activity (${date(p.local.lastActivity)}) than this file (${date(p.lastActivity)}).`;
+  }
+  return `<label class="address-choice${disabled?' is-disabled':''}"><input type="checkbox" value="${esc(p.id)}" data-replace="${replace?1:0}"${checked?' checked':''}${disabled?' disabled':''}><span><strong>${esc(p.name)}</strong><small>${esc(p.address)}</small><small>${esc(facts)}</small><small class="transfer-state ${kind}">${esc(note)}</small></span></label>`;
+}
+function renderWorkspacePreview(){
+  const s=stagedImport,exported=s.exported?new Date(s.exported).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+  $('#workspace-source').textContent=`Exported ${exported?`${exported} `:''}from AHJ Atlas ${s.version} · ${s.projects.length===1?'1 project':`${s.projects.length} projects`}`;
+  $('#workspace-projects').innerHTML=s.projects.map(workspaceChoice).join('');$('#workspace-empty').hidden=Boolean(s.projects.length);
+  $('#workspace-preview').hidden=false;syncWorkspaceImport();
+}
+function syncWorkspaceImport(){
+  const chosen=[...document.querySelectorAll('#workspace-projects input:checked:not(:disabled)')],replace=chosen.filter(b=>b.dataset.replace==='1').length,add=chosen.length-replace;
+  $('#workspace-count').textContent=stagedImport?[`${add} new`,replace?`${replace} to replace`:''].filter(Boolean).join(', ')+` · ${stagedImport.projects.filter(p=>!p.held&&!p.local?.same).length} of ${stagedImport.projects.length} can be imported`:'';
+  const submit=$('#workspace-import-submit');submit.disabled=!chosen.length;submit.textContent=chosen.length===1?'Import 1 project':chosen.length?`Import ${chosen.length} projects`:'Import';
+}
+$('#import-workspace').addEventListener('click',openWorkspaceImport);
+$('#workspace-choose').addEventListener('click',()=>$('#workspace-file').click());
+$('#workspace-projects').addEventListener('change',syncWorkspaceImport);
+$('#workspace-file').addEventListener('change',async()=>{
+  const input=$('#workspace-file'),file=input.files[0];input.value='';if(!file)return;
+  const upload=++importUpload,choose=$('#workspace-choose'),error=$('#workspace-import-error');
+  stagedImport=null;$('#workspace-preview').hidden=true;error.textContent='';syncWorkspaceImport();
+  $('#workspace-file-name').textContent=`Reading “${file.name}”…`;choose.disabled=true;
+  try{
+    let response;try{response=await fetch('/api/workspace/import',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-App-Token':state.bootstrap.token},body:file});}catch(err){recordClientError('The browser could not reach the local application.','/api/workspace/import');throw err;}
+    const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'The workspace file could not be read.');
+    // A file read after the dialog closed or another file was chosen is discarded.
+    if(upload!==importUpload||!$('#workspace-import-dialog').open){api(`/api/workspace/import/${data.id}`,{method:'DELETE'}).catch(()=>{});return;}
+    stagedImport=data;$('#workspace-file-name').textContent=file.name;renderWorkspacePreview();
+  }catch(err){if(upload===importUpload){$('#workspace-file-name').textContent='';error.textContent=err.message;}}
+  finally{if(upload===importUpload){choose.disabled=false;choose.textContent=stagedImport?'Choose a different file':'Choose workspace file';}}
+});
+$('#workspace-import-dialog').addEventListener('close',()=>{
+  importUpload++;const staged=stagedImport;stagedImport=null;
+  if(staged)api(`/api/workspace/import/${staged.id}`,{method:'DELETE'}).catch(()=>{});
+});
+$('#workspace-import-form').addEventListener('submit',async e=>{
+  e.preventDefault();const staged=stagedImport,submit=$('#workspace-import-submit'),error=$('#workspace-import-error');if(!staged)return;
+  const chosen=[...document.querySelectorAll('#workspace-projects input:checked:not(:disabled)')];if(!chosen.length)return;
+  const add=chosen.filter(b=>b.dataset.replace!=='1').map(b=>b.value),replace=chosen.filter(b=>b.dataset.replace==='1').map(b=>b.value);
+  if(replace.length&&!confirm(`Replace ${replace.length===1?'1 of your projects':`${replace.length} of your projects`} with the ${replace.length===1?'copy':'copies'} in this file? Chat, notes, answers and research saved only in your ${replace.length===1?'copy':'copies'} will be removed. Their recorded charges stay in your spending totals.`))return;
+  error.textContent='';submit.disabled=true;
+  try{
+    const result=await api(`/api/workspace/import/${staged.id}`,{method:'POST',body:{add,replace}});
+    stagedImport=null;$('#workspace-import-dialog').close();
+    const count=n=>n===1?'1 project':`${n} projects`;
+    toast([result.added?`Imported ${count(result.added)}`:'',result.replaced?`${result.added?'replaced':'Replaced'} ${count(result.replaced)}`:''].filter(Boolean).join(' and ')+'.');
+    if(state.selected&&replace.includes(state.selected))await refreshSelected();else await refreshProjects();
+  }catch(err){error.textContent=err.message;}
+  finally{if(stagedImport)syncWorkspaceImport();}
 });
 async function removeNote(button){
   if(!confirm('Remove this note from the report? It stays in the chat conversation.'))return;
