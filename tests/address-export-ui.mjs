@@ -19,6 +19,8 @@ try{
   const phoenix=app.store.create({...input,name:'Phoenix <b>PHX-10</b>',address:'4000 Example Pkwy, Phoenix, AZ 85043',siteDescription:'APN 300-12-345'});
   const montreal=app.store.create({...input,name:'Montréal campus',address:'1000 Rue Example, Montréal, QC H3B 1A1',country:'Canada',discipline:'Mechanical'});
   const dallas=app.store.create({...input,name:'Dallas DFW-3',address:'1 Example Rd, Dallas, TX 75201'});
+  // Give fixtures distinct creation times so their order does not depend on clock resolution.
+  for(const [project,created] of [[phoenix,'2026-01-01T00:00:00.000Z'],[montreal,'2026-01-01T00:00:01.000Z'],[dallas,'2026-01-01T00:00:02.000Z']]) app.store.db.prepare('UPDATE projects SET created=? WHERE id=?').run(created,project.id);
   browser=await puppeteer.launch({executablePath:browserPath(),headless:true,pipe:true});
   const cdp=await browser.target().createCDPSession();await cdp.send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:downloads});
   const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
