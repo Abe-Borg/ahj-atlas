@@ -47,7 +47,8 @@ const tour=createTour({
     loadDock();
     const id=view?.selected;
     if(id&&state.projects.some(p=>p.id===id)){await selectProject(id,{capture:false});if(view.tab&&state.detail&&state.tab!==view.tab){state.tab=view.tab;renderProject();}}
-    else newForm();
+    // The form on screen may be the practice one, so the user's saved draft is restored without capturing it.
+    else newForm({capture:false});
   },
   changed:()=>{renderSidebar();renderTourButton();},
   setFinished:version=>{if(state.bootstrap)state.bootstrap.settings={...state.bootstrap.settings,tourFinished:version};renderTourButton();},
@@ -221,8 +222,8 @@ $('#diagnostic-project').addEventListener('change',loadDiagnostics);
 $('#refresh-diagnostics').addEventListener('click',loadDiagnostics);
 $('#download-diagnostics').addEventListener('click',()=>{if(!diagnosticsSnapshot)return;const a=document.createElement('a');a.href='/api/diagnostics/download'+($('#diagnostic-project').value?'?project='+encodeURIComponent($('#diagnostic-project').value):'');a.download='AHJ-Atlas-diagnostics.json';document.body.appendChild(a);a.click();a.remove();});
 const icons={chat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z"/></svg>',expand:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/></svg>',collapse:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10h-6V4M14 10l7-7M4 14h6v6M10 14l-7 7"/></svg>',minimize:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>',send:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12 20 4l-4 16-4-7-8-1Z"/></svg>',paperclip:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 12-8.5 8.5a5 5 0 0 1-7-7L13 5a3.3 3.3 0 0 1 4.7 4.7L9.5 18a1.6 1.6 0 0 1-2.3-2.3L15 8"/></svg>',image:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m20 16-4.5-4.5L8 19"/></svg>',pin:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>',people:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6m1 3a5 5 0 0 1 3 5v2"/></svg>',book:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h14a2 2 0 0 1 2 2v15H6a2 2 0 0 1-2-2V4Zm0 13h16M8 8h8M8 11h6"/></svg>',check:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg>'};
-function newForm({keepDraft=true}={}){
-  if(keepDraft)captureNewProjectDraft();
+function newForm({keepDraft=true,capture=keepDraft}={}){
+  if(capture)captureNewProjectDraft();
   const touring=tour.active(),prefill=touring?{...PRACTICE_FORM,detailsOpen:false}:keepDraft?(projectDrafts.get('new')||{}):{};
   projectLoad++;
   const custom=prefill.discipline==='Other',country=COUNTRIES.includes(prefill.country)?prefill.country:'United States';

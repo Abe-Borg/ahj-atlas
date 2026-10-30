@@ -144,6 +144,17 @@ try{
 
   // The guide opened a fresh page, so the workspace it returns to is the new-project form.
   await page.waitForSelector('#project-form');
+
+  phase='ending on the practice form keeps the user’s draft';
+  await page.type('#address','34 Second Draft Road, Springfield, IL 62701');await page.type('#name','Second unsent draft');
+  await page.click('#start-tour');await settled();
+  while(!(await card()).chapter)await press('next');
+  await press('chapter');assert.equal((await card()).title,'Address and country');
+  assert.match(await page.$eval('#address',e=>e.value),/Practice Parkway/);
+  await page.click('.tour-card [data-action="ask-end"]');await page.click('#tour-end-dialog [data-tour-end]');
+  await page.waitForFunction(()=>document.querySelector('.tour-layer').hidden);
+  await page.waitForFunction(()=>document.querySelector('#address')?.value==='34 Second Draft Road, Springfield, IL 62701');
+  assert.equal(await page.$eval('#name',e=>e.value),'Second unsent draft');
   phase='a narrow window';
   await page.click(`[data-project="${own.id}"]`);await page.waitForSelector('#rename-form');
   await page.setViewport({width:390,height:844});await page.click('#start-tour');await settled();
