@@ -112,7 +112,7 @@ export const TOUR=[
     step('composer','chat-composer',['chat.composer','chat.depth','chat.attach-document','chat.attach-image','chat.starters','chat.stop','chat.retry','chat.earlier'],'Asking a question',
       `Enter sends and Shift+Enter starts a new line. Reply depth: Standard (${F.models.research.label}) for most questions, Premium (${F.models.review.label}) for the hardest. Attach up to ${F.chat.attachments} documents and ${F.chat.images} images, or paste a screenshot. An empty conversation offers starter questions; Stop reply ends a running reply, a declined reply offers a retry, and Show earlier messages loads older ones. All held during the tour.`,{placement:'left'}),
     step('limits','chat-limits',['chat.limits'],'What a reply may do',
-      `Each reply can make up to ${F.chat.searches} web searches and ${F.chat.webReads} page reads and shows its estimated cost; there is no spending limit. Pages a reply reads join the project’s Sources. The project’s evidence is cached, so follow-up questions soon after cost less. Open this to read the rest.`,{placement:'left'}),
+      `Each reply can make up to ${F.chat.searches} web searches and ${F.chat.webReads} page reads and shows its estimated cost; there is no spending limit. Pages a reply reads join the project’s Sources. The project’s evidence is cached, so follow-up questions soon after cost less. Once a reply has been counted, a bar below the cost line shows how much of the model’s context window it filled; the recorded replies here have none. Open this to read the rest.`,{placement:'left'}),
   ]},
   {id:'finish',title:'Finish',show:project(),steps:[
     step('finish','tour-button',['tour.start','tour.finish'],'That is the window',
