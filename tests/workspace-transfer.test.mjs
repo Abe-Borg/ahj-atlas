@@ -173,6 +173,27 @@ test('replacing a project takes the file’s copy and keeps charges made only in
   assert.equal(to.store.spending().total,1.2);assert.equal(copy.cost,0.9);
 });
 
+test('a charge is counted once when a replaced or deleted project comes back in a later import',async t=>{
+  const from=await setup(t),p=finished(from.store),to=await setup(t),older=await from.exported();
+  let staged=await(await to.upload(older)).json();await to.apply(staged.id,{add:[p.id]});
+  // The importer adds a $0.30 request of their own and exports their copy.
+  const turn=to.store.createChatTurn(p.id,{clientId:'mine',message:'My question'});
+  const mine=to.store.reserve(p.id,'chat',{...reservation,chatTurnId:turn.id});
+  to.store.updateAttempt(mine.id,{state:'settled',actual:300000,applied:1});to.store.updateChatTurn(p.id,turn.id,{status:'complete',answer:'My answer'});
+  const theirs=await to.exported();assert.equal(to.store.spending().total,1.2);
+  // Replacing with the older file keeps that $0.30 as a charge of a removed copy…
+  staged=await(await to.upload(older)).json();await to.apply(staged.id,{replace:[p.id]});
+  assert.equal(to.store.spending().total,1.2);assert.equal(to.store.project(p.id).cost,0.9);
+  // …and bringing back the copy that has the request counts it once.
+  staged=await(await to.upload(theirs)).json();await to.apply(staged.id,{replace:[p.id]});
+  assert.equal(to.store.project(p.id).cost,1.2);assert.equal(to.store.spending().total,1.2);
+  // Deleting the project and importing it again does the same.
+  to.store.deleteProject(p.id);assert.equal(to.store.spending().total,1.2);
+  staged=await(await to.upload(theirs)).json();await to.apply(staged.id,{add:[p.id]});
+  assert.equal(to.store.spending().total,1.2);
+  assert.equal(to.store.db.prepare('SELECT COUNT(*) n FROM deleted_project_charges').get().n,0);
+});
+
 test('a project with work running here cannot be replaced',async t=>{
   const from=await setup(t),p=finished(from.store),to=await setup(t);
   const first=await(await to.upload(await from.exported())).json();await to.apply(first.id,{add:[p.id]});
