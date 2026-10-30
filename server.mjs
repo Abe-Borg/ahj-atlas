@@ -1,5 +1,3 @@
-import { fireProfile } from './lib/fire-protection.mjs';
-import { screeningView } from './lib/screening.mjs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +10,9 @@ import { addDocument, uploadLimitMb } from './lib/documents.mjs';
 import { addChatImage, imageLimitMb } from './lib/images.mjs';
 import { createServices } from './lib/services.mjs';
 import { errorDetails } from './lib/diagnostics.mjs';
+import { Tour, TOUR_REFUSAL } from './lib/tour.mjs';
+import { fireProfile } from './lib/fire-protection.mjs';
+import { screeningView } from './lib/screening.mjs';
 
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 function acquireDataLock(dir){
@@ -24,11 +25,18 @@ function acquireDataLock(dir){
     }
   }throw new Error('Unable to claim the local workspace.');
 }
+// The shape GET /api/projects/:id answers with, for a saved project and for the tour's practice one.
+export function projectDetail(store,chat,id){
+  const project=store.project(id);if(!project)return null;
+  return {project,researchLimits:{searches:LIMITS.searches,reads:LIMITS.reads},chat:chat.view(project.id),notes:store.notes(project.id),fireProfile:fireProfile(project.input),screening:screeningView(project.input),stages:store.stages(project.id).map(({messages,...s})=>s),sources:store.sources(project.id).map(s=>({...s,text:s.text.slice(0,20000)})),events:store.events(project.id),attempts:store.attemptSummaries(project.id)};
+}
 export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provider:injectedProvider,worker=true,vaultDir,updateChecker=null}={}){
   const releaseLock=acquireDataLock(dataDir);
   let store;
   try{store=new Store(dataDir);}catch(error){releaseLock();throw error;}
   const token=randomBytes(32).toString('hex');
+  // The guided tour's practice project, in memory and apart from this workspace (lib/tour.mjs).
+  const tour=new Tour();
   let services=null;
   const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));};
   // Export addresses puts every chosen project's ID in its link; 64 KB fits well over a thousand.
@@ -47,9 +55,12 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
       endpoint=url.pathname;
       if(endpoint.startsWith('/api/')&&!endpoint.startsWith('/api/diagnostics'))res.once('finish',()=>{if(req.method==='POST'||req.method==='DELETE'||res.statusCode>=400||endpoint.endsWith('/export'))store.diagnostic('http.completed',{level:res.statusCode>=400?'warning':'info',localRequestId,method:req.method,endpoint,status:res.statusCode,durationMs:Date.now()-started});});
       let body={};
+      const practiceId=url.pathname.match(/^\/api\/projects\/([a-f0-9-]+)(?:\/|$)/)?.[1],practice=Boolean(practiceId)&&tour.owns(practiceId);
       if(req.method!=='GET'&&req.method!=='HEAD'){
         const supplied=String(req.headers['x-app-token']||'');
         if(supplied.length!==token.length||!timingSafeEqual(Buffer.from(supplied),Buffer.from(token)))return send(res,403,{error:'Reload the app before trying again.'});
+        // The practice project is read-only: a change to it is refused before its body is read.
+        if(practice)return send(res,409,{error:TOUR_REFUSAL});
         // A document the user adds arrives as the raw file, named by X-File-Name.
         const upload=req.method==='POST'&&url.pathname.match(/^\/api\/projects\/([a-f0-9-]+)\/documents$/);
         if(upload){
@@ -72,6 +83,11 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
         let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>262144){send(res,413,{error:'Request is too large.'});return;}raw+=chunk;}
         try{body=raw?JSON.parse(raw):{};}catch{return send(res,400,{error:'The request is not valid JSON.'});}
       }
+      if(practice)return await tour.route({url,res,send,detail:projectDetail});
+      if(url.pathname==='/api/tour'&&req.method==='GET')return send(res,200,{...tour.status(),finished:store.settings().tourFinished||0});
+      if(url.pathname==='/api/tour/start'&&req.method==='POST')return send(res,200,await tour.start());
+      if(url.pathname==='/api/tour/end'&&req.method==='POST')return send(res,200,tour.end(typeof body.projectId==='string'?body.projectId:undefined));
+      if(url.pathname==='/api/tour/finished'&&req.method==='POST')return send(res,200,{finished:store.setTourFinished(body.version).tourFinished});
       if(url.pathname==='/api/bootstrap'&&req.method==='GET')return send(res,200,{application:'AHJ Atlas',token,version:VERSION,updatesEnabled:Boolean(updateChecker),settings:store.settings(),spending:store.spending(),models:MODELS,...services.connection()});
       if(url.pathname==='/api/updates'&&updateChecker){
         if(req.method==='GET')return send(res,200,await updateChecker.check());
@@ -102,10 +118,10 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
       if(services && await services.route({req,res,url,body,send}))return;
       if(url.pathname==='/api/projects'&&req.method==='POST'){const project=store.create(body);return send(res,201,project);}
       const match=url.pathname.match(/^\/api\/projects\/([a-f0-9-]+)$/);
-      if(match&&req.method==='GET'){const project=store.project(match[1]);if(!project)return send(res,404,{error:'Project not found.'});return send(res,200,{project,researchLimits:{searches:LIMITS.searches,reads:LIMITS.reads},chat:services.chat.view(project.id),notes:store.notes(project.id),fireProfile:fireProfile(project.input),screening:screeningView(project.input),stages:store.stages(project.id).map(({messages,...s})=>s),sources:store.sources(project.id).map(s=>({...s,text:s.text.slice(0,20000)})),events:store.events(project.id),attempts:store.attemptSummaries(project.id)});}
+      if(match&&req.method==='GET'){const detail=projectDetail(store,services.chat,match[1]);if(!detail)return send(res,404,{error:'Project not found.'});return send(res,200,detail);}
       if(url.pathname.startsWith('/api/'))return send(res,404,{error:'This action is unavailable.'});
       if(req.method!=='GET'&&req.method!=='HEAD')return send(res,405,{error:'Method not allowed.'});
-      const files={'/':'public/index.html','/app.js':'public/app.js','/markdown.js':'public/markdown.js','/latest-refresh.js':'public/latest-refresh.js','/location.js':'public/location.js','/trust.js':'public/trust.js','/trust-facts.js':'public/trust-facts.js','/trust.css':'public/trust.css','/styles.css':'public/styles.css','/favicon.svg':'public/favicon.svg','/help':'public/help.html','/license':'LICENSE'};
+      const files={'/':'public/index.html','/app.js':'public/app.js','/tour.js':'public/tour.js','/capabilities.js':'public/capabilities.js','/markdown.js':'public/markdown.js','/latest-refresh.js':'public/latest-refresh.js','/location.js':'public/location.js','/trust.js':'public/trust.js','/trust-facts.js':'public/trust-facts.js','/trust.css':'public/trust.css','/styles.css':'public/styles.css','/favicon.svg':'public/favicon.svg','/help':'public/help.html','/license':'LICENSE'};
       const filename=files[url.pathname];if(!filename)return send(res,404,{error:'Page not found.'});
       const file=await readFile(path.join(ROOT,filename));
       res.writeHead(200,{'Content-Type':filename.endsWith('.js')?'text/javascript; charset=utf-8':filename.endsWith('.css')?'text/css; charset=utf-8':filename.endsWith('.svg')?'image/svg+xml':filename.endsWith('.html')?'text/html; charset=utf-8':'text/plain; charset=utf-8'});res.end(req.method==='HEAD'?undefined:file);
@@ -114,7 +130,7 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
   try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});services=await createServices({store,provider:injectedProvider,worker,vaultDir});}
   catch(e){await new Promise(r=>server.close(()=>r()));store.close();releaseLock();throw e;}
   store.diagnostic('application.started',{version:VERSION});
-  let closing=false;const closeApp=async()=>{if(closing)return;closing=true;store.diagnostic('application.stopping');await services?.close();await new Promise(r=>server.close(r));store.close();releaseLock();};
+  let closing=false;const closeApp=async()=>{if(closing)return;closing=true;store.diagnostic('application.stopping');await services?.close();await new Promise(r=>server.close(r));tour.end();store.close();releaseLock();};
   return {server,store,services,url:`http://127.0.0.1:${server.address().port}`,close:closeApp};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
