@@ -410,6 +410,9 @@ test('context and output limits stop a reply without further paid requests',asyn
     const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
     const turn=c.view(a.id).turns[0];assert.equal(turn.status,'limited');assert.equal(provider.calls.length,kind==='input'?0:1);
     if(kind==='output')assert.equal(turn.answer,'Truncated');
+    // The refused request's count is kept for the context gauge, which shows why the reply ended.
+    const tokens=kind==='input'?CHAT_LIMITS.contextWindow-CHAT_LIMITS.output+1:1000;
+    assert.deepEqual(turn.contextUse,{tokens,opening:tokens,window:CHAT_LIMITS.contextWindow,limit:CHAT_LIMITS.contextWindow-CHAT_LIMITS.output,turnsShown:0,turnsOmitted:0});
   });
 });
 test('chat input is limited only by the model’s context window, as the model list reports it',async t=>{
@@ -417,12 +420,52 @@ test('chat input is limited only by the model’s context window, as the model l
   const small=new ChatProvider();small.preflight=async function(...args){this.preflights.push(args);return [{id:MODELS.research.id,max_input_tokens:200000}];};small.counted=200000-CHAT_LIMITS.output+1;
   const narrow=await setup(t,small);narrow.app.services.chat.start(narrow.a.id,body());await settled(narrow.app.services.chat);
   assert.equal(narrow.app.services.chat.view(narrow.a.id).turns[0].status,'limited');assert.equal(small.calls.length,0);
+  assert.deepEqual(narrow.app.services.chat.view(narrow.a.id).turns[0].contextUse,{tokens:200000-CHAT_LIMITS.output+1,opening:200000-CHAT_LIMITS.output+1,window:200000,limit:200000-CHAT_LIMITS.output,turnsShown:0,turnsOmitted:0});
   // Input above the former 400,000-token ceiling is sent when the window has room for it.
   for(const window of [1000000,0])await t.test(window?'reported 1M window':'no reported window',async t=>{
     const provider=new ChatProvider();provider.preflight=async function(...args){this.preflights.push(args);return window?[{id:MODELS.research.id,max_input_tokens:window}]:undefined;};provider.counted=800000;
     const {app,a}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());await settled(c);
     assert.equal(c.view(a.id).turns[0].status,'complete');assert.equal(provider.calls.length,1);assert.equal(provider.calls[0].payload.max_tokens,128000);
   });
+});
+test('each request’s counted size is saved on its reply for the context gauge, live while the reply runs',async t=>{
+  let release;const held=new Promise(resolve=>release=resolve);
+  const provider=new ChatProvider(async(payload,n)=>{if(n===1)return chatResponse('',{stop_reason:'tool_use',content:[{type:'tool_use',id:'tool_context',name:'read_project',input:{section:'report',offset:0,length:500}}]});await held;return chatResponse('Answer after the lookup.');});
+  const counts=[120000,154321];provider.count=async()=>counts.shift();
+  const {app,a,dir}=await setup(t,provider),c=app.services.chat;c.start(a.id,body());
+  // The second request is counted before it is sent, so the gauge has its size while it runs.
+  // The held reply is released even when a check fails, so the app can close.
+  const expected={tokens:154321,opening:120000,window:CHAT_LIMITS.contextWindow,limit:CHAT_LIMITS.contextWindow-CHAT_LIMITS.output,turnsShown:0,turnsOmitted:0};
+  let turn;
+  try{
+    while(provider.calls.length<2&&c.running.size)await new Promise(r=>setTimeout(r,5));
+    turn=c.view(a.id).turns[0];assert.equal(turn.status,'running');assert.deepEqual(turn.contextUse,expected);
+  }finally{release();}
+  await settled(c);turn=c.view(a.id).turns[0];assert.equal(turn.status,'complete');assert.deepEqual(turn.contextUse,expected);
+  const reopened=new Store(dir);try{assert.deepEqual(reopened.chatTurns(a.id)[0].context_use,expected);}finally{reopened.close();}
+  // A count the app cannot use is not recorded; the reply ends as before and keeps no figure.
+  provider.count=async()=>Number.NaN;c.start(a.id,body('Another question.'));await settled(c);
+  turn=c.view(a.id).turns[1];assert.equal(turn.status,'limited');assert.ok(!Object.hasOwn(turn,'contextUse'));assert.equal(provider.calls.length,2);
+});
+test('the context record names the earlier messages a reply carried and the older ones it left out',async t=>{
+  const {app,a,provider}=await setup(t),s=app.store,c=app.services.chat;
+  for(let n=0;n<40;n++){const turn=s.createChatTurn(a.id,{clientId:randomUUID(),message:'ALPHA old message '+n});s.updateChatTurn(a.id,turn.id,{status:'complete',answer:'x'.repeat(8000)});}
+  // Replies saved before the gauge, or made by hand here, carry no figure.
+  assert.ok(c.view(a.id).turns.every(t=>!Object.hasOwn(t,'contextUse')));
+  c.start(a.id,body());await settled(c);
+  const meta=JSON.parse(provider.calls[0].payload.messages.at(-1).content.find(b=>b.text?.startsWith('{"earlierTurnsShown"')).text),use=c.view(a.id).turns.at(-1).contextUse;
+  assert.ok(use.turnsShown>0&&use.turnsOmitted>0);assert.equal(use.turnsShown,meta.earlierTurnsShown);assert.equal(use.turnsOmitted,meta.olderTurnsOmitted);assert.equal(use.turnsShown+use.turnsOmitted,40);
+  assert.equal(use.tokens,1000);assert.equal(use.opening,1000);
+});
+test('a database from before the context gauge gains its column and keeps its replies',t=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-chat-legacy-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  let s=new Store(dir);const p=s.create({...input,name:'Legacy chat'}),turn=s.createChatTurn(p.id,{clientId:randomUUID(),message:'An older question'});s.updateChatTurn(p.id,turn.id,{status:'complete',answer:'An older answer'});
+  s.db.exec('ALTER TABLE chat_turns DROP COLUMN context_use');assert.ok(!s.db.prepare('PRAGMA table_info(chat_turns)').all().some(c=>c.name==='context_use'));s.close();
+  s=new Store(dir);try{
+    assert.ok(s.db.prepare('PRAGMA table_info(chat_turns)').all().some(c=>c.name==='context_use'));
+    const [saved]=s.chatTurns(p.id);assert.equal(saved.answer,'An older answer');assert.equal(saved.context_use,null);
+    const view=new ProjectChat(s,new ChatProvider(),()=>null,{}).view(p.id);assert.equal(view.turns[0].answer,'An older answer');assert.ok(!Object.hasOwn(view.turns[0],'contextUse'));
+  }finally{s.close();}
 });
 test('history remains persisted, paginated and retrievable within a single project',async t=>{
   const {app,a,b,dir}=await setup(t),s=app.store,c=app.services.chat;

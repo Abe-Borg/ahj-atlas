@@ -21,7 +21,7 @@ The runtime inventory has **32 user action groups and 7 automatic behavior group
 | U11 | Research with saved answers | Engine.resume; questionContext | tests/questions.test.mjs |
 | U12 | Reconcile batch (Activity) | Engine.reconcile,importBatch | tests/core.test.mjs |
 | U13 | Resolve uncertain charge; amount; confirmation; note | lib/services.mjs:resolve-charge route | tests/core.test.mjs; tests/chat.test.mjs |
-| U14 | Chat with Atlas; Reply depth; compose (Enter sends); Send message; starter questions; Ask Atlas; Show earlier messages | ProjectChat.start,view,run,chatPayload; attachedDocuments,attachedImages; public/app.js:askAtlas | tests/chat.test.mjs; tests/ask-atlas.test.mjs; tests/chat-images.test.mjs |
+| U14 | Chat with Atlas; Reply depth; compose (Enter sends); Send message; starter questions; Ask Atlas; Show earlier messages; context window gauge and each reply's token figure | ProjectChat.start,view,run,chatPayload; earlierTurns; attachedDocuments,attachedImages; Store.updateChatTurn(context_use); public/app.js:askAtlas,chatContext | tests/chat.test.mjs; tests/ask-atlas.test.mjs; tests/chat-images.test.mjs |
 | U15 | Retry a declined reply at suggested depth | public/app.js:chatRetries; ProjectChat.start | tests/chat.test.mjs |
 | U16 | Stop reply | ProjectChat.stop,run | tests/chat.test.mjs |
 | U17 | Apply; Apply and start research; processing mode on proposal | applyAction; Engine.resume; Store.saveQuestion; Store.addNote | tests/chat-actions.test.mjs; tests/ask-atlas.test.mjs |

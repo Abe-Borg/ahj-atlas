@@ -68,8 +68,9 @@ try{
   const rows=(await page.evaluate(()=>window.copied[0])).split('\r\n').map(r=>r.split('\t'));assert.equal(rows.length,2);assert.deepEqual(rows[0].slice(0,2),['Standard','Edition']);assert.equal(rows[1].length,6);assert.equal(rows[1][3],'January 1, 2025');
   assert.equal(await page.$eval('#chat-history .chat-turn:last-child [data-chat-copy-table]',e=>e.textContent),'Copied');
   await click('#chat-history .chat-turn:last-child [data-chat-copy]');await page.waitForFunction(()=>window.copied.length===2);assert.match(await page.evaluate(()=>window.copied[1]),/^### Adopted editions\n/);
-  // A reply that made no searches or page reads says it came from the project records.
-  assert.match(await page.$eval('#chat-history .chat-turn:last-child .chat-meta',e=>e.textContent),/^Reply complete · From project records · \$/);
+  // A reply that made no searches or page reads says it came from the project records, and how
+  // large its context was (the fake provider counts every request at 1,000 tokens).
+  assert.match(await page.$eval('#chat-history .chat-turn:last-child .chat-meta',e=>e.textContent),/^Reply complete · From project records · 1k-token context · \$/);
   phase='declined reply and retry';let retried=null;
   custom=()=>chatResponse('Partial text',{stop_reason:'refusal',stop_details:{type:'refusal',category:'general_harms'}});
   await page.type('#chat-message','A question Claude declines.');await click('#chat-form button[type=submit]');
@@ -84,6 +85,36 @@ try{
   phase='reply depth cost help';
   assert.match(await page.$eval('#chat-limits',e=>e.textContent),/Both depths reason at high effort/);
   assert.doesNotMatch(await page.$eval('#chat-limits',e=>e.textContent),/Economy|Haiku/);
+  phase='context window gauge';
+  const gauge=()=>page.$eval('.chat-send-row .chat-context',e=>({text:e.textContent,title:e.title,level:e.className,now:e.getAttribute('aria-valuenow'),value:e.getAttribute('aria-valuetext'),bar:e.querySelector('.chat-context-bar>span').style.width}));
+  let shown=await gauge();
+  assert.equal(shown.text,'1k / 1M context window');assert.equal(shown.level,'chat-context');assert.equal(shown.now,'1000');assert.equal(shown.value,'1,000 of 1,000,000 tokens (0.1%)');assert.equal(shown.bar,'0.1%');
+  assert.match(shown.title,/^Latest reply: 1,000 of 1,000,000 tokens in the model’s context window \(0\.1%\), as Anthropic counted its largest request\. It started at 1,000: this project’s saved records, \d+ earlier messages and the message it answers\. Each new message starts again/);
+  assert.match(await page.$eval('#chat-limits',e=>e.textContent),/The context window gauge beside the cost shows how much of the model’s context window the latest reply filled/);
+  assert.match(await page.$eval('#chat-history .chat-turn:last-child .chat-meta-context',e=>e.title),/^This reply: 1,000 of 1,000,000 tokens/);
+  // A reply nearing the input limit turns the gauge amber while it is still running.
+  let finishNear=null;provider.counted=700000;custom=()=>new Promise(resolve=>{finishNear=()=>resolve(chatResponse('An answer near the limit.'));});
+  await page.type('#chat-message','How full is the context window?');await click('#chat-form button[type=submit]');
+  await page.waitForFunction(()=>document.querySelector('.chat-send-row .chat-context')?.textContent==='700k / 1M context window',{timeout:10000});
+  shown=await gauge();assert.equal(shown.level,'chat-context near');assert.ok(await page.$('#chat-stop'));
+  assert.match(shown.title,/^Reply in progress: 700,000 of 1,000,000 tokens .*as Anthropic counted its current request\..* Nearing the 872,000-token input limit \(the window less the 128,000-token output allowance\)\./);
+  while(!finishNear)await new Promise(r=>setTimeout(r,5));finishNear();
+  await page.waitForFunction(()=>document.querySelector('#chat-history')?.textContent.includes('An answer near the limit.'),{timeout:10000});
+  assert.match(await page.$eval('#chat-history .chat-turn:last-child .chat-meta',e=>e.textContent),/^Reply complete · From project records · 700k-token context · \$/);
+  assert.ok(await page.$('#chat-history .chat-turn:last-child .chat-meta-context.near'));assert.match((await gauge()).title,/^Latest reply: 700,000/);
+  // A request over the limit is not sent; the gauge and that reply's figure turn red and say why.
+  const sentBefore=provider.calls.length;provider.counted=872001;custom=null;
+  await page.type('#chat-message','One more question.');await click('#chat-form button[type=submit]');
+  await page.waitForFunction(()=>document.querySelector('#chat-history .chat-turn:last-child .chat-meta')?.textContent.startsWith('Limit reached'),{timeout:10000});
+  assert.equal(provider.calls.length,sentBefore);shown=await gauge();
+  assert.equal(shown.text,'872k / 1M context window');assert.equal(shown.level,'chat-context full');assert.equal(shown.bar,'87.2%');
+  assert.match(shown.title,/Its last request was over the 872,000-token input limit \(the window less the 128,000-token output allowance\), so it was not sent and the reply ended\./);
+  assert.ok(await page.$('#chat-history .chat-turn:last-child .chat-meta-context.full'));assert.match(await page.$eval('#chat-history .chat-turn:last-child .chat-meta-context',e=>e.title),/^This reply: 872,001 of 1,000,000 tokens/);
+  // The figure survives a reload, and the gauge wraps below the costs in a narrow panel.
+  await page.reload();await click('#open-chat');await page.waitForSelector('.chat-send-row .chat-context.full');
+  await page.setViewport({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
+  assert.equal(await page.$eval('.chat-send-row',row=>row.scrollWidth<=row.clientWidth),true);await page.setViewport({width:1440,height:1100});
+  provider.counted=1000;
   phase='proposal cards';
   const questionId=app.store.project(cp.id).questions[0].id;
   custom=payload=>payload.messages.at(-1).content.some(x=>x.type==='tool_result')?chatResponse('Two cards are ready for your approval.'):chatResponse('',{stop_reason:'tool_use',content:[
@@ -256,6 +287,6 @@ try{
   await click(`[data-project="${b.id}"]`);await click('#open-chat');await page.waitForFunction(()=>document.querySelector('.chat-heading-project')?.textContent.includes('BRAVO'));
   phase='desktop/mobile layout';await click('#chat-limits>summary');await page.type('#chat-message','Which missing details should I confirm with the owner?');await click('#chat-history .chat-citation summary');assert.equal(await page.$eval('#chat-history .chat-citation',e=>e.open),true);
   mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/project-chat-desktop.png',fullPage:true});await page.setViewport({width:390,height:844});await page.screenshot({path:'test-results/project-chat-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
-  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, two reply depths with no Economy option, stop, stale-response protection, estimated costs without budgets, Markdown tables and lists with Copy table and Copy answer, live draft and step, declined reply with retry on the other model, proposal cards applied only on Apply, a report note saved, shown on Overview and removed, Ask Atlas on a question card using the selected reply depth and Apply, a note applied from Ask Atlas leaving the asked question open, documents attached by choosing or dropping files (refused, removed and sent) and shown on the sent message, images pasted or chosen (refused, scaled, removed, sent before the message text, shown and opened full size), the floating panel (open across tabs, minimized, expanded, dragged, remembered, Escape), Chat with Atlas button, and desktop/mobile layout. No paid API calls.');
+  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, two reply depths with no Economy option, stop, stale-response protection, estimated costs without budgets, Markdown tables and lists with Copy table and Copy answer, live draft and step, declined reply with retry on the other model, the context window gauge and each reply’s token figure (amber while a reply nears the limit, red when a request did not fit, kept after a reload), proposal cards applied only on Apply, a report note saved, shown on Overview and removed, Ask Atlas on a question card using the selected reply depth and Apply, a note applied from Ask Atlas leaving the asked question open, documents attached by choosing or dropping files (refused, removed and sent) and shown on the sent message, images pasted or chosen (refused, scaled, removed, sent before the message text, shown and opened full size), the floating panel (open across tabs, minimized, expanded, dragged, remembered, Escape), Chat with Atlas button, and desktop/mobile layout. No paid API calls.');
 }catch(e){console.error('Failed during: '+phase);if(page){console.error(await page.evaluate(()=>document.body.innerText).catch(()=>''));await page.screenshot({path:'test-results/project-chat-failure.png',fullPage:true}).catch(()=>{});}throw e;}
 finally{for(const release of releases)release();await browser?.close();await app?.close();assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-chat-ui-')));rmSync(dir,{recursive:true,force:true});}
