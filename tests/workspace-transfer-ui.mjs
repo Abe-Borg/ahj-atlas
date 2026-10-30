@@ -25,6 +25,8 @@ try{
   const batch=s.create({...input,name:'Dallas batch',mode:'batch'});const b=s.reserve(batch.id,'jurisdiction',{mode:'batch',modelKey:'research',payload:{},reserve:1000});
   s.updateAttempt(b.id,{state:'pending',batch_id:'msgbatch_ui'});s.updateProject(batch.id,{status:'waiting_batch'});
   const running=s.create({...input,name:'Montréal campus',address:'1000 Rue Example, Montréal, QC H3B 1A1',country:'Canada'});s.updateProject(running.id,{status:'researching'});
+  // Give fixtures distinct creation times so their order does not depend on clock resolution.
+  for(const [project,created] of [[done,'2026-01-01T00:00:00.000Z'],[batch,'2026-01-01T00:00:01.000Z'],[running,'2026-01-01T00:00:02.000Z']]) s.db.prepare('UPDATE projects SET created=? WHERE id=?').run(created,project.id);
   // The teammate's workspace starts empty.
   theirs=await createApp({dataDir:path.join(root,'theirs'),port:0,provider:new FakeProvider(),worker:false});theirs.services.engine.tick=async()=>{};
 
