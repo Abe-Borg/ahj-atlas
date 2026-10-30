@@ -6,7 +6,7 @@ export const CAPABILITIES=[
   // the tour itself
   'tour.start','tour.controls','tour.finish',
   // the sidebar and the top bar
-  'sidebar.projects','sidebar.new-research','sidebar.export-addresses','sidebar.connection','top.settings',
+  'sidebar.projects','sidebar.new-research','sidebar.export-addresses','sidebar.export-workspace','sidebar.import-workspace','sidebar.connection','top.settings',
   // API & spending
   'settings.key','settings.remember','settings.spending','settings.forget','settings.updates','settings.diagnostics',
   // the footer and updates

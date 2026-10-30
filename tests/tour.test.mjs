@@ -97,6 +97,7 @@ test('the practice project lives apart from the workspace, and every change to i
   assert.deepEqual((await json('/api/projects')).map(p=>p.id),[own.id]);
   assert.equal(app.store.project(id),null);
   assert.deepEqual(app.store.spending(),{today:0,total:0,pending:0});
+  assert.equal((await json('/api/workspace')).projects,1,'a workspace export holds only the user’s own project');
   // Read as any project is.
   const detail=await json('/api/projects/'+id);
   assert.equal(detail.project.name,PRACTICE_INPUT.name);assert.equal(detail.sources.length,6);assert.equal(detail.screening.fire,true);

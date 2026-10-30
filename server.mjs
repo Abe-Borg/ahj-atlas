@@ -77,6 +77,8 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
           const image=await addChatImage(store,imageUpload[1],{name,type:String(req.headers['content-type']||''),buffer:Buffer.concat(chunks)});
           return send(res,201,{image});
         }
+        // A workspace file to import arrives the same way and is staged on disk; see lib/workspace-transfer.mjs.
+        if(req.method==='POST'&&url.pathname==='/api/workspace/import')return send(res,201,await services.transfer.stage(req));
         if(!req.headers['content-type']?.startsWith('application/json'))return send(res,415,{error:'JSON requests are required.'});
         let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>262144){send(res,413,{error:'Request is too large.'});return;}raw+=chunk;}
         try{body=raw?JSON.parse(raw):{};}catch{return send(res,400,{error:'The request is not valid JSON.'});}
@@ -123,7 +125,7 @@ export async function createApp({dataDir=path.join(ROOT,'data'),port=4318,provid
       const filename=files[url.pathname];if(!filename)return send(res,404,{error:'Page not found.'});
       const file=await readFile(path.join(ROOT,filename));
       res.writeHead(200,{'Content-Type':filename.endsWith('.js')?'text/javascript; charset=utf-8':filename.endsWith('.css')?'text/css; charset=utf-8':filename.endsWith('.svg')?'image/svg+xml':filename.endsWith('.html')?'text/html; charset=utf-8':'text/plain; charset=utf-8'});res.end(req.method==='HEAD'?undefined:file);
-    }catch(e){store.diagnostic('http.failed',{level:'error',localRequestId,method:req.method,endpoint,error:errorDetails(e)});send(res,400,{error:services?.safeError(e)||e.message||'The request could not be completed.',requestId:localRequestId});}
+    }catch(e){store.diagnostic('http.failed',{level:'error',localRequestId,method:req.method,endpoint,error:errorDetails(e)});send(res,e.httpStatus||400,{error:services?.safeError(e)||e.message||'The request could not be completed.',requestId:localRequestId});}
   });
   try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});services=await createServices({store,provider:injectedProvider,worker,vaultDir});}
   catch(e){await new Promise(r=>server.close(()=>r()));store.close();releaseLock();throw e;}

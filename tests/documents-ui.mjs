@@ -13,18 +13,20 @@ let app,browser;
 try{
   app=await createApp({dataDir:dir,port:0,provider:new FakeProvider(),worker:false});
   const p=app.store.create({...input,name:'Documents project'});
-  const letter='Fire <Marshal> letter.txt',word=path.join(dir,'notes.docx');
-  writeFileSync(word,Buffer.from('PK\u0003\u0004word'));
+  const letter='Fire <Marshal> letter.txt',json=path.join(dir,'export.json');
+  writeFileSync(json,'{"fee":250}');
   browser=await puppeteer.launch({executablePath:browserPath(),headless:true,pipe:true});
   const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setViewport({width:1440,height:1000});await page.goto(app.url+'/#project='+p.id);
   await page.locator('[data-tab=sources]').click();await page.waitForSelector('#document-upload');
+  // The file chooser offers only the document types people add, by extension.
+  assert.equal(await page.$eval('#document-file',e=>e.accept),'.pdf,.docx,.xlsx,.csv,.txt');
   // Submitting without a file explains what to do and sends nothing.
   await page.locator('#document-upload button[type=submit]').click();
   assert.equal(await page.$eval('#document-error',e=>e.textContent),'Choose a document to add.');
   // An unsupported file is refused with the server's explanation.
-  await(await page.$('#document-file')).uploadFile(word);await page.locator('#document-upload button[type=submit]').click();
-  await page.waitForFunction(()=>document.querySelector('#document-error')?.textContent.includes('Save other formats'));
+  await(await page.$('#document-file')).uploadFile(json);await page.locator('#document-upload button[type=submit]').click();
+  await page.waitForFunction(()=>document.querySelector('#document-error')?.textContent.includes('Add a PDF, Word (.docx), Excel (.xlsx)'));
   // A text file joins the register and appears as your document, with its name escaped.
   // Windows cannot store this name on disk, so the file is built in the page.
   await page.$eval('#document-file',(e,name)=>{const files=new DataTransfer();files.items.add(new File(['The county enforces the 2024 International Fire Code with local amendments.'],name,{type:'text/plain'}));e.files=files.files;},letter);
@@ -37,7 +39,7 @@ try{
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/documents-mobile.png',fullPage:true});
   assert.deepEqual(errors,[]);
-  console.log('Document browser checks passed: empty submission, refused Word file, added text document, escaped name, source card and mobile layout. No paid API calls.');
+  console.log('Document browser checks passed: file types offered, empty submission, refused JSON file, added text document, escaped name, source card and mobile layout. No paid API calls.');
 }finally{
   await browser?.close();await app?.close();
   assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-documents-ui-')));rmSync(dir,{recursive:true,force:true});
