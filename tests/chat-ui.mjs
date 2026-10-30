@@ -205,9 +205,11 @@ try{
   const settledSources=n=>page.waitForFunction(n=>document.querySelector('[data-tab=sources] .tab-count')?.textContent===String(n),{timeout:10000},n);
   const pick=(selector,name,text,type='text/plain')=>page.$eval(selector,(e,name,text,type)=>{const files=new DataTransfer();files.items.add(new File([text],name,{type}));e.files=files.files;e.dispatchEvent(new Event('change',{bubbles:true}));},name,text,type);
   assert.equal(await page.$eval('#chat-attach-button',e=>e.textContent),'Attach document');assert.match(await page.$eval('#chat-limits',e=>e.textContent),/Removing it here keeps it in Sources/);
+  // The file choosers offer only the document and image types people attach, by extension.
+  assert.deepEqual(await page.$$eval('#chat-file,#chat-image-file',els=>els.map(e=>e.accept)),['.pdf,.docx,.xlsx,.csv,.txt','.jpg,.jpeg,.png,.gif,.webp']);
   // An unsupported file is refused with the server's explanation and attaches nothing.
-  await pick('#chat-file','notes.docx','PK\u0003\u0004word','application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-  await page.waitForFunction(()=>document.querySelector('#chat-error')?.textContent.includes('Save other formats'),{timeout:10000});assert.equal(await page.$('.chat-attachments'),null);
+  await pick('#chat-file','export.json','{"fee":250}','application/json');
+  await page.waitForFunction(()=>document.querySelector('#chat-error')?.textContent.includes('Add a PDF, Word (.docx), Excel (.xlsx)'),{timeout:10000});assert.equal(await page.$('.chat-attachments'),null);
   // A chosen file joins Sources and is listed on the unsent message, its name escaped.
   await pick('#chat-file','AHJ <letter>.txt','The county enforces the 2024 International Fire Code with local amendments.');
   await page.waitForFunction(()=>document.querySelector('.chat-attachments li')?.textContent.includes('AHJ <letter>.txt'),{timeout:10000});

@@ -3,7 +3,7 @@ import os from 'node:os';
 import { mkdtempSync } from 'node:fs';
 import { copyFile, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { safeDownloadName } from '../lib/download-filename.mjs';
+import { safeDownloadName, WORKSPACE_EXTENSION } from '../lib/download-filename.mjs';
 
 function exportRequest(url,appUrl){
   try{
@@ -18,6 +18,10 @@ function exportRequest(url,appUrl){
       if([...target.searchParams.keys()].some(key=>!['format','projects'].includes(key)))return null;
       if(!/^[a-f0-9-]+(?:,[a-f0-9-]+)*$/.test(target.searchParams.get('projects')||''))return null;
       return {csv:{extension:'csv',label:'CSV file'},xlsx:{extension:'xlsx',label:'Excel workbook'}}[target.searchParams.get('format')||'csv']||null;
+    }
+    if(target.pathname==='/api/workspace/export'){
+      if([...target.searchParams.keys()].length)return null;
+      return {extension:WORKSPACE_EXTENSION,label:'AHJ Atlas workspace'};
     }
     if(target.pathname==='/api/diagnostics/download'){
       if([...target.searchParams.keys()].some(key=>key!=='project'))return null;
