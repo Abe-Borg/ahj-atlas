@@ -2,7 +2,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { app, BrowserWindow, dialog, screen, shell } from 'electron';
+import { app, BrowserWindow, Menu, dialog, screen, shell } from 'electron';
 import { DatabaseSync } from 'node:sqlite';
 import { createApp } from '../server.mjs';
 import { startDesktop } from './lifecycle.mjs';
@@ -51,7 +51,7 @@ if((!app.isPackaged||packagedSmokeProfile)&&process.argv.includes('--fake-provid
 }
 
 // Electron signals readiness after this module returns; do not top-level await.
-void startDesktop({app,BrowserWindow,dialog,screen,shell,provider,
+void startDesktop({app,BrowserWindow,Menu,dialog,screen,shell,provider,
   downloadDir:provider&&process.env.ATLAS_DESKTOP_DOWNLOAD_DIR?path.resolve(process.env.ATLAS_DESKTOP_DOWNLOAD_DIR):null,
   diagnostics:process.argv.includes('--desktop-diagnostics'),
   migrationChoice:provider&&process.argv.includes('--migration-smoke')&&process.env.ATLAS_DESKTOP_LEGACY_DIR?'import':null,

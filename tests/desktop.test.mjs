@@ -7,6 +7,7 @@ import path from 'node:path';
 import { startDesktop } from '../desktop/lifecycle.mjs';
 import { navigationDecision, secureWindowNavigation } from '../desktop/navigation.mjs';
 import { desktopPaths } from '../desktop/paths.mjs';
+import { MENU_COMMANDS, menuTemplate, menuRunner } from '../desktop/menu.mjs';
 import { Store } from '../lib/store.mjs';
 import { input } from './fixtures.mjs';
 
@@ -201,4 +202,51 @@ test('navigation stays on the runtime origin and rejects unsafe protocols and lo
   // Only the app's own pages may write to the clipboard (chat's Copy buttons); nothing may read it.
   const ask=(name,requestingUrl)=>{let answer;window.permissionHandler(null,name,a=>{answer=a;},{requestingUrl});return answer;};
   assert.equal(ask('clipboard-sanitized-write',origin+'/'),true);assert.equal(ask('clipboard-sanitized-write','https://example.com/'),false);assert.equal(ask('clipboard-read',origin+'/'),false);assert.equal(ask('clipboard-sanitized-write',undefined),false);
+});
+
+test('the menu bar holds AHJ Atlas commands instead of Electron’s default menus',()=>{
+  const runs=[],closed=[];
+  const template=menuTemplate({run:command=>runs.push(command),closeWindow:()=>closed.push(true),platform:'win32'});
+  assert.deepEqual(template.map(menu=>menu.label),['&File','&View','&Help']);
+  const items=template.flatMap(menu=>menu.submenu).filter(item=>item.type!=='separator');
+  // Window roles only where they act on this window; no Edit, Window or developer menus.
+  for(const item of items.filter(item=>item.role))assert.ok(['zoomIn','zoomOut','resetZoom','togglefullscreen','reload'].includes(item.role),item.role);
+  for(const item of items.filter(item=>!item.role))item.click();
+  assert.deepEqual(closed,[true],'Exit closes the window, so the close confirmation still asks');
+  assert.deepEqual(runs,MENU_COMMANDS.filter(command=>command!=='updates'));
+  // An ampersand in a Windows menu label would be read as a mnemonic, so labels spell "and".
+  for(const item of items)if(item.label)assert.doesNotMatch(item.label,/&(?!File$|View$|Help$)/,item.label);
+  assert.deepEqual(Object.fromEntries(items.filter(item=>item.accelerator).map(item=>[item.label,item.accelerator])),
+    {'New research':'CmdOrCtrl+N','API and spending…':'CmdOrCtrl+,','Overview':'CmdOrCtrl+1','Contacts':'CmdOrCtrl+2','Codes and standards':'CmdOrCtrl+3','Sources':'CmdOrCtrl+4','Activity':'CmdOrCtrl+5','Chat with Atlas':'CmdOrCtrl+J','User guide':'F1'});
+  const packaged=menuTemplate({run:command=>runs.push(command),closeWindow:()=>{},updates:true,platform:'win32'});
+  packaged[2].submenu.find(item=>item.label==='Check for updates…').click();assert.equal(runs.at(-1),'updates');
+  const mac=menuTemplate({run:()=>{},closeWindow:()=>{},platform:'darwin'});
+  assert.deepEqual(mac.slice(0,2).map(menu=>menu.role),['appMenu','editMenu']);
+});
+
+test('a menu command reaches the workspace page, opening it first from another page',async()=>{
+  const log=[];let current='http://127.0.0.1:54321/#project=abc',destroyed=false;
+  const window={isDestroyed:()=>destroyed,loadURL:async url=>{log.push(['load',url]);current=url+'/';},
+    webContents:{getURL:()=>current,executeJavaScript:async(code,gesture)=>{log.push(['run',code,gesture]);}}};
+  const errors=[],run=menuRunner({window,appUrl:'http://127.0.0.1:54321',onError:error=>errors.push(error)});
+  await run('tour');
+  assert.deepEqual(log,[['run','dispatchEvent(new CustomEvent(\'atlas-menu\',{detail:"tour"}))',true]]);
+  log.length=0;current='http://127.0.0.1:54321/help';await run('new-research');
+  assert.deepEqual(log.map(entry=>entry[0]),['load','run']);assert.equal(log[0][1],'http://127.0.0.1:54321');assert.match(log[1][1],/detail:"new-research"/);
+  log.length=0;current='http://127.0.0.1:54321/help';await run('guide');
+  assert.deepEqual(log.map(entry=>entry[0]),['run'],'the user guide is already open');
+  log.length=0;await run('alert(1)');await run('toggleDevTools');destroyed=true;await run('tour');
+  assert.deepEqual(log,[],'only the listed commands are sent, and never to a closed window');
+  destroyed=false;window.webContents.executeJavaScript=async()=>{throw new Error('page gone');};await run('about');
+  assert.equal(errors.length,1);
+});
+
+test('startDesktop installs the menu bar on its window',async()=>{
+  const app=new FakeApp(),Menu={setApplicationMenu(menu){this.menu=menu;},buildFromTemplate:template=>({template})};
+  const desktop=await startDesktop({app,BrowserWindow:FakeWindow,Menu,dataDir:'synthetic',createBackend:async()=>backend()});
+  const items=Menu.menu.template.flatMap(menu=>menu.submenu||[]);
+  assert.ok(items.some(item=>item.label==='Take the guided tour'));
+  assert.equal(items.some(item=>item.label==='Check for updates…'),false,'only the installed app checks for updates');
+  let closed=0;desktop.window.close=()=>closed++;
+  items.find(item=>item.label==='Exit').click();assert.equal(closed,1);
 });

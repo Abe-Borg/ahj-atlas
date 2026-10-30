@@ -2,6 +2,7 @@ import { preflightWorkspace } from './migration.mjs';
 import { secureWindowNavigation } from './navigation.mjs';
 import { restoredBounds, saveWindowBounds } from './window-state.mjs';
 import { handleDesktopDownloads } from './downloads.mjs';
+import { installMenu } from './menu.mjs';
 
 function activeWork(backend){
   const services=backend?.services;
@@ -11,7 +12,7 @@ function activeWork(backend){
 }
 
 // beforeExit runs after the backend has closed and just before the process exits.
-export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths,dataDir,provider,
+export async function startDesktop({app,BrowserWindow,Menu=null,createBackend,resolvePaths,dataDir,provider,
   dialog,screen,shell,preflight=preflightWorkspace,onError=console.error,diagnostics=false,migrationChoice=null,downloadDir=null,beforeExit=null}){
   if(!app.requestSingleInstanceLock()){
     app.quit();
@@ -71,6 +72,8 @@ export async function startDesktop({app,BrowserWindow,createBackend,resolvePaths
     window=new BrowserWindow({...bounds,minWidth:900,minHeight:650,
       webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,devTools:diagnostics||!paths.packaged}});
     if(shell)secureWindowNavigation({window,appUrl:backend.url,shell,onError});
+    // AHJ Atlas's own menu bar replaces Electron's default one (desktop/menu.mjs).
+    if(Menu)installMenu({Menu,window,appUrl:backend.url,updates:Boolean(paths.packaged),onError});
     const stopDownloads=dialog?handleDesktopDownloads({window,appUrl:backend.url,dialog,downloadsDir:downloadDir||app.getPath?.('downloads')||paths.userData||process.cwd(),onError}):null;
     if(paths.packaged&&!diagnostics)window.webContents.on('devtools-opened',()=>window.webContents.closeDevTools());
     window.on('close',event=>{
