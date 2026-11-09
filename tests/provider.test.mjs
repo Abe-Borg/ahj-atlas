@@ -142,6 +142,15 @@ test('spending caps stop retries and errors redact credentials',()=>{
   const configured=providerError({error:{type:'invalid_request_error',message:'You have reached your specified workspace API usage limits. sk-ant-secret-example'}},{status:400});assert.equal(configured.code,'spend_limit');assert.ok(!configured.message.includes('sk-ant-'));
   const rate=providerError({error:{type:'rate_limit_error',message:'Too many requests'}},{status:429,headers:new Headers({'retry-after':'300'})});assert.equal(rate.retryAfterMs,300000);assert.equal(rate.retryable,true);
 });
+test('conflict, oversized and ramp-limit responses say what happened and keep their retry rules',async()=>{
+  // A batch result carries only the error type.
+  const conflict=providerError({error:{type:'conflict_error',message:'Fixture conflict'}});assert.equal(conflict.status,409);assert.equal(conflict.retryable,false);assert.match(conflict.message,/^The request conflicted with the current state of an Anthropic resource\. Fixture conflict$/);
+  // Anthropic's edge answers an oversized request before the API, so the body may be HTML.
+  const html=()=>new Response('<html><body>413 Request Entity Too Large</body></html>',{status:413,headers:{'content-type':'text/html'}});
+  for(const send of [c=>c.message(payload),c=>c.batch([])])await assert.rejects(send(client(async()=>html())),e=>e.status===413&&!e.ambiguous&&!e.retryable&&e.message==='The request was larger than Anthropic accepts.');
+  const ramp=providerError({error:{type:'rate_limit_error',message:'Fixture ramp',details:{error_code:'ramp_limit_exceeded'}}},{status:429,headers:new Headers({'retry-after':'60'})});
+  assert.equal(ramp.code,'ramp_limit_exceeded');assert.equal(ramp.retryable,true);assert.equal(ramp.retryAfterMs,60000);assert.match(ramp.message,/^Anthropic is limiting how quickly this account’s usage can grow\. Fixture ramp$/);
+});
 test('REST distinguishes overload rejection from gateway uncertainty',async()=>{
   for(const [status,type,ambiguous] of [[529,'overloaded_error',false],[500,'api_error',false],[504,'timeout_error',true]]){
     const c=client(async()=>new Response(JSON.stringify({error:{type,message:'Fixture'}}),{status}));
