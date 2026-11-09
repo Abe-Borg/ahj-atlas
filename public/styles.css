@@ -155,6 +155,7 @@
 .chat-mode{width:auto;min-height:0;padding:6px 26px 6px 8px;font-size:.78rem;border-color:transparent;background:#f3f6f8;margin-left:auto;max-width:100%}
 .chat-mode:focus{border-color:var(--blue)}
 #chat-mode-help{margin:4px 0 0;font-size:.72rem}
+.chat-fast{display:inline-flex;align-items:center;gap:5px;margin:0 2px 0 6px;font-size:.78rem;font-weight:500;color:var(--muted);cursor:pointer;white-space:nowrap}.chat-fast input{width:15px;min-height:15px;height:15px;margin:0;padding:0}.chat-fast:has(input:disabled){opacity:.5;cursor:default}
 .chat-send-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:4px 10px;margin-top:6px}
 .chat-send-row .field-help{margin:0;font-size:.72rem}
 .chat-context{display:inline-flex;align-items:center;gap:6px;font-size:.72rem;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums;cursor:help}

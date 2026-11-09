@@ -107,6 +107,20 @@ test('cache comparison metadata reaches generation and survives streaming withou
   const result=await c.message(request);assert.deepEqual(sent[1].body.diagnostics,request.diagnostics);assert.deepEqual(result.data.diagnostics,diagnostics);assert.equal(result.data.usage.cache_read_input_tokens,300);
 });
 
+test('a fast Opus 5.5 request streams speed fast with no beta header of its own, and token counts leave speed out',async()=>{
+  const seen=[];
+  const c=client(async(url,options)=>{
+    seen.push({path:new URL(url).pathname,beta:new Headers(options.headers).get('anthropic-beta'),body:JSON.parse(options.body)});
+    if(String(url).endsWith('/count_tokens'))return new Response(JSON.stringify({input_tokens:100}),{headers:{'content-type':'application/json'}});
+    return eventsResponse([{...initial,message:{...initial.message,usage:{...initial.message.usage,speed:'fast'}}},...ending]);
+  });
+  const fast={...payload,speed:'fast'};
+  await c.count(fast);const {data}=await c.message(fast);
+  assert.deepEqual(seen.map(r=>r.path),['/v1/messages/count_tokens','/v1/messages']);
+  assert.equal(Object.hasOwn(seen[0].body,'speed'),false);assert.equal(seen[1].body.speed,'fast');
+  assert.deepEqual(seen.map(r=>r.beta),[null,null]);
+  assert.equal(data.usage.speed,'fast');
+});
 test('the progress-update display sends its beta header to generation, token counting and batches only',async()=>{
   const seen=[];
   const c=client(async(url,options)=>{

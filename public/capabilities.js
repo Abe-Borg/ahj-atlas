@@ -18,5 +18,5 @@ export const CAPABILITIES=[
   // the report
   'report.tabs','report.evidence','questions.answer','questions.dismiss','questions.ask-atlas','questions.reopen','questions.research-answers','notes.remove','codes.research-standards','sources.add-document','activity.resolve-charge',
   // Chat with Atlas
-  'chat.launcher','chat.panel','chat.starters','chat.composer','chat.depth','chat.attach-document','chat.attach-image','chat.stop','chat.retry','chat.earlier','chat.copy','chat.citations','chat.proposal','chat.limits',
+  'chat.launcher','chat.panel','chat.starters','chat.composer','chat.depth','chat.fast','chat.attach-document','chat.attach-image','chat.stop','chat.retry','chat.earlier','chat.copy','chat.citations','chat.proposal','chat.limits',
 ];

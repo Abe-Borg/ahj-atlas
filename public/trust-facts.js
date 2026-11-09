@@ -13,7 +13,12 @@ export const FACTS = {
       "label": "Claude Opus 5.5",
       "input": 4,
       "output": 20,
-      "cacheRead": 0.2
+      "cacheRead": 0.2,
+      "fast": {
+        "input": 8,
+        "output": 40,
+        "cacheRead": 0.4
+      }
     },
     "economy": {
       "id": "claude-haiku-5-5",
@@ -136,6 +141,13 @@ export const FACTS = {
       "label": "Premium",
       "modelKey": "review",
       "effort": "high"
+    },
+    "opus_fast": {
+      "label": "Premium · Fast",
+      "modelKey": "review",
+      "effort": "high",
+      "speed": "fast",
+      "fastOf": "opus"
     }
   },
   "priceDate": "2026-10-07",
