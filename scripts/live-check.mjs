@@ -1,5 +1,5 @@
 // Live check of the Anthropic API paths changed for SDK 1.x (API version 2026-10-21), the
-// dynamic-filtering web tools (_20260209) and server-side refusal fallback. Unit tests cover
+// dynamic-filtering web tools (_20260209), server-side refusal fallback and Premium · Fast chat. Unit tests cover
 // these against documented shapes; only real requests show that the API accepts the app's
 // exact request shapes and returns what the app reads. The requests go through the app's own
 // provider and request builders and are billed to your Anthropic account. Nothing is saved to
@@ -14,9 +14,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Anthropic, withFallbacks, API_VERSION, FALLBACK_BETA } from '../lib/provider.mjs';
-import { MODELS, costMicros, usd, fallbackModel, modelLabel } from '../lib/config.mjs';
+import { MODELS, costMicros, usd, fallbackModel, modelLabel, pricingSnapshot } from '../lib/config.mjs';
 import { Store } from '../lib/store.mjs';
 import { researchPayload } from '../lib/prompts.mjs';
+import { chatPayload } from '../lib/chat.mjs';
 import { captureSearchSources, searchTool, fetchTool } from '../lib/research-tools.mjs';
 
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -31,7 +32,9 @@ It sends real requests billed to the key in ANTHROPIC_API_KEY:
   - one research request built exactly as the app builds it (Sonnet 5.5, dynamic-filtering web tools, fallbacks)
   - one small web search request (Sonnet 5.5, dynamic filtering, fallbacks)
   - one small structured-output request (Opus 5.5, fallbacks)
-Expected cost: about $0.05 to $0.40. --batch adds under $0.01; --ab adds about $0.10 to $0.60.
+  - one Premium · Fast chat request built exactly as the app builds it (Opus 5.5, speed fast, no fallbacks)
+  - one tiny request that tries speed fast together with fallbacks (informational)
+Expected cost: about $0.20 to $0.90. --batch adds under $0.01; --ab adds about $0.10 to $0.60.
 Run again with --yes to send them.`);
   process.exit(0);
 }
@@ -52,7 +55,7 @@ async function complete(payload,modelKey,onEvent){
   for(let n=0;n<2&&data.stop_reason==='pause_turn';n++){body={...body,messages:[...body.messages,{role:'assistant',content:data.content}]};({data}=await provider.message(body,{onEvent}));cost+=charge(data,modelKey);}
   return {data,cost};
 }
-const usageLine=(u={})=>`input ${(u.input_tokens||0)+(u.cache_read_input_tokens||0)+(u.cache_creation_input_tokens||0)} tokens (${u.cache_read_input_tokens||0} cached), output ${u.output_tokens||0}, searches ${u.server_tool_use?.web_search_requests||0}, fetches ${u.server_tool_use?.web_fetch_requests||0}`;
+const usageLine=(u={})=>`${u.speed?`speed ${u.speed}, `:''}input ${(u.input_tokens||0)+(u.cache_read_input_tokens||0)+(u.cache_creation_input_tokens||0)} tokens (${u.cache_read_input_tokens||0} cached), output ${u.output_tokens||0}, searches ${u.server_tool_use?.web_search_requests||0}, fetches ${u.server_tool_use?.web_fetch_requests||0}`;
 const fromCode=content=>(content||[]).filter(b=>b.caller&&b.caller.type!=='direct').length;
 
 console.log(`AHJ Atlas live check: Anthropic SDK ${sdkVersion}, API version ${API_VERSION}, fallback beta ${FALLBACK_BETA}\n`);
@@ -100,6 +103,34 @@ await check('Structured output (Opus 5.5, fallbacks)',async()=>{
   const {data,cost}=await complete(payload,'review'),text=data.content.filter(b=>b.type==='text').map(b=>b.text).join('');
   if(JSON.parse(text).ok!==true)fail(`Unexpected output: ${text.slice(0,200)}`);
   return `valid JSON; served by ${served(data)}; ${usageLine(data.usage)}; about $${usd(cost).toFixed(4)}`;
+});
+
+// Premium · Fast sends the Premium chat request with speed 'fast' and no fallbacks. Only the first
+// request is sent: a lookup the model asks for is not run, since acceptance and speed are the check.
+await check('Premium · Fast chat request as the app builds it (Opus 5.5, speed fast)',async()=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'ahj-live-check-'));let store;
+  try{
+    store=new Store(dir);const p=store.create(project);
+    const turn=store.createChatTurn(p.id,{clientId:'live-check-fast',message:'In one sentence, what is this project? Answer from the records you were given; do not look anything up.',mode:'opus_fast'});
+    const payload=chatPayload(store,turn);
+    if(payload.speed!=='fast'||payload.fallbacks)fail(`The app built speed ${payload.speed} with fallbacks ${payload.fallbacks}.`);
+    const {data}=await provider.message(payload),cost=costMicros(data.usage,'review','realtime',pricingSnapshot('review',undefined,{speed:'fast'}));spent+=cost;
+    if(data.usage?.speed!=='fast')fail(`Accepted, but usage.speed is ${JSON.stringify(data.usage?.speed)}; the app would charge Premium's standard rates.`);
+    return `accepted; stop ${data.stop_reason}; blocks ${summary(data.content)}; ${usageLine(data.usage)}; about $${usd(cost).toFixed(4)} at fast rates`;
+  }finally{store?.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+// The app leaves fallbacks off Fast requests because Anthropic does not document how a fallback
+// attempt runs or is billed with speed 'fast'. This shows whether the API accepts the combination.
+await check('Speed fast with server-side fallback (informational)',async()=>{
+  const payload=withFallbacks({model:MODELS.review.id,max_tokens:2000,speed:'fast',thinking:{type:'adaptive',display:'omitted'},output_config:{effort:'low'},messages:[{role:'user',content:'Reply with the word ready.'}]});
+  try{
+    const {data}=await provider.message(payload),cost=costMicros(data.usage,'review','realtime',pricingSnapshot('review',undefined,{speed:'fast'}));spent+=cost;
+    return `accepted together (fallbacks "${payload.fallbacks}"); ${usageLine(data.usage)}; about $${usd(cost).toFixed(4)}. How a fallback attempt runs and is billed with speed fast is still undocumented.`;
+  }catch(error){
+    if(error.status>=400&&error.status<500)return `rejected: ${error.message} (HTTP ${error.status}). Fast replies must stay without fallbacks.`;
+    throw error;
+  }
 });
 
 if(args.has('--batch'))await check('Message Batch (no fallbacks)',async()=>{

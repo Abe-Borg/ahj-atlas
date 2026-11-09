@@ -13,7 +13,7 @@ import { ResearchTools, searchTool, TOOL_DEFS, LOW_QUALITY_DOMAINS } from '../li
 import { remainingSearches } from '../lib/prompts.mjs';
 import { CHAT_LIMITS,LIMITS,FETCH_HISTORY_CHARS,MODELS,costMicros } from '../lib/config.mjs';
 import { ProviderError,validateCapabilities } from '../lib/provider.mjs';
-import { diagnosticReport } from '../lib/diagnostics.mjs';
+import { diagnosticReport,requestSummary } from '../lib/diagnostics.mjs';
 import { input,report,chatResponse,ChatProvider,fetchBlocks,pdfFetchBlocks } from './fixtures.mjs';
 
 async function setup(t,provider=new ChatProvider()){
@@ -248,11 +248,55 @@ test('Standard and Premium replies reason at high effort on their model, check t
   const standardAttempt=s.attempts(a.id).find(x=>x.model_key==='research'),premiumAttempt=s.attempts(a.id).find(x=>x.model_key==='review');assert.equal(standardAttempt.model_key,'research');assert.equal(premiumAttempt.model_key,'review');
   assert.equal(premiumAttempt.actual,costMicros(chatResponse().usage,'review','realtime'));assert.ok(premiumAttempt.actual>standardAttempt.actual);
   const view=c.view(a.id);assert.deepEqual(view.turns.map(t=>t.mode),['standard','opus']);assert.equal(view.turns[1].modeLabel,'Premium · Claude Opus 5.5');
-  assert.deepEqual(view.modes,[{id:'standard',label:'Standard',model:'Claude Sonnet 5.5',effort:'high'},{id:'opus',label:'Premium',model:'Claude Opus 5.5',effort:'high'}]);
+  assert.deepEqual(view.modes,[{id:'standard',label:'Standard',model:'Claude Sonnet 5.5',effort:'high'},{id:'opus',label:'Premium',model:'Claude Opus 5.5',effort:'high'},{id:'opus_fast',label:'Premium · Fast',model:'Claude Opus 5.5',effort:'high',speed:'fast',fastOf:'opus'}]);
   // The Opus capability check now covers high effort, which Opus research stages do not use.
   const opusModel=capabilities=>({id:MODELS.review.id,max_tokens:CHAT_LIMITS.output,capabilities});
   validateCapabilities([opusModel({effort:{high:{supported:true}}})],{modelKeys:['review'],outputLimits:{review:CHAT_LIMITS.output},efforts:{review:'high'}});
   assert.throws(()=>validateCapabilities([opusModel({effort:{high:{supported:false}}})],{modelKeys:['review'],outputLimits:{review:CHAT_LIMITS.output},efforts:{review:'high'}}),/high effort/);
+});
+test('Premium · Fast sends the Premium request at fast speed without fallbacks and prices it at the speed it ran',async t=>{
+  const speeds=['fast','standard'];
+  const {app,provider,a}=await setup(t,new ChatProvider((payload,n)=>chatResponse('Answer [S1].',{usage:{input_tokens:1000,output_tokens:400,...(payload.speed?{speed:speeds.shift()}:{})}}))),s=app.store,c=app.services.chat;
+  c.start(a.id,body('Premium question',{mode:'opus'}));await settled(c);
+  c.start(a.id,body('Fast question',{mode:'opus_fast'}));await settled(c);
+  c.start(a.id,body('Fast question served at standard speed',{mode:'opus_fast'}));await settled(c);
+  const [premium,fast]=provider.calls.map(call=>call.payload);
+  // Premium keeps server-side fallback and sends no speed; Fast is the same request with speed 'fast' and no fallbacks.
+  assert.equal(premium.fallbacks,'default');assert.equal(Object.hasOwn(premium,'speed'),false);
+  assert.equal(fast.speed,'fast');assert.equal(Object.hasOwn(fast,'fallbacks'),false);
+  assert.equal(fast.model,MODELS.review.id);assert.equal(fast.output_config.effort,'high');assert.equal(fast.system,premium.system);assert.deepEqual(fast.thinking,premium.thinking);
+  const [standardRow,fastRow,downgradedRow]=s.attempts(a.id).filter(x=>x.stage_id==='chat');
+  assert.equal(fastRow.pricing.speed,'fast');assert.deepEqual([fastRow.pricing.input,fastRow.pricing.output,fastRow.pricing.cacheRead],[MODELS.review.fast.input,MODELS.review.fast.output,MODELS.review.fast.cacheRead]);
+  assert.deepEqual(fastRow.pricing.standard,{input:MODELS.review.input,output:MODELS.review.output,cacheRead:MODELS.review.cacheRead});
+  // Fast tokens cost twice Premium's; a response reporting standard speed is charged Premium's rates.
+  assert.equal(fastRow.actual,2*standardRow.actual);assert.equal(downgradedRow.actual,standardRow.actual);assert.ok(fastRow.reserve>standardRow.reserve);
+  const view=c.view(a.id);assert.deepEqual(view.turns.map(t=>t.mode),['opus','opus_fast','opus_fast']);assert.equal(view.turns[1].modeLabel,'Premium · Fast · Claude Opus 5.5');
+  assert.equal(provider.preflights[1][2].efforts.review,'high');
+  // Diagnostics name the speed a request asked for; the response's usage.speed is kept with its usage.
+  assert.equal(requestSummary(fast).speed,'fast');assert.equal(Object.hasOwn(requestSummary(premium),'speed'),false);
+});
+test('a declined or rate-limited Fast reply says how Fast differs and offers Standard',async t=>{
+  await t.test('declined',async t=>{
+    const {app,a}=await setup(t,new ChatProvider(()=>chatResponse('Partial',{stop_reason:'refusal',stop_details:{type:'refusal',category:'general_harms',explanation:null}}))),c=app.services.chat;
+    c.start(a.id,body('Fast question',{mode:'opus_fast'}));await settled(c);
+    const turn=c.view(a.id).turns[0];assert.equal(turn.status,'declined');assert.equal(turn.retryMode,'standard');
+    assert.match(turn.note,/try Standard \(Claude Sonnet 5\.5\)/);assert.match(turn.note,/Fast replies do not use server-side fallback; with Fast off, Anthropic can continue some declined Premium replies on another model\./);
+  });
+  await t.test('Premium without Fast keeps the earlier note',async t=>{
+    const {app,a}=await setup(t,new ChatProvider(()=>chatResponse('Partial',{stop_reason:'refusal',stop_details:{type:'refusal',category:'general_harms',explanation:null}}))),c=app.services.chat;
+    c.start(a.id,body('Premium question',{mode:'opus'}));await settled(c);
+    assert.doesNotMatch(c.view(a.id).turns[0].note,/Fast/);
+  });
+  for(const status of [429,529])await t.test(`fast ${status}`,async t=>{
+    const {app,a}=await setup(t,new ChatProvider(()=>{throw new ProviderError('Anthropic rate limits were reached.',{status,retryable:true});})),c=app.services.chat;
+    c.start(a.id,body('Fast question',{mode:'opus_fast'}));await settled(c);
+    const turn=c.view(a.id).turns[0];assert.equal(turn.status,'failed');assert.match(turn.note,/^Anthropic rate limits were reached\. Fast mode has its own rate limit and capacity\. Turn Fast off to send at standard speed, or wait and send again\.$/);
+  });
+  await t.test('Premium 429 has no Fast advice',async t=>{
+    const {app,a}=await setup(t,new ChatProvider(()=>{throw new ProviderError('Anthropic rate limits were reached.',{status:429,retryable:true});})),c=app.services.chat;
+    c.start(a.id,body('Premium question',{mode:'opus'}));await settled(c);
+    assert.equal(c.view(a.id).turns[0].note,'Anthropic rate limits were reached.');
+  });
 });
 test('replies saved with the retired Deep and Economy depths keep their labels, and a new message cannot choose them',async t=>{
   for(const [mode,label] of [['deep','Deep · Claude Sonnet 5.5'],['economy','Economy · Claude Haiku 5.5']])await t.test(mode,async t=>{

@@ -54,7 +54,7 @@ The Messages and token-counting endpoints now accept requests up to 128 MB (batc
 
   Adopt threads only after measuring time to first token with and without them (the `--ab` pattern in `scripts/live-check.mjs`).
 - **On-demand compaction (`compact-2026-09-04`).** Research already restarts from its own checkpoints, which pin the reviewer's lookups and evidence. Server compaction would replace that mechanism and cannot be combined with threads.
-- **Fast mode on Opus 5.5** (generally available, $8 / $40 per million tokens, twice the standard price, up to 2.5 times the output speed). Premium chat, the evidence check and the final review could finish sooner. It doubles their token cost, so it is a product decision. If adopted, it would be an explicit choice the user makes, not a default.
+- **Fast mode on Opus 5.5** (generally available, $8 / $40 per million tokens, twice the standard price, up to 2.5 times the output speed). Premium chat, the evidence check and the final review could finish sooner. It doubles their token cost, so it is a product decision. If adopted, it would be an explicit choice the user makes, not a default. *Later the same day:* Premium chat gained an opt-in **Fast** toggle; research stages stay at standard speed. See [Premium · Fast chat](premium-fast-mode-2026-11-09.md).
 - **Cache pre-warming** (`max_tokens: 0`) when chat opens. Nothing the app does costs money until the user acts. A pre-warm charges the cache write even when no message follows.
 - **Task budgets (beta).** Research and chat already pace themselves with round, lookup and time allowances, and they warn the model as each runs low.
 

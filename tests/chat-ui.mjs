@@ -39,6 +39,16 @@ try{
   await click('#chat-history .chat-citation [data-source=S1]');await page.waitForSelector('#source-S1');assert.match(await page.$eval('#source-S1',e=>e.textContent),/ALPHA project source/);await click('#open-chat');await page.reload();await click('#open-chat');assert.match(await page.$eval('#chat-history',e=>e.textContent),/ALPHA reply/);await click('#chat-history .chat-citation summary');assert.match(await page.$eval('#chat-history .chat-citation blockquote',e=>e.textContent),/ALPHA project evidence/);
   phase='reply depth';assert.deepEqual(await page.$$eval('#chat-mode option',o=>o.map(x=>x.value)),['standard','opus']);assert.deepEqual(await page.$$eval('#chat-mode option',o=>o.map(x=>x.textContent)),['Standard — Claude Sonnet 5.5, high reasoning','Premium — Claude Opus 5.5, high reasoning']);assert.match(await page.$eval('#chat-mode-help',e=>e.textContent),/Sonnet 5\.5 · High reasoning/);await page.select('#chat-mode','opus');assert.match(await page.$eval('#chat-mode-help',e=>e.textContent),/Opus 5\.5 · High reasoning/);
   phase='stop reply';await page.type('#chat-message','A second ALPHA question');await click('#chat-form button[type=submit]');await page.waitForSelector('#chat-stop');while(releases.length<3)await new Promise(r=>setTimeout(r,5));await click('#chat-stop');await page.waitForFunction(()=>document.querySelector('#chat-history')?.textContent.includes('Stopping after the current request'));releases[2]();await page.waitForFunction(()=>!document.querySelector('#chat-stop'),{timeout:10000});assert.equal(app.services.chat.view(a.id).turns.at(-1).status,'stopped');assert.equal(provider.calls[2].payload.model,'claude-opus-5-5');assert.match(await page.$eval('#chat-history',e=>e.textContent),/Premium · Claude Opus 5\.5/);assert.equal(await page.$eval('#chat-mode',e=>e.value),'opus');
+  // Fast is a toggle on Premium, not a depth: off and unavailable with Standard, remembered for Premium.
+  phase='fast toggle';assert.equal(await page.$$eval('#chat-mode option',o=>o.some(x=>x.value==='opus_fast')),false);assert.deepEqual(await page.$eval('#chat-fast',e=>[e.disabled,e.checked]),[false,false]);
+  await page.select('#chat-mode','standard');assert.equal(await page.$eval('#chat-fast',e=>e.disabled),true);await page.select('#chat-mode','opus');assert.equal(await page.$eval('#chat-fast',e=>e.disabled),false);
+  await click('#chat-fast');assert.equal(await page.$eval('#chat-fast',e=>e.checked),true);assert.match(await page.$eval('#chat-mode-help',e=>e.textContent),/Opus 5\.5 · High reasoning · Fast: writes its answer up to about 2\.5 times faster at twice Premium’s token price/);
+  await page.select('#chat-mode','standard');assert.deepEqual(await page.$eval('#chat-fast',e=>[e.disabled,e.checked]),[true,false]);assert.doesNotMatch(await page.$eval('#chat-mode-help',e=>e.textContent),/Fast/);await page.select('#chat-mode','opus');assert.equal(await page.$eval('#chat-fast',e=>e.checked),true);
+  custom=()=>chatResponse('A fast ALPHA answer.');const sentBeforeFast=provider.calls.length;
+  await page.type('#chat-message','A fast ALPHA question');await click('#chat-form button[type=submit]');await page.waitForFunction(()=>document.querySelector('#chat-history')?.textContent.includes('A fast ALPHA answer.')&&!document.querySelector('#chat-stop'),{timeout:10000});
+  const fastPayload=provider.calls[sentBeforeFast].payload;assert.equal(fastPayload.speed,'fast');assert.equal(Object.hasOwn(fastPayload,'fallbacks'),false);assert.equal(fastPayload.model,'claude-opus-5-5');
+  assert.equal(app.services.chat.view(a.id).turns.at(-1).mode,'opus_fast');assert.match(await page.$eval('#chat-history .chat-turn:last-child',e=>e.textContent),/Premium · Fast · Claude Opus 5\.5/);
+  assert.deepEqual(await page.$eval('#chat-fast',e=>[e.disabled,e.checked]),[false,true]);await click('#chat-fast');assert.equal(await page.$eval('#chat-fast',e=>e.checked),false);custom=null;
   phase='late project response';await click(`[data-project="${b.id}"]`);await page.waitForFunction(()=>document.querySelector('.chat-heading-project')?.textContent.includes('BRAVO'));
   await page.setRequestInterception(true);let held=null,holdA=true;
   page.on('request',req=>{if(holdA&&req.url()===app.url+'/api/projects/'+a.id){holdA=false;held=req;}else req.continue();});
@@ -84,6 +94,7 @@ try{
   assert.equal(await page.$('[data-chat-retry]'),null);await page.reload();await click('#open-chat');await page.waitForSelector('#chat-history');assert.equal(await page.$('[data-chat-retry]'),null);
   phase='reply depth cost help';
   assert.match(await page.$eval('#chat-limits',e=>e.textContent),/Both depths reason at high effort/);
+  assert.match(await page.$eval('#chat-limits',e=>e.textContent),/Premium’s Fast option sends the same Opus 5\.5 request in Anthropic’s fast mode.*\$8 input and \$40 output per million tokens/);
   assert.doesNotMatch(await page.$eval('#chat-limits',e=>e.textContent),/Economy|Haiku/);
   phase='context window gauge';
   const gauge=()=>page.$eval('.chat-send-row .chat-context',e=>({text:e.textContent,title:e.title,level:e.className,now:e.getAttribute('aria-valuenow'),value:e.getAttribute('aria-valuetext'),bar:e.querySelector('.chat-context-bar>span').style.width}));
@@ -154,7 +165,8 @@ try{
   page.once('dialog',dialog=>dialog.accept());await click('[data-delete-note]');await page.waitForFunction(()=>!document.querySelector('#report-notes'),{timeout:10000});
   assert.deepEqual(app.store.notes(cp.id),[]);custom=null;await click('#open-chat');await page.waitForSelector('.chat-heading');
   phase='ask atlas';
-  await page.select('#chat-mode','opus');
+  // Ask Atlas uses the depth chosen in the panel, Fast included.
+  await page.select('#chat-mode','opus');await click('#chat-fast');
   let asked=null;
   custom=payload=>{
     asked??=payload;
@@ -172,12 +184,13 @@ try{
   await page.waitForFunction(()=>document.querySelector('[data-proposal-apply]')?.textContent==='Apply',{timeout:10000});
   assert.equal(await page.$$eval('.chat-user-text',(els,id)=>els.some(e=>e.textContent.includes('do the legwork yourself')&&e.textContent.includes(id)&&!e.textContent.includes('Which NFPA 13 edition does the fire marshal enforce?')),questionId),true);
   assert.equal(app.store.project(cp.id).questions.find(q=>q.id===questionId).answer,beforeAsk);
-  assert.equal(asked.model,'claude-opus-5-5');assert.equal(asked.max_tokens,128000);assert.equal(asked.output_config.effort,'high');
+  assert.equal(asked.model,'claude-opus-5-5');assert.equal(asked.speed,'fast');assert.equal(asked.max_tokens,128000);assert.equal(asked.output_config.effort,'high');
   assert.ok(asked.tools.some(t=>t.name==='web_search'&&t.max_uses===4));assert.ok(asked.tools.some(t=>t.name==='propose_question_update'));
   assert.match(asked.system,/You are the project AI assistant/);
   await click('[data-proposal-apply]');
   await page.waitForFunction(()=>document.querySelectorAll('.chat-proposal .status-pill.green').length===4,{timeout:10000});
   assert.match(app.store.project(cp.id).questions.find(q=>q.id===questionId).answer,/NFPA 13, 2022 edition/);
+  await click('#chat-fast');assert.equal(await page.$eval('#chat-fast',e=>e.checked),false);
   // Applying a note from an Ask Atlas reply saves the note and leaves the asked question open.
   phase='ask atlas note leaves the question open';
   custom=payload=>payload.messages.at(-1).content.some(x=>x.type==='tool_result')?chatResponse('A note card is ready.'):chatResponse('',{stop_reason:'tool_use',content:[{type:'tool_use',id:'toolu_ask_note',name:'propose_report_note',input:{title:'Enforced NFPA 13 edition',note:'The fire marshal enforces NFPA 13, 2022 edition [S1].',reason:'The saved source settles the question.'}}]});
@@ -289,6 +302,6 @@ try{
   await click(`[data-project="${b.id}"]`);await click('#open-chat');await page.waitForFunction(()=>document.querySelector('.chat-heading-project')?.textContent.includes('BRAVO'));
   phase='desktop/mobile layout';await click('#chat-limits>summary');await page.type('#chat-message','Which missing details should I confirm with the owner?');await click('#chat-history .chat-citation summary');assert.equal(await page.$eval('#chat-history .chat-citation',e=>e.open),true);
   mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/project-chat-desktop.png',fullPage:true});await page.setViewport({width:390,height:844});await page.screenshot({path:'test-results/project-chat-mobile.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
-  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, two reply depths with no Economy option, stop, stale-response protection, estimated costs without budgets, Markdown tables and lists with Copy table and Copy answer, live draft and step, declined reply with retry on the other model, the context window gauge and each reply’s token figure (amber while a reply nears the limit, red when a request did not fit, kept after a reload), proposal cards applied only on Apply, a report note saved, shown on Overview and removed, Ask Atlas on a question card using the selected reply depth and Apply, a note applied from Ask Atlas leaving the asked question open, documents attached by choosing or dropping files (refused, removed and sent) and shown on the sent message, images pasted or chosen (refused, scaled, removed, sent before the message text, shown and opened full size), the floating panel (open across tabs, minimized, expanded, dragged, remembered, Escape), Chat with Atlas button, and desktop/mobile layout. No paid API calls.');
+  assert.deepEqual(errors,[]);console.log('Chat browser checks passed: required name, siloed drafts/history/replies, simultaneous project chats, source links, escaped content, reload, two reply depths with no Economy option, Premium’s Fast toggle (unavailable with Standard, sent as speed fast without fallbacks, remembered across replies), stop, stale-response protection, estimated costs without budgets, Markdown tables and lists with Copy table and Copy answer, live draft and step, declined reply with retry on the other model, the context window gauge and each reply’s token figure (amber while a reply nears the limit, red when a request did not fit, kept after a reload), proposal cards applied only on Apply, a report note saved, shown on Overview and removed, Ask Atlas on a question card using the selected reply depth and Apply, a note applied from Ask Atlas leaving the asked question open, documents attached by choosing or dropping files (refused, removed and sent) and shown on the sent message, images pasted or chosen (refused, scaled, removed, sent before the message text, shown and opened full size), the floating panel (open across tabs, minimized, expanded, dragged, remembered, Escape), Chat with Atlas button, and desktop/mobile layout. No paid API calls.');
 }catch(e){console.error('Failed during: '+phase);if(page){console.error(await page.evaluate(()=>document.body.innerText).catch(()=>''));await page.screenshot({path:'test-results/project-chat-failure.png',fullPage:true}).catch(()=>{});}throw e;}
 finally{for(const release of releases)release();await browser?.close();await app?.close();assert.ok(path.resolve(dir).startsWith(path.join(os.tmpdir(),'ahj-chat-ui-')));rmSync(dir,{recursive:true,force:true});}
